@@ -529,6 +529,7 @@ show_main_menu() {
   19. 查看原始服务详情
   20. 帮助
   21. 添加客户端
+  22. 查看客户端列表
   0. 退出
 EOF
 }
@@ -641,6 +642,7 @@ run_menu_choice() {
     19) run_cli_command status --raw ;;
     20) run_cli_command help ;;
     21) run_cli_command add-client ;;
+    22) run_cli_command list-clients ;;
     *)
       warn "未知的菜单项：${1}"
       return 1

@@ -140,6 +140,9 @@ run_dispatch_case() {
 
   run_menu_choice 21
   [[ "${dispatched}" == "add-client" ]]
+
+  run_menu_choice 22
+  [[ "${dispatched}" == "list-clients" ]]
 }
 
 run_client_cli_case() {
