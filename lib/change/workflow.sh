@@ -80,6 +80,7 @@ begin_managed_change() {
   start_backup_session
   log_step "读取当前托管安装状态。"
   load_current_install_context
+  ensure_xray_user
 }
 
 begin_managed_output_change() {

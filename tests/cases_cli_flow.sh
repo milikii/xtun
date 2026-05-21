@@ -171,6 +171,7 @@ run_client_cli_case() {
     XHTTP_UUID="22222222-2222-2222-2222-222222222222"
     NODE_CLIENTS_TEXT=""
   }
+  ensure_xray_user() { :; }
   apply_managed_runtime_update() {
     applied=$((applied + 1))
   }

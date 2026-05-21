@@ -299,6 +299,28 @@ run_runtime_context_reset_case() {
   [[ "$(warp_rule_count_text)" == "0" ]]
 }
 
+run_begin_managed_change_resolves_xray_user_case() {
+  local ensure_calls=0
+
+  need_root() { :; }
+  start_backup_session() { :; }
+  log_step() { :; }
+  load_current_install_context() { :; }
+  ensure_xray_user() {
+    ensure_calls=$((ensure_calls + 1))
+    XRAY_UID="123"
+    XRAY_GID="456"
+  }
+
+  XRAY_UID=""
+  XRAY_GID=""
+  begin_managed_change
+
+  [[ "${ensure_calls}" -eq 1 ]]
+  [[ "${XRAY_UID}" == "123" ]]
+  [[ "${XRAY_GID}" == "456" ]]
+}
+
 run_managed_apply_case() {
   local tls_calls=0
   local runtime_calls=0

@@ -128,6 +128,7 @@ run_change_command_case() {
     WARP_PROXY_PORT="40000"
     WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
   }
+  ensure_xray_user() { :; }
   begin_managed_output_change() {
     NODE_LABEL_PREFIX="HKG"
   }
@@ -272,6 +273,7 @@ run_renew_cert_command_case() {
     XHTTP_PATH="/old"
     WARP_PROXY_PORT="40000"
   }
+  ensure_xray_user() { :; }
   apply_managed_update() {
     applied=$((applied + 1))
   }

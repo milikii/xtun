@@ -35,6 +35,7 @@ main() {
     run_state_file_decode_case
     run_node_client_state_case
     run_runtime_context_reset_case
+    run_begin_managed_change_resolves_xray_user_case
     run_usage_case
     run_show_links_without_state_case
     run_single_file_bootstrap_case
