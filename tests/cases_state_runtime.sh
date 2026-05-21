@@ -328,6 +328,9 @@ run_managed_apply_case() {
   local restart_calls=0
   local state_calls=0
   local output_calls=0
+  local xray_write_calls=0
+  local xray_validate_calls=0
+  local xray_restart_calls=0
 
   write_tls_assets() {
     tls_calls=$((tls_calls + 1))
@@ -347,6 +350,15 @@ run_managed_apply_case() {
   write_output_file() {
     output_calls=$((output_calls + 1))
   }
+  write_xray_config() {
+    xray_write_calls=$((xray_write_calls + 1))
+  }
+  validate_xray_config() {
+    xray_validate_calls=$((xray_validate_calls + 1))
+  }
+  restart_xray_service() {
+    xray_restart_calls=$((xray_restart_calls + 1))
+  }
 
   apply_managed_runtime_update
   [[ "${tls_calls}" -eq 0 ]]
@@ -363,6 +375,15 @@ run_managed_apply_case() {
   [[ "${restart_calls}" -eq 2 ]]
   [[ "${state_calls}" -eq 2 ]]
   [[ "${output_calls}" -eq 2 ]]
+
+  apply_xray_only_managed_update
+  [[ "${xray_write_calls}" -eq 1 ]]
+  [[ "${xray_validate_calls}" -eq 1 ]]
+  [[ "${xray_restart_calls}" -eq 1 ]]
+  [[ "${runtime_calls}" -eq 2 ]]
+  [[ "${restart_calls}" -eq 2 ]]
+  [[ "${state_calls}" -eq 3 ]]
+  [[ "${output_calls}" -eq 3 ]]
 }
 
 run_tls_stage_failure_case() {

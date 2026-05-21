@@ -172,7 +172,7 @@ run_client_cli_case() {
     NODE_CLIENTS_TEXT=""
   }
   ensure_xray_user() { :; }
-  apply_managed_runtime_update() {
+  apply_xray_only_managed_update() {
     applied=$((applied + 1))
   }
   show_links() {

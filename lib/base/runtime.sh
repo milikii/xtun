@@ -223,11 +223,14 @@ remove_managed_paths() {
   done
 }
 
-validate_configs() {
+validate_xray_config() {
   log_step "校验 Xray 配置。"
   "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}"
   log_success "Xray 配置校验通过。"
+}
 
+validate_configs() {
+  validate_xray_config
   log_step "校验 Nginx 配置。"
   nginx -t
   log_success "Nginx 配置校验通过。"
@@ -259,6 +262,12 @@ attempt_runtime_service_recovery() {
   systemctl restart nginx >/dev/null 2>&1 || true
 }
 
+attempt_xray_service_recovery() {
+  ensure_xray_user
+  ensure_managed_permissions
+  systemctl restart xray >/dev/null 2>&1 || true
+}
+
 rollback_managed_runtime_state() {
   local include_tls_assets="${1:-no}"
   local include_service_file="${2:-no}"
@@ -287,6 +296,29 @@ rollback_managed_runtime_state() {
   warn "检测到托管配置应用失败，正在回滚最近一次变更。"
   rollback_managed_paths "${paths[@]}"
   attempt_runtime_service_recovery
+}
+
+rollback_xray_config_state() {
+  warn "检测到 Xray 配置应用失败，正在回滚最近一次 Xray 配置变更。"
+  rollback_managed_paths "${XRAY_CONFIG_FILE}"
+  attempt_xray_service_recovery
+}
+
+rollback_xray_only_managed_state() {
+  local paths=(
+    "${XRAY_CONFIG_FILE}"
+    "${STATE_FILE}"
+    "${OUTPUT_FILE}"
+    "${SUBSCRIPTION_RAW_FILE}"
+    "${SUBSCRIPTION_BASE64_FILE}"
+    "${SUBSCRIPTION_MANIFEST_FILE}"
+    "${SUBSCRIPTION_RAW_QR_FILE}"
+    "${SUBSCRIPTION_BASE64_QR_FILE}"
+  )
+
+  warn "检测到 Xray-only 变更应用失败，正在回滚最近一次变更。"
+  rollback_managed_paths "${paths[@]}"
+  attempt_xray_service_recovery
 }
 
 rollback_install_runtime_state() {
@@ -390,6 +422,14 @@ restart_core_services() {
   log_success "nginx 已重启。"
 }
 
+restart_xray_service() {
+  log_step "重启 Xray 服务。"
+  ensure_xray_user
+  ensure_managed_permissions
+  systemctl restart xray
+  log_success "xray 已重启。"
+}
+
 write_runtime_managed_files() {
   write_warp_rules_file
   write_xray_config
@@ -417,4 +457,21 @@ apply_managed_files() {
 
   write_state_file
   write_output_file
+}
+
+apply_xray_only_managed_update() {
+  write_xray_config
+  if ! validate_xray_config; then
+    rollback_xray_config_state
+    return 1
+  fi
+
+  write_state_file
+  write_output_file
+
+  log "客户端配置、状态文件和输出文件已写入；接下来只重启 Xray。"
+  if ! restart_xray_service; then
+    rollback_xray_only_managed_state
+    return 1
+  fi
 }

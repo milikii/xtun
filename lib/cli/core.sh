@@ -195,7 +195,7 @@ add_client_cmd() {
 
   log_step "写入客户端配置。"
   OUTPUT_CLIENT_NAME="${client_name}"
-  apply_managed_runtime_update
+  apply_xray_only_managed_update
   log_success "客户端 ${client_name} 已添加。"
   log "备份目录：${BACKUP_DIR}"
   if [[ "${show_qr}" -eq 1 ]]; then
