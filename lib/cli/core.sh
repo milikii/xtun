@@ -5,13 +5,112 @@
 # 负责状态、菜单、分发与通用维护命令
 # ------------------------------
 
+render_output_file_qr() {
+  if ! command -v qrencode >/dev/null 2>&1; then
+    warn "系统中未找到 qrencode，无法输出二维码。"
+    return
+  fi
+
+  printf '\n'
+  while IFS= read -r link; do
+    [[ "${link}" == vless://* ]] || continue
+    printf '%s\n' "二维码:"
+    qrencode -t ANSIUTF8 "${link}" || true
+    printf '\n'
+  done < "${OUTPUT_FILE}"
+}
+
+prompt_node_client_selection() {
+  local prompt_text="${1:-请选择客户端}"
+  local answer=""
+  local client_name=""
+  local selected_client=""
+  local index=1
+  local selected_index=0
+  local -a client_names=()
+
+  printf '%s\n' "可用客户端:" >&2
+  while IFS= read -r client_name; do
+    [[ -n "${client_name}" ]] || continue
+    client_names+=("${client_name}")
+    printf '  %s. %s\n' "${index}" "${client_name}" >&2
+    index=$((index + 1))
+  done < <(node_client_names_text)
+
+  [[ "${#client_names[@]}" -gt 0 ]] || die "当前没有可用客户端。"
+  printf '%s' "${prompt_text} [1]: " >&2
+  read -r answer
+  answer="${answer:-1}"
+
+  if [[ "${answer}" =~ ^[0-9]+$ ]]; then
+    selected_index=$((answer - 1))
+    [[ "${selected_index}" -ge 0 && "${selected_index}" -lt "${#client_names[@]}" ]] || die "客户端序号无效：${answer}"
+    selected_client="${client_names[${selected_index}]}"
+  else
+    ensure_node_client_name_format "${answer}"
+    node_client_exists "${answer}" || die "找不到客户端：${answer}"
+    selected_client="${answer}"
+  fi
+
+  printf '%s' "${selected_client}"
+}
+
+list_clients_cmd() {
+  local client_name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "未知的 list-clients 参数：${1}"
+        ;;
+    esac
+  done
+
+  load_current_install_context
+  while IFS= read -r client_name; do
+    [[ -n "${client_name}" ]] || continue
+    printf '%s\n' "${client_name}"
+  done < <(node_client_names_text)
+}
+
+select_output_client_if_requested() {
+  local client_name="${1:-}"
+
+  if [[ -n "${client_name}" ]]; then
+    load_current_install_context
+    node_client_exists "${client_name}" || die "找不到客户端：${client_name}"
+    write_output_file "${client_name}"
+    return
+  fi
+
+  if [[ -t 0 && -t 1 && -f "${STATE_FILE}" && -f "${XRAY_CONFIG_FILE}" ]]; then
+    load_current_install_context
+    if [[ "$(node_client_count)" -gt 1 ]]; then
+      client_name="$(prompt_node_client_selection "请选择要输出链接的客户端")"
+      write_output_file "${client_name}"
+    fi
+  fi
+}
+
 show_links() {
   local show_qr=0
+  local client_name=""
 
   while [[ $# -gt 0 ]]; do
     case "${1}" in
       --qr)
         show_qr=1
+        ;;
+      --client|--client-name)
+        assign_option_value client_name "${1}" "${@:2}"
+        shift
+        ;;
+      --client=*|--client-name=*)
+        client_name="${1#*=}"
         ;;
       --help|-h|help)
         usage
@@ -24,22 +123,85 @@ show_links() {
     shift
   done
 
+  select_output_client_if_requested "${client_name}"
   [[ -f "${OUTPUT_FILE}" ]] || die "找不到输出文件：${OUTPUT_FILE}"
   cat "${OUTPUT_FILE}"
 
   if [[ "${show_qr}" -eq 1 ]]; then
-    if ! command -v qrencode >/dev/null 2>&1; then
-      warn "系统中未找到 qrencode，无法输出二维码。"
-      return
+    render_output_file_qr
+  fi
+}
+
+add_client_cmd() {
+  local client_name=""
+  local reality_uuid=""
+  local xhttp_uuid=""
+  local show_qr=0
+
+  while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then
+      shift
+      continue
     fi
 
-    printf '\n'
-    while IFS= read -r link; do
-      [[ "${link}" == vless://* ]] || continue
-      printf '%s\n' "二维码:"
-      qrencode -t ANSIUTF8 "${link}" || true
-      printf '\n'
-    done < "${OUTPUT_FILE}"
+    case "${1}" in
+      --name|--client|--client-name)
+        assign_option_value client_name "${1}" "${@:2}"
+        shift 2
+        ;;
+      --name=*|--client=*|--client-name=*)
+        client_name="${1#*=}"
+        shift
+        ;;
+      --reality-uuid)
+        assign_option_value reality_uuid "${1}" "${@:2}"
+        shift 2
+        ;;
+      --reality-uuid=*)
+        reality_uuid="${1#*=}"
+        shift
+        ;;
+      --xhttp-uuid)
+        assign_option_value xhttp_uuid "${1}" "${@:2}"
+        shift 2
+        ;;
+      --xhttp-uuid=*)
+        xhttp_uuid="${1#*=}"
+        shift
+        ;;
+      --qr)
+        show_qr=1
+        shift
+        ;;
+      --*)
+        die "未知的 add-client 参数：${1}"
+        ;;
+      *)
+        [[ -z "${client_name}" ]] || die "只能指定一个客户端名称。"
+        client_name="${1}"
+        shift
+        ;;
+    esac
+  done
+
+  begin_managed_change
+  if [[ -z "${client_name}" ]]; then
+    prompt_with_default client_name "新客户端名称" ""
+  fi
+
+  reality_uuid="${reality_uuid:-$(random_uuid)}"
+  xhttp_uuid="${xhttp_uuid:-$(random_uuid)}"
+  append_node_client_record "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
+
+  log_step "写入客户端配置。"
+  OUTPUT_CLIENT_NAME="${client_name}"
+  apply_managed_runtime_update
+  log_success "客户端 ${client_name} 已添加。"
+  log "备份目录：${BACKUP_DIR}"
+  if [[ "${show_qr}" -eq 1 ]]; then
+    show_links --client "${client_name}" --qr
+  else
+    show_links --client "${client_name}"
   fi
 }
 
@@ -366,6 +528,7 @@ show_main_menu() {
   18. 完全卸载（含软件包）
   19. 查看原始服务详情
   20. 帮助
+  21. 添加客户端
   0. 退出
 EOF
 }
@@ -428,6 +591,12 @@ run_cli_command() {
     show-links)
       show_links "$@"
       ;;
+    add-client)
+      add_client_cmd "$@"
+      ;;
+    list-clients)
+      list_clients_cmd "$@"
+      ;;
     diagnose)
       diagnose_cmd "$@"
       ;;
@@ -471,6 +640,7 @@ run_menu_choice() {
     18) run_cli_command purge --yes ;;
     19) run_cli_command status --raw ;;
     20) run_cli_command help ;;
+    21) run_cli_command add-client ;;
     *)
       warn "未知的菜单项：${1}"
       return 1

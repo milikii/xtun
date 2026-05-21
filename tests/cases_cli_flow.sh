@@ -74,6 +74,14 @@ run_dispatch_case() {
     dispatched="change-warp-rules"
     dispatched_args="$*"
   }
+  add_client_cmd() {
+    dispatched="add-client"
+    dispatched_args="$*"
+  }
+  list_clients_cmd() {
+    dispatched="list-clients"
+    dispatched_args="$*"
+  }
   main_menu() {
     dispatched="menu"
     dispatched_args="$*"
@@ -96,6 +104,13 @@ run_dispatch_case() {
 
   run_cli_command diagnose
   [[ "${dispatched}" == "diagnose" ]]
+
+  run_cli_command add-client phone
+  [[ "${dispatched}" == "add-client" ]]
+  [[ "${dispatched_args}" == "phone" ]]
+
+  run_cli_command list-clients
+  [[ "${dispatched}" == "list-clients" ]]
 
   run_cli_command
   [[ "${dispatched}" == "menu" ]]
@@ -122,6 +137,70 @@ run_dispatch_case() {
 
   run_menu_choice 6
   [[ "${dispatched}" == "update-script" ]]
+
+  run_menu_choice 21
+  [[ "${dispatched}" == "add-client" ]]
+}
+
+run_client_cli_case() {
+  local applied=0
+  local shown_args=""
+  local output=""
+  local workdir=""
+  local write_marker=""
+  local original_show_links_fn=""
+  local selection=""
+  local stderr_file=""
+
+  workdir="$(mktemp -d)"
+  write_marker="${workdir}/write-client.txt"
+  stderr_file="${workdir}/client-select.stderr"
+  prepare_workspace "${workdir}"
+  original_show_links_fn="$(capture_function_definition show_links)"
+
+  need_root() { :; }
+  start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
+  log_step() { :; }
+  log_success() { :; }
+  log() { :; }
+  load_current_install_context() {
+    REALITY_UUID="11111111-1111-1111-1111-111111111111"
+    XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+    NODE_CLIENTS_TEXT=""
+  }
+  apply_managed_runtime_update() {
+    applied=$((applied + 1))
+  }
+  show_links() {
+    shown_args="$*"
+  }
+
+  add_client_cmd phone \
+    --reality-uuid 33333333-3333-3333-3333-333333333333 \
+    --xhttp-uuid 44444444-4444-4444-4444-444444444444
+
+  [[ "${applied}" -eq 1 ]]
+  [[ "${OUTPUT_CLIENT_NAME}" == "phone" ]]
+  [[ "${NODE_CLIENTS_TEXT}" == "phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444" ]]
+  [[ "${shown_args}" == "--client phone" ]]
+  selection="$(printf '2\n' | prompt_node_client_selection "选择客户端" 2>"${stderr_file}")"
+  [[ "${selection}" == "phone" ]]
+  grep -q '可用客户端:' "${stderr_file}"
+
+  restore_function_definition "${original_show_links_fn}"
+  load_current_install_context() {
+    REALITY_UUID="11111111-1111-1111-1111-111111111111"
+    XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+    NODE_CLIENTS_TEXT="phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444"
+  }
+  write_output_file() {
+    printf '%s' "${1}" > "${write_marker}"
+    printf 'client=%s\n' "${1}" > "${OUTPUT_FILE}"
+  }
+
+  output="$(show_links --client phone)"
+  [[ "$(cat "${write_marker}")" == "phone" ]]
+  [[ "${output}" == "client=phone" ]]
 }
 
 run_install_flow_case() {

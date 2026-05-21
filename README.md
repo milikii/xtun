@@ -580,10 +580,33 @@ xtun diagnose
 xtun show-links
 ```
 
+如果已经添加了多个客户端，可以选择某个客户端重新生成本地输出和订阅文件：
+
+```bash
+xtun show-links --client phone
+```
+
 如果系统里装了 `qrencode`，也可以直接输出二维码：
 
 ```bash
 xtun show-links --qr
+```
+
+### 添加 / 查看客户端
+
+默认安装会保留一组 `default` 客户端链接。新增客户端会复用同一组服务端节点、域名、路径与 Reality 参数，但给该客户端生成独立的 REALITY UUID 和 XHTTP UUID。
+
+```bash
+xtun add-client phone
+xtun list-clients
+```
+
+也可以显式指定客户端 UUID：
+
+```bash
+xtun add-client phone \
+  --reality-uuid 33333333-3333-3333-3333-333333333333 \
+  --xhttp-uuid 44444444-4444-4444-4444-444444444444
 ```
 
 ### 查看订阅文件
@@ -596,7 +619,7 @@ ls -l /root/xtun-subscriptions
 
 其中：
 
-- `vless-raw.txt` 是 3 条原始 `vless://` 链接，适合支持 URI 行订阅的客户端
+- `vless-raw.txt` 是当前选中客户端的 5 条原始 `vless://` 链接，适合支持 URI 行订阅的客户端
 - `vless-base64.txt` 是 base64 订阅，适合 V2RayN / Xray 风格导入
 - `manifest.txt` 记录订阅文件和二维码 PNG 的生成状态
 - `qr/` 目录只在系统安装了 `qrencode` 时生成
@@ -898,15 +921,18 @@ xtun status
 
 ## 客户端导出
 
-当前输出文件默认只保留 3 条原始 `vless://` 分享链接：
+当前输出文件默认只保留当前客户端的 5 条原始 `vless://` 分享链接：
 
 1. `REALITY + Vision`
-2. `XHTTP + TLS + CDN`
-3. `上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality`
+2. `XHTTP + Reality`
+3. `XHTTP + TLS + CDN`
+4. `上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality`
+5. `上行 XHTTP + Reality ｜ 下行 XHTTP + TLS + CDN`
 
 说明：
 
 - 不再额外附带其它客户端结构化片段
+- 新增客户端会生成独立 UUID，`xtun show-links --client NAME` 会刷新该客户端的输出和订阅文件
 - `XHTTP-SPLIT` 节点的客户端兼容差异更大，继续建议直接使用脚本生成的原始分享链接导入
 - 订阅文件单独写在 `/root/xtun-subscriptions/`，不会混进 Markdown 输出文件
 - 当前只生成 raw/base64 VLESS 订阅；原生 Mihomo YAML 暂不生成，避免把 XHTTP split / ECH / xpadding 映射错

@@ -221,6 +221,60 @@ EOF
   [[ "${WARP_TEAM_NAME}" == $'tab\tbackslash\\done' ]]
 }
 
+run_node_client_state_case() {
+  local duplicate_output=""
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.50"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="www.scu.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PRIVATE_KEY="private-key-value"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION=""
+  XHTTP_VLESS_DECRYPTION="none"
+  TLS_ALPN="h2"
+  FINGERPRINT="chrome"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  WARP_PROXY_PORT="40000"
+  CERT_MODE="existing"
+  NODE_CLIENTS_TEXT=$'phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444\nlaptop|55555555-5555-5555-5555-555555555555|66666666-6666-6666-6666-666666666666'
+
+  write_state_file
+  bash -n "${STATE_FILE}"
+
+  NODE_CLIENTS_TEXT=""
+  load_existing_state
+  [[ "$(node_client_count)" == "3" ]]
+  [[ "$(node_client_names_csv)" == "default, phone, laptop" ]]
+  [[ "$(node_client_record_for_name phone)" == "phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444" ]]
+
+  append_node_client_record tablet "77777777-7777-7777-7777-777777777777" "88888888-8888-8888-8888-888888888888"
+  [[ "$(node_client_count)" == "4" ]]
+  node_client_exists tablet
+
+  if duplicate_output="$(append_node_client_record duplicate-reality "11111111-1111-1111-1111-111111111111" "99999999-9999-9999-9999-999999999999" 2>&1)"; then
+    return 1
+  fi
+  [[ "${duplicate_output}" == *"REALITY UUID 已被客户端 default 使用。"* ]]
+
+  if duplicate_output="$(append_node_client_record duplicate-xhttp "99999999-9999-9999-9999-999999999999" "44444444-4444-4444-4444-444444444444" 2>&1)"; then
+    return 1
+  fi
+  [[ "${duplicate_output}" == *"XHTTP UUID 已被客户端 phone 使用。"* ]]
+}
+
 run_runtime_context_reset_case() {
   local workdir=""
 

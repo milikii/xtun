@@ -44,6 +44,7 @@ run_warp_enabled_case() {
 
   write_xray_config
   write_state_file
+  OUTPUT_CLIENT_NAME=""
   write_output_file
 
   jq -e '.routing.rules | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
@@ -85,6 +86,65 @@ run_warp_enabled_case() {
   [[ "$(grep -c '^vless://' "${SUBSCRIPTION_RAW_FILE}")" -eq 5 ]]
   base64 -d "${SUBSCRIPTION_BASE64_FILE}" | grep -q '^vless://'
   if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" || -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then
+    return 1
+  fi
+}
+
+run_multi_client_config_output_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.40"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="www.scu.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PRIVATE_KEY="private-key-value"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION=""
+  XHTTP_VLESS_DECRYPTION="none"
+  TLS_ALPN="h2"
+  FINGERPRINT="chrome"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  WARP_PROXY_PORT="40000"
+  CERT_MODE="existing"
+  NODE_CLIENTS_TEXT="phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444"
+
+  write_xray_config
+  write_output_file phone
+
+  jq -e '.inbounds[] | select(.tag == "reality-vision") | .settings.clients | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.inbounds[] | select(.tag == "reality-vision") | .settings.clients[] | select(.email == "phone-reality-vision") | .id == "33333333-3333-3333-3333-333333333333"' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .settings.clients[] | select(.email == "phone-xhttp-cdn") | .id == "44444444-4444-4444-4444-444444444444"' "${XRAY_CONFIG_FILE}" >/dev/null
+
+  assert_contains 'HKG-phone-REALITY' "${OUTPUT_FILE}"
+  assert_contains 'HKG-phone-XHTTP-CDN' "${OUTPUT_FILE}"
+  assert_contains '- 当前导出: phone' "${OUTPUT_FILE}"
+  assert_contains '- UUID: 33333333-3333-3333-3333-333333333333' "${OUTPUT_FILE}"
+  assert_contains '- UUID: 44444444-4444-4444-4444-444444444444' "${OUTPUT_FILE}"
+  assert_contains '33333333-3333-3333-3333-333333333333@203.0.113.40:443' "${SUBSCRIPTION_RAW_FILE}"
+  assert_contains '44444444-4444-4444-4444-444444444444@cdn.example.com:443' "${SUBSCRIPTION_RAW_FILE}"
+  if grep -q '11111111-1111-1111-1111-111111111111' "${SUBSCRIPTION_RAW_FILE}"; then
+    return 1
+  fi
+  if grep -q '22222222-2222-2222-2222-222222222222' "${SUBSCRIPTION_RAW_FILE}"; then
+    return 1
+  fi
+  [[ "$(grep -c '^vless://' "${SUBSCRIPTION_RAW_FILE}")" -eq 5 ]]
+
+  OUTPUT_CLIENT_NAME=""
+  write_output_file
+  assert_contains 'HKG-REALITY' "${OUTPUT_FILE}"
+  if grep -q 'HKG-phone-REALITY' "${OUTPUT_FILE}"; then
     return 1
   fi
 }

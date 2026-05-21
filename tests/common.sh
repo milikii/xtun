@@ -44,6 +44,11 @@ reset_feature_defaults() {
   XHTTP_SPLIT_URI=""
   XHTTP_REALITY_URI=""
   XHTTP_REVERSE_SPLIT_URI=""
+  NODE_CLIENTS_TEXT=""
+  OUTPUT_CLIENT_NAME=""
+  LINK_CLIENT_NAME=""
+  LINK_REALITY_UUID=""
+  LINK_XHTTP_UUID=""
 }
 
 stub_side_effects() {

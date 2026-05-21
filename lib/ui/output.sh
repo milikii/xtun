@@ -41,6 +41,60 @@ xhttp_xpadding_status_text() {
   printf '否'
 }
 
+selected_output_client_name() {
+  printf '%s' "${OUTPUT_CLIENT_NAME:-$(default_node_client_name)}"
+}
+
+current_link_client_name() {
+  printf '%s' "${LINK_CLIENT_NAME:-$(default_node_client_name)}"
+}
+
+current_link_reality_uuid() {
+  printf '%s' "${LINK_REALITY_UUID:-${REALITY_UUID}}"
+}
+
+current_link_xhttp_uuid() {
+  printf '%s' "${LINK_XHTTP_UUID:-${XHTTP_UUID}}"
+}
+
+client_scoped_node_label() {
+  local client_name="${1}"
+  local suffix="${2}"
+
+  if [[ "${client_name}" == "$(default_node_client_name)" ]]; then
+    prefixed_node_label "${suffix}"
+    return
+  fi
+
+  printf '%s-%s-%s' "$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")" "${client_name}" "${suffix}"
+}
+
+output_client_detail_line() {
+  local client_name=""
+
+  client_name="$(current_link_client_name)"
+  if [[ "${client_name}" != "$(default_node_client_name)" ]]; then
+    printf '%s\n' "- 客户端: ${client_name}"
+  fi
+}
+
+output_client_summary_block() {
+  local client_name=""
+  local client_count=""
+
+  client_name="$(current_link_client_name)"
+  client_count="$(node_client_count)"
+  if [[ "${client_name}" == "$(default_node_client_name)" && "${client_count}" -le 1 ]]; then
+    return
+  fi
+
+  cat <<EOF
+## 客户端
+- 当前导出: ${client_name}
+- 可用客户端: $(node_client_names_csv)
+EOF
+}
+
 effective_tls_alpn() {
   printf '%s' "${TLS_ALPN:-${DEFAULT_TLS_ALPN}}"
 }
@@ -89,7 +143,7 @@ build_xhttp_uri() {
   [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
 
   printf 'vless://%s@%s:443?mode=auto&path=%s&security=tls&alpn=%s&encryption=%s&insecure=0&host=%s&fp=%s&fingerprint=%s&type=xhttp&allowInsecure=0&sni=%s%s%s#%s' \
-    "${XHTTP_UUID}" \
+    "$(current_link_xhttp_uuid)" \
     "${XHTTP_DOMAIN}" \
     "${path_component}" \
     "$(effective_tls_alpn)" \
@@ -115,7 +169,7 @@ build_xhttp_reality_uri() {
   [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
 
   printf 'vless://%s@%s:443?encryption=%s&security=reality&sni=%s&fp=%s&fingerprint=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=auto%s#%s' \
-    "${XHTTP_UUID}" \
+    "$(current_link_xhttp_uuid)" \
     "${SERVER_IP}" \
     "${encryption_value}" \
     "${REALITY_SNI}" \
@@ -324,6 +378,8 @@ build_xhttp_reverse_split_extra_json() {
 }
 
 build_link_context() {
+  local requested_client_name="${1:-$(selected_output_client_name)}"
+  local client_record=""
   local xhttp_path_component=""
   local xhttp_ech_component=""
   local xhttp_vlessenc_component=""
@@ -341,14 +397,17 @@ build_link_context() {
   local reverse_split_extra_json=""
   local reverse_split_extra_component=""
 
+  client_record="$(node_client_record_for_name "${requested_client_name}")" || die "找不到客户端：${requested_client_name}"
+  IFS='|' read -r LINK_CLIENT_NAME LINK_REALITY_UUID LINK_XHTTP_UUID <<< "${client_record}"
+
   xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
   xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
   xhttp_vlessenc_component="$(uri_encode "${XHTTP_VLESS_ENCRYPTION}")"
-  reality_label="$(prefixed_node_label "REALITY")"
-  xhttp_label="$(prefixed_node_label "XHTTP-CDN")"
-  xhttp_split_label="$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")"
-  xhttp_reality_label="$(prefixed_node_label "XHTTP-REALITY")"
-  xhttp_reverse_split_label="$(prefixed_node_label "XHTTP-SPLIT-REALITY-CDN")"
+  reality_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "REALITY")"
+  xhttp_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-CDN")"
+  xhttp_split_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-SPLIT-CDN-REALITY")"
+  xhttp_reality_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-REALITY")"
+  xhttp_reverse_split_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-SPLIT-REALITY-CDN")"
 
   REALITY_URI="$(build_reality_uri "${reality_label}")"
   reality_extra_json="$(build_xhttp_reality_extra_json)"
@@ -366,7 +425,7 @@ build_link_context() {
 }
 
 subscription_raw_text() {
-  build_link_context
+  build_link_context "$(selected_output_client_name)"
   printf '%s\n%s\n%s\n%s\n%s\n' \
     "${REALITY_URI}" \
     "${XHTTP_REALITY_URI}" \
@@ -466,7 +525,7 @@ build_reality_uri() {
   local label="${1}"
 
   printf 'vless://%s@%s:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&fingerprint=%s&pbk=%s&sid=%s&type=tcp&headerType=none#%s' \
-    "${REALITY_UUID}" \
+    "$(current_link_reality_uuid)" \
     "${SERVER_IP}" \
     "${REALITY_SNI}" \
     "$(effective_fingerprint)" \
@@ -483,9 +542,10 @@ output_reality_block() {
 ## 节点 1
 - 类型: VLESS + REALITY + Vision
 - 节点名前缀: ${NODE_LABEL_PREFIX}
+$(output_client_detail_line)
 - 地址: ${SERVER_IP}
 - 端口: 443
-- UUID: ${REALITY_UUID}
+- UUID: $(current_link_reality_uuid)
 - SNI: ${REALITY_SNI}
 - 公钥: ${REALITY_PUBLIC_KEY}
 - 短 ID: ${REALITY_SHORT_ID}
@@ -504,7 +564,7 @@ output_xhttp_block() {
 ## ${title}
 - 地址: ${XHTTP_DOMAIN}
 - 端口: 443
-- UUID: ${XHTTP_UUID}
+- UUID: $(current_link_xhttp_uuid)
 EOF
 }
 
@@ -557,9 +617,10 @@ output_xhttp_reality_block() {
 ## 节点 2
 - 类型: VLESS + XHTTP + Reality（上下行不分离）
 - 节点名前缀: ${NODE_LABEL_PREFIX}
+$(output_client_detail_line)
 - 地址: ${SERVER_IP}
 - 端口: 443
-- UUID: ${XHTTP_UUID}
+- UUID: $(current_link_xhttp_uuid)
 - SNI: ${REALITY_SNI}
 - 公钥: ${REALITY_PUBLIC_KEY}
 - 短 ID: ${REALITY_SHORT_ID}
@@ -578,9 +639,10 @@ output_xhttp_reverse_split_block() {
 ## 节点 5
 - 类型: 上行 XHTTP + Reality ｜ 下行 XHTTP + TLS + CDN
 - 节点名前缀: ${NODE_LABEL_PREFIX}
+$(output_client_detail_line)
 - 上行地址: ${SERVER_IP}（Reality）
 - 下行地址: ${XHTTP_DOMAIN}（CDN+TLS）
-- UUID: ${XHTTP_UUID}
+- UUID: $(current_link_xhttp_uuid)
 - 上行 SNI: ${REALITY_SNI}
 - 公钥: ${REALITY_PUBLIC_KEY}
 - 短 ID: ${REALITY_SHORT_ID}
@@ -679,11 +741,13 @@ EOF
 output_file_text() {
   local cf_ssl_mode=""
 
-  build_link_context
+  build_link_context "$(selected_output_client_name)"
   cf_ssl_mode="$(cloudflare_ssl_mode_text)"
 
   cat <<EOF
 # Xray WARP Team 部署信息
+
+$(output_client_summary_block)
 
 $(output_reality_block "${REALITY_URI}")
 
@@ -702,6 +766,7 @@ EOF
 }
 
 write_output_file() {
+  OUTPUT_CLIENT_NAME="${1:-$(selected_output_client_name)}"
   write_subscription_files
   write_generated_file_atomically "${OUTPUT_FILE}" output_file_text
   chmod 0644 "${OUTPUT_FILE}"

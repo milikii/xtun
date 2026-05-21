@@ -62,7 +62,7 @@ load_warp_mdm_context() {
 
 state_file_key_allowed() {
   case "${1}" in
-    STATE_VERSION|SERVER_IP|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|WARP_PROXY_PORT|WARP_TEAM_NAME|WARP_CLIENT_ID|WARP_CLIENT_SECRET|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|CF_ZONE_ID|CF_API_TOKEN|CF_CERT_VALIDITY|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|CORE_HEALTH_LAST_CHECK_AT|CORE_HEALTH_LAST_ACTION|CORE_HEALTH_LAST_REASON|WARP_HEALTH_LAST_CHECK_AT|WARP_HEALTH_LAST_ACTION|WARP_HEALTH_LAST_REASON)
+    STATE_VERSION|SERVER_IP|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|WARP_PROXY_PORT|WARP_TEAM_NAME|WARP_CLIENT_ID|WARP_CLIENT_SECRET|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|CF_ZONE_ID|CF_API_TOKEN|CF_CERT_VALIDITY|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|NODE_CLIENTS_TEXT|CORE_HEALTH_LAST_CHECK_AT|CORE_HEALTH_LAST_ACTION|CORE_HEALTH_LAST_REASON|WARP_HEALTH_LAST_CHECK_AT|WARP_HEALTH_LAST_ACTION|WARP_HEALTH_LAST_REASON)
       return 0
       ;;
     *)
@@ -253,6 +253,11 @@ reset_loaded_runtime_context() {
   XHTTP_XPADDING_HEADER=""
   XHTTP_XPADDING_PLACEMENT=""
   XHTTP_XPADDING_METHOD=""
+  NODE_CLIENTS_TEXT=""
+  OUTPUT_CLIENT_NAME=""
+  LINK_CLIENT_NAME=""
+  LINK_REALITY_UUID=""
+  LINK_XHTTP_UUID=""
   CORE_HEALTH_LAST_CHECK_AT=""
   CORE_HEALTH_LAST_ACTION=""
   CORE_HEALTH_LAST_REASON=""
@@ -446,6 +451,159 @@ path_to_uri_component() {
   uri_encode "${1}"
 }
 
+default_node_client_name() {
+  printf 'default'
+}
+
+ensure_node_client_name_format() {
+  local client_name="${1:-}"
+
+  [[ -n "${client_name}" ]] || die "客户端名称不能为空。"
+  [[ "${client_name}" =~ ^[A-Za-z0-9._-]+$ ]] || die "客户端名称只能包含字母、数字、点、下划线或横线。"
+}
+
+ensure_new_node_client_name_format() {
+  local client_name="${1:-}"
+
+  ensure_node_client_name_format "${client_name}"
+  [[ "${client_name}" != "$(default_node_client_name)" ]] || die "default 是内置客户端名称，不能重复添加。"
+}
+
+ensure_node_client_uuid_format() {
+  local label="${1}"
+  local uuid="${2:-}"
+
+  [[ "${uuid}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+    || die "${label} 不是合法 UUID。"
+}
+
+node_client_record_line() {
+  local client_name="${1}"
+  local reality_uuid="${2}"
+  local xhttp_uuid="${3}"
+
+  printf '%s|%s|%s\n' "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
+}
+
+node_extra_clients_text() {
+  local line=""
+  local client_name=""
+  local reality_uuid=""
+  local xhttp_uuid=""
+  local _extra=""
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ -n "${line}" ]] || continue
+    IFS='|' read -r client_name reality_uuid xhttp_uuid _extra <<< "${line}"
+    [[ -n "${client_name}" && -n "${reality_uuid}" && -n "${xhttp_uuid}" ]] || continue
+    [[ "${client_name}" != "$(default_node_client_name)" ]] || continue
+    node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
+  done <<< "${NODE_CLIENTS_TEXT:-}"
+}
+
+node_clients_text() {
+  if [[ -n "${REALITY_UUID:-}" && -n "${XHTTP_UUID:-}" ]]; then
+    node_client_record_line "$(default_node_client_name)" "${REALITY_UUID}" "${XHTTP_UUID}"
+  fi
+
+  node_extra_clients_text
+}
+
+node_client_record_for_name() {
+  local wanted_name="${1}"
+  local client_name=""
+  local reality_uuid=""
+  local xhttp_uuid=""
+  local records=""
+
+  ensure_node_client_name_format "${wanted_name}"
+  records="$(node_clients_text)"
+  while IFS='|' read -r client_name reality_uuid xhttp_uuid; do
+    [[ -n "${client_name}" ]] || continue
+    if [[ "${client_name}" == "${wanted_name}" ]]; then
+      node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
+      return 0
+    fi
+  done <<< "${records}"
+
+  return 1
+}
+
+node_client_exists() {
+  node_client_record_for_name "${1}" >/dev/null
+}
+
+node_client_count() {
+  local count=0
+  local line=""
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    count=$((count + 1))
+  done < <(node_clients_text)
+
+  printf '%s' "${count}"
+}
+
+node_client_names_text() {
+  local client_name=""
+  local _reality_uuid=""
+  local _xhttp_uuid=""
+
+  while IFS='|' read -r client_name _reality_uuid _xhttp_uuid; do
+    [[ -n "${client_name}" ]] || continue
+    printf '%s\n' "${client_name}"
+  done < <(node_clients_text)
+}
+
+node_client_names_csv() {
+  local joined=""
+  local client_name=""
+
+  while IFS= read -r client_name; do
+    [[ -n "${client_name}" ]] || continue
+    if [[ -n "${joined}" ]]; then
+      joined+=", "
+    fi
+    joined+="${client_name}"
+  done < <(node_client_names_text)
+
+  printf '%s' "${joined}"
+}
+
+append_node_client_record() {
+  local client_name="${1}"
+  local reality_uuid="${2}"
+  local xhttp_uuid="${3}"
+  local existing_clients=""
+  local existing_client_name=""
+  local existing_reality_uuid=""
+  local existing_xhttp_uuid=""
+
+  ensure_new_node_client_name_format "${client_name}"
+  ensure_node_client_uuid_format "REALITY UUID" "${reality_uuid}"
+  ensure_node_client_uuid_format "XHTTP UUID" "${xhttp_uuid}"
+  if node_client_exists "${client_name}"; then
+    die "客户端已存在：${client_name}"
+  fi
+  while IFS='|' read -r existing_client_name existing_reality_uuid existing_xhttp_uuid; do
+    [[ -n "${existing_client_name}" ]] || continue
+    if [[ "${existing_reality_uuid}" == "${reality_uuid}" ]]; then
+      die "REALITY UUID 已被客户端 ${existing_client_name} 使用。"
+    fi
+    if [[ "${existing_xhttp_uuid}" == "${xhttp_uuid}" ]]; then
+      die "XHTTP UUID 已被客户端 ${existing_client_name} 使用。"
+    fi
+  done < <(node_clients_text)
+
+  existing_clients="$(node_extra_clients_text)"
+  if [[ -n "${existing_clients}" ]]; then
+    NODE_CLIENTS_TEXT="${existing_clients}"$'\n'"$(node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}")"
+  else
+    NODE_CLIENTS_TEXT="$(node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}")"
+  fi
+}
+
 write_state_kv() {
   local key="${1}"
   local value="${2-}"
@@ -496,6 +654,7 @@ state_file_text() {
   write_state_kv "XHTTP_XPADDING_HEADER" "${XHTTP_XPADDING_HEADER}"
   write_state_kv "XHTTP_XPADDING_PLACEMENT" "${XHTTP_XPADDING_PLACEMENT}"
   write_state_kv "XHTTP_XPADDING_METHOD" "${XHTTP_XPADDING_METHOD}"
+  write_state_kv "NODE_CLIENTS_TEXT" "$(node_extra_clients_text)"
 }
 
 write_state_file() {

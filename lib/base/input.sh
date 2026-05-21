@@ -27,7 +27,9 @@ usage() {
   ${command_name} renew-cert [参数]
   ${command_name} uninstall [--yes] [--purge]
   ${command_name} purge [--yes]
-  ${command_name} show-links [--qr]
+  ${command_name} show-links [--client NAME] [--qr]
+  ${command_name} add-client NAME [参数]
+  ${command_name} list-clients
   ${command_name} diagnose
   ${command_name} status [--raw]
   ${command_name} restart
@@ -84,6 +86,14 @@ usage() {
   --xhttp-uuid VALUE          指定新的 XHTTP UUID，而不是自动生成。
   --reality-only              只轮换 REALITY UUID。
   --xhttp-only                只轮换 XHTTP UUID。
+
+客户端参数:
+  add-client NAME             添加一个命名客户端，并为它生成独立的 REALITY / XHTTP UUID。
+  --client NAME               show-links 使用指定客户端重新生成输出与订阅文件。
+  --client-name VALUE         add-client 使用的客户端名称。
+  --reality-uuid VALUE        为新客户端指定 REALITY UUID；省略时自动生成。
+  --xhttp-uuid VALUE          为新客户端指定 XHTTP UUID；省略时自动生成。
+  list-clients                输出当前可用客户端名称。
 
 变更 SNI 参数:
   --non-interactive           非交互运行。
@@ -159,6 +169,7 @@ usage() {
   update-script               下载并更新脚本自身的持久化 bundle 与管理命令。
 
 链接参数:
+  --client NAME               选择要输出的客户端；不传时默认保持原有输出，多客户端交互终端会提示选择。
   --qr                        额外输出分享链接二维码；需要系统已安装 qrencode。
 
 示例:
@@ -175,6 +186,8 @@ usage() {
   ${command_name} change-warp-rules --add-domain chat.openai.com
   ${command_name} change-cert-mode --cert-mode self-signed
   ${command_name} renew-cert
+  ${command_name} add-client phone
+  ${command_name} show-links --client phone
   ${command_name} uninstall --yes
   ${command_name} uninstall --purge --yes
   ${command_name} install --non-interactive \

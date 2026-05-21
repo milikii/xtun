@@ -42,9 +42,47 @@ xray_sniffing_json() {
   }'
 }
 
+xray_clients_json() {
+  local client_kind="${1}"
+
+  node_clients_text | jq -Rn \
+    --arg client_kind "${client_kind}" \
+    --arg default_client_name "$(default_node_client_name)" \
+    '[
+      inputs
+      | select(length > 0)
+      | split("|")
+      | {
+          name: .[0],
+          reality_uuid: .[1],
+          xhttp_uuid: .[2]
+        }
+      | if $client_kind == "reality" then
+          {
+            id: .reality_uuid,
+            flow: "xtls-rprx-vision",
+            email: (if .name == $default_client_name then "reality-vision" else (.name + "-reality-vision") end)
+          }
+        else
+          {
+            id: .xhttp_uuid,
+            email: (if .name == $default_client_name then "xhttp-cdn" else (.name + "-xhttp-cdn") end)
+          }
+        end
+    ]'
+}
+
+xray_reality_clients_json() {
+  xray_clients_json "reality"
+}
+
+xray_xhttp_clients_json() {
+  xray_clients_json "xhttp"
+}
+
 xray_reality_inbound_json() {
   jq -cn \
-    --arg reality_uuid "${REALITY_UUID}" \
+    --argjson clients "$(xray_reality_clients_json)" \
     --arg xhttp_local_port "${XHTTP_LOCAL_PORT}" \
     --arg reality_target "${REALITY_TARGET}" \
     --arg reality_sni "${REALITY_SNI}" \
@@ -62,13 +100,7 @@ xray_reality_inbound_json() {
       port: 2443,
       protocol: "vless",
       settings: {
-        clients: [
-          {
-            id: $reality_uuid,
-            flow: "xtls-rprx-vision",
-            email: "reality-vision"
-          }
-        ],
+        clients: $clients,
         decryption: "none",
         fallbacks: [
           {
@@ -108,7 +140,7 @@ xray_xhttp_inbound_json() {
 
   jq -cn \
     --arg xhttp_local_port "${XHTTP_LOCAL_PORT}" \
-    --arg xhttp_uuid "${XHTTP_UUID}" \
+    --argjson clients "$(xray_xhttp_clients_json)" \
     --arg xhttp_decryption "${XHTTP_VLESS_DECRYPTION:-none}" \
     --arg xhttp_path "${XHTTP_PATH}" \
     --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
@@ -127,12 +159,7 @@ xray_xhttp_inbound_json() {
       port: ($xhttp_local_port | tonumber),
       protocol: "vless",
       settings: {
-        clients: [
-          {
-            id: $xhttp_uuid,
-            email: "xhttp-cdn"
-          }
-        ],
+        clients: $clients,
         decryption: $xhttp_decryption
       },
       streamSettings: {

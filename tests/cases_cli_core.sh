@@ -11,6 +11,8 @@ run_usage_case() {
   [[ "${output}" == *$'\n  xtun update-script'* ]]
   [[ "${output}" == *$'\n  xtun renew-cert [参数]'* ]]
   [[ "${output}" == *$'\n  xtun change-warp-rules [参数]'* ]]
+  [[ "${output}" == *$'\n  xtun add-client NAME [参数]'* ]]
+  [[ "${output}" == *$'\n  xtun list-clients'* ]]
   [[ "${output}" == *$'\n  xtun diagnose'* ]]
 }
 

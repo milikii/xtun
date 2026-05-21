@@ -21,6 +21,7 @@ main() {
   local case_name=""
   local -a cases=(
     run_warp_enabled_case
+    run_multi_client_config_output_case
     run_warp_disabled_case
     run_warp_rules_file_case
     run_output_helper_case
@@ -32,6 +33,7 @@ main() {
     run_state_version_case
     run_health_history_count_without_python_case
     run_state_file_decode_case
+    run_node_client_state_case
     run_runtime_context_reset_case
     run_usage_case
     run_show_links_without_state_case
@@ -76,6 +78,7 @@ main() {
     run_diagnose_command_case
     run_missing_option_value_case
     run_dispatch_case
+    run_client_cli_case
     run_install_flow_case
   )
 
