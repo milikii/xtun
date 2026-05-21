@@ -147,6 +147,7 @@ run_dispatch_case() {
 
 run_client_cli_case() {
   local applied=0
+  local backup_marker=""
   local shown_args=""
   local output=""
   local workdir=""
@@ -154,15 +155,26 @@ run_client_cli_case() {
   local original_show_links_fn=""
   local selection=""
   local stderr_file=""
+  local write_backup_marker=""
 
   workdir="$(mktemp -d)"
+  backup_marker="${workdir}/backup-sessions.txt"
   write_marker="${workdir}/write-client.txt"
+  write_backup_marker="${workdir}/write-backup-count.txt"
   stderr_file="${workdir}/client-select.stderr"
   prepare_workspace "${workdir}"
+  printf '0' > "${backup_marker}"
   original_show_links_fn="$(capture_function_definition show_links)"
 
   need_root() { :; }
-  start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
+  start_backup_session() {
+    local backup_sessions=""
+
+    backup_sessions="$(cat "${backup_marker}")"
+    backup_sessions=$((backup_sessions + 1))
+    printf '%s' "${backup_sessions}" > "${backup_marker}"
+    BACKUP_DIR="${workdir}/backup-${backup_sessions}"
+  }
   log_step() { :; }
   log_success() { :; }
   log() { :; }
@@ -187,6 +199,7 @@ run_client_cli_case() {
   [[ "${OUTPUT_CLIENT_NAME}" == "phone" ]]
   [[ "${NODE_CLIENTS_TEXT}" == "phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444" ]]
   [[ "${shown_args}" == "--client phone" ]]
+  [[ "$(cat "${backup_marker}")" == "1" ]]
   selection="$(printf '2\n' | prompt_node_client_selection "选择客户端" 2>"${stderr_file}")"
   [[ "${selection}" == "phone" ]]
   grep -q '可用客户端:' "${stderr_file}"
@@ -198,13 +211,16 @@ run_client_cli_case() {
     NODE_CLIENTS_TEXT="phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444"
   }
   write_output_file() {
+    printf '%s' "$(cat "${backup_marker}")" > "${write_backup_marker}"
     printf '%s' "${1}" > "${write_marker}"
     printf 'client=%s\n' "${1}" > "${OUTPUT_FILE}"
   }
 
   output="$(show_links --client phone)"
   [[ "$(cat "${write_marker}")" == "phone" ]]
+  [[ "$(cat "${write_backup_marker}")" == "2" ]]
   [[ "${output}" == "client=phone" ]]
+  [[ "$(cat "${backup_marker}")" == "2" ]]
 }
 
 run_install_flow_case() {

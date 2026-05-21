@@ -83,6 +83,7 @@ select_output_client_if_requested() {
   if [[ -n "${client_name}" ]]; then
     load_current_install_context
     node_client_exists "${client_name}" || die "找不到客户端：${client_name}"
+    start_backup_session
     write_output_file "${client_name}"
     return
   fi
@@ -91,6 +92,7 @@ select_output_client_if_requested() {
     load_current_install_context
     if [[ "$(node_client_count)" -gt 1 ]]; then
       client_name="$(prompt_node_client_selection "请选择要输出链接的客户端")"
+      start_backup_session
       write_output_file "${client_name}"
     fi
   fi

@@ -299,6 +299,26 @@ run_runtime_context_reset_case() {
   [[ "$(warp_rule_count_text)" == "0" ]]
 }
 
+run_backup_path_without_session_case() {
+  local output=""
+
+  if ! output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
+workdir="\$(mktemp -d)"
+printf 'old\n' > "\${workdir}/managed.txt"
+unset BACKUP_DIR
+backup_path "\${workdir}/managed.txt"
+cat "\${workdir}/managed.txt"
+EOF
+)"; then
+    return 1
+  fi
+
+  [[ "${output}" == "old" ]]
+}
+
 run_begin_managed_change_resolves_xray_user_case() {
   local ensure_calls=0
 

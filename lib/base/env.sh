@@ -234,6 +234,7 @@ backup_path() {
   local path="${1}"
   local target=""
 
+  [[ -n "${BACKUP_DIR:-}" ]] || return 0
   if [[ ! -e "${path}" ]]; then
     return
   fi
