@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Signals Review</title>
+    <meta
+      name="description"
+      content="AI Signals Review 汇总模型、Agent、搜索、生产力和企业 AI 的公开进展。"
+    >
+    <link rel="stylesheet" href="/desk-assets/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="AI Signals Review">
+        <span class="brand-mark" aria-hidden="true">AI</span>
+        <span>AI Signals Review</span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="#briefs">Briefs</a>
+        <a href="#radar">Radar</a>
+        <a href="#sources">Sources</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="kicker">AI Briefing / May 2026</p>
+          <h1>Tracking practical AI progress beyond the headlines.</h1>
+          <p class="summary">
+            A concise digest for model releases, agentic workflows, AI search, creative tools,
+            and enterprise deployment signals.
+          </p>
+        </div>
+
+        <aside class="lead-panel" aria-label="Lead story">
+          <canvas id="signalCanvas" width="900" height="560"></canvas>
+          <div class="lead-content">
+            <span class="tag">Lead Signal</span>
+            <h2>Models are shifting from chat answers to tool-using work systems.</h2>
+            <p>
+              The latest public releases put more emphasis on planning, tool use,
+              coding, search, document work, and cross-app execution.
+            </p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="ticker" aria-label="Current themes">
+        <span>Agentic coding</span>
+        <span>Multimodal search</span>
+        <span>Enterprise controls</span>
+        <span>Creative workflows</span>
+      </section>
+
+      <section id="briefs" class="section">
+        <div class="section-heading">
+          <p class="kicker">Briefs</p>
+          <h2>What changed recently</h2>
+        </div>
+
+        <div class="brief-grid">
+          <article class="brief-card feature">
+            <div class="card-topline">
+              <span>OpenAI</span>
+              <time datetime="2026-04-23">Apr 23, 2026</time>
+            </div>
+            <h3>GPT-5.5 pushes deeper into professional work and long-running tasks.</h3>
+            <p>
+              OpenAI described GPT-5.5 as aimed at coding, research, data analysis,
+              documents, spreadsheets, software operation, and multi-step tool use.
+            </p>
+            <a href="https://openai.com/index/introducing-gpt-5-5/">Read source</a>
+          </article>
+
+          <article class="brief-card">
+            <div class="card-topline">
+              <span>Google</span>
+              <time datetime="2026-05-19">May 19, 2026</time>
+            </div>
+            <h3>Gemini updates highlight action-oriented assistants and search agents.</h3>
+            <p>
+              Google I/O updates centered on more agentic Gemini experiences across
+              the Gemini app, Search, productivity, and developer surfaces.
+            </p>
+            <a href="https://blog.google/innovation-and-ai/products/gemini-app/next-evolution-gemini-app/">Read source</a>
+          </article>
+
+          <article class="brief-card">
+            <div class="card-topline">
+              <span>Anthropic</span>
+              <time datetime="2026-05">May 2026</time>
+            </div>
+            <h3>Claude release notes continue to focus on stronger work output.</h3>
+            <p>
+              Anthropic release notes point to new Claude capabilities around visual
+              outputs, prototypes, slides, one-pagers, and model availability.
+            </p>
+            <a href="https://support.claude.com/en/articles/12138966-release-notes">Read source</a>
+          </article>
+
+          <article class="brief-card">
+            <div class="card-topline">
+              <span>Microsoft</span>
+              <time datetime="2026-05-20">May 20, 2026</time>
+            </div>
+            <h3>Business AI packaging is converging around security and admin control.</h3>
+            <p>
+              Microsoft positioned Edge for Business AI around workplace productivity,
+              enterprise security, compliance, and IT-managed rollout.
+            </p>
+            <a href="https://blogs.windows.com/msedgedev/2026/05/20/new-in-edge-for-business-ai-for-work-safe-from-day-one/">Read source</a>
+          </article>
+        </div>
+      </section>
+
+      <section id="radar" class="section radar-section">
+        <div class="section-heading">
+          <p class="kicker">Radar</p>
+          <h2>Signals worth watching</h2>
+        </div>
+
+        <div class="radar-grid">
+          <article>
+            <span class="index">01</span>
+            <h3>Agent reliability</h3>
+            <p>Better planning is useful only when agents can inspect state, recover from errors, and stop safely.</p>
+          </article>
+          <article>
+            <span class="index">02</span>
+            <h3>Context economics</h3>
+            <p>Long context, tool calls, and multimodal inputs are becoming product design costs, not just model specs.</p>
+          </article>
+          <article>
+            <span class="index">03</span>
+            <h3>Search as workflow</h3>
+            <p>AI search is moving from answer boxes toward monitoring, shopping, research, and task completion.</p>
+          </article>
+          <article>
+            <span class="index">04</span>
+            <h3>Governed rollout</h3>
+            <p>Enterprise adoption depends on auditability, policy controls, data boundaries, and predictable admin tools.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section newsletter">
+        <div>
+          <p class="kicker">Digest</p>
+          <h2>Short summaries, source-first reading.</h2>
+        </div>
+        <form action="/" method="get">
+          <label for="email">Email</label>
+          <div class="form-row">
+            <input id="email" name="email" type="email" placeholder="reader@example.com" autocomplete="email">
+            <button type="submit">Subscribe</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="sources" class="section sources">
+        <div class="section-heading">
+          <p class="kicker">Sources</p>
+          <h2>Primary links used for this static edition</h2>
+        </div>
+        <ul>
+          <li><a href="https://openai.com/index/introducing-gpt-5-5/">OpenAI: Introducing GPT-5.5</a></li>
+          <li><a href="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-5/">Google: Gemini 3.5</a></li>
+          <li><a href="https://blog.google/products-and-platforms/products/search/search-io-2026/">Google: Search I/O 2026 updates</a></li>
+          <li><a href="https://support.claude.com/en/articles/12138966-release-notes">Anthropic: Claude release notes</a></li>
+          <li><a href="https://blogs.windows.com/msedgedev/2026/05/20/new-in-edge-for-business-ai-for-work-safe-from-day-one/">Microsoft: Edge for Business AI</a></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>AI Signals Review</span>
+      <span>Static edition checked May 24, 2026</span>
+    </footer>
+
+    <script src="/desk-assets/site.js" defer></script>
+  </body>
+</html>

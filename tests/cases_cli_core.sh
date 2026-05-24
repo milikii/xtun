@@ -99,6 +99,7 @@ run_install_self_command_case() {
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
   [[ -f "${SELF_INSTALL_DIR}/lib/install.sh" ]]
+  [[ -f "${SELF_INSTALL_DIR}/static/fallback/index.html" ]]
 
   output="$("${SELF_COMMAND_PATH}" help)"
   [[ "${output}" == *$'\n  xtun help'* ]]
@@ -115,6 +116,7 @@ run_install_self_command_case() {
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
   [[ -f "${SELF_INSTALL_DIR}/lib/ui/output.sh" ]]
+  [[ -f "${SELF_INSTALL_DIR}/static/fallback/index.html" ]]
 }
 
 run_update_script_command_case() {

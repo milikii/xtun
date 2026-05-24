@@ -52,6 +52,7 @@ main() {
     run_install_packages_failure_case
     run_install_draft_case
     run_service_config_helper_case
+    run_fallback_site_deploy_case
     run_managed_apply_case
     run_managed_rollback_case
     run_optional_component_rollback_case

@@ -283,6 +283,7 @@ rollback_managed_runtime_state() {
     "${CORE_HEALTH_TIMER_FILE}"
     "${XRAY_LOGROTATE_FILE}"
     "${OP_LOG_DIR}"
+    "${FALLBACK_SITE_DIR}"
   )
 
   if [[ "${include_tls_assets}" == "yes" ]]; then
@@ -327,6 +328,7 @@ rollback_install_runtime_state() {
     "${SELF_INSTALL_DIR}"
     "${XRAY_BIN}"
     "${XRAY_ASSET_DIR}"
+    "${FALLBACK_SITE_DIR}"
   )
 
   warn "检测到安装运行时应用失败，正在回滚管理命令与 Xray 核心文件。"
@@ -431,6 +433,7 @@ restart_xray_service() {
 }
 
 write_runtime_managed_files() {
+  deploy_fallback_site
   write_warp_rules_file
   write_xray_config
   write_haproxy_config

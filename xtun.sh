@@ -16,7 +16,7 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
-SCRIPT_VERSION="0.5.2"
+SCRIPT_VERSION="0.5.3"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xtun"
 SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xtun"
 BOOTSTRAP_SELF_INSTALL_DIR="${XTUN_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
@@ -103,6 +103,9 @@ bootstrap_install_bundle_to_self() {
   staging_dir="$(mktemp -d "$(dirname "${BOOTSTRAP_SELF_INSTALL_DIR}")/.xtun.bootstrap.XXXXXX")"
   install -m 0755 "${bundle_root}/xtun.sh" "${staging_dir}/xtun.sh"
   cp -a "${bundle_root}/lib" "${staging_dir}/lib"
+  if [[ -d "${bundle_root}/static" ]]; then
+    cp -a "${bundle_root}/static" "${staging_dir}/static"
+  fi
 
   install -d -m 0755 "$(dirname "${wrapper_path}")"
   wrapper_tmp="$(mktemp)"
@@ -185,6 +188,8 @@ NGINX_CONF_DIR="/etc/nginx/conf.d"
 NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
 NGINX_TLS_PORT="8443"
 XHTTP_LOCAL_PORT="8001"
+FALLBACK_SITE_DIR="/var/www/xtun-fallback"
+FALLBACK_SITE_SOURCE_DIR="${SCRIPT_ROOT}/static/fallback"
 NGINX_SERVICE_FILE="/lib/systemd/system/nginx.service"
 STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
 HEALTH_STATE_FILE="${XRAY_CONFIG_DIR}/health-state.env"

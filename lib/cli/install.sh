@@ -148,9 +148,7 @@ install_xray_runtime() {
 
 write_install_managed_files() {
   write_tls_assets
-  write_xray_config
-  write_haproxy_config
-  write_nginx_config
+  write_runtime_managed_files
   write_xray_service
   write_core_health_monitor
   write_xray_logrotate_config

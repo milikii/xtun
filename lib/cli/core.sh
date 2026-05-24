@@ -470,6 +470,7 @@ uninstall_cmd() {
     "${XRAY_LOGROTATE_FILE}" \
     "${HAPROXY_CONFIG}" \
     "${NGINX_CONFIG_FILE}" \
+    "${FALLBACK_SITE_DIR}" \
     "${SSL_DIR}" \
     "${WARP_APT_KEYRING}" \
     "${WARP_APT_SOURCE_LIST}" \
@@ -523,7 +524,7 @@ show_main_menu() {
   11. 修改节点名前缀
   12. 开关 WARP 分流
   13. 修改 WARP 分流规则
-  14. 修改证书模式 / CDN 域名
+  14. 修改证书模式 / CDN 域名（当前节点全部客户端）
   15. 续期 / 刷新证书
   16. 抢修文件权限
   17. 卸载托管文件

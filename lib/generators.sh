@@ -307,15 +307,26 @@ nginx_proxy_headers_config() {
 EOF
 }
 
-nginx_fallback_location_config() {
-  local proxy_headers=""
+deploy_fallback_site() {
+  local source_dir="${FALLBACK_SITE_SOURCE_DIR:-${SCRIPT_ROOT}/static/fallback}"
+  local target_dir="${FALLBACK_SITE_DIR:-/var/www/xtun-fallback}"
 
-  proxy_headers="$(nginx_proxy_headers_config)"
+  [[ -d "${source_dir}" ]] || die "找不到默认静态伪装站模板目录：${source_dir}"
+  [[ -n "${target_dir}" && "${target_dir}" == /* && "${target_dir}" != "/" && "${target_dir}" != "/var" && "${target_dir}" != "/var/www" ]] \
+    || die "静态伪装站目标目录不安全：${target_dir}"
+
+  backup_path "${target_dir}"
+  rm -rf "${target_dir}"
+  install -d -m 0755 "${target_dir}"
+  cp -a "${source_dir}/." "${target_dir}/"
+  find "${target_dir}" -type d -exec chmod 0755 {} +
+  find "${target_dir}" -type f -exec chmod 0644 {} +
+}
+
+nginx_fallback_location_config() {
   cat <<EOF
     location / {
-        proxy_pass https://www.harvard.edu;
-        proxy_set_header Host www.harvard.edu;
-${proxy_headers}
+        try_files \$uri \$uri/ /index.html;
     }
 EOF
 }
@@ -347,6 +358,8 @@ server {
 
     ssl_certificate ${TLS_CERT_FILE};
     ssl_certificate_key ${TLS_KEY_FILE};
+    root /var/www/xtun-fallback;
+    index index.html;
 
 ${fallback_location}
 

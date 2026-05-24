@@ -44,14 +44,14 @@ xtun.sh
 - `xray 127.0.0.1:2443`
   - `REALITY + Vision`
   - `fallback -> 127.0.0.1:8001`
-  - `target -> 你设置的 Reality 伪装站，比如 www.harvard.edu:443`
+  - `target -> 你设置的 Reality 伪装站，比如 www.sony.co.jp:443`
 - `xray 127.0.0.1:8001`
   - `VLESS + XHTTP`
   - 默认开启 `VLESS Encryption`
 - `nginx 127.0.0.1:8443`
   - 给 `CDN 域名` 提供 TLS / HTTP2
   - `/XHTTP_PATH -> grpc_pass 127.0.0.1:8001`
-  - `/ -> 伪装站`
+  - `/ -> 本地静态伪装站（默认 AI Signals Review）`
 
 也就是说，三节点共享同一个 `443`，但实现方式是：
 
@@ -240,6 +240,7 @@ bash xtun.sh install --non-interactive \
 - `/root/xtun-subscriptions/vless-raw.txt`
 - `/root/xtun-subscriptions/vless-base64.txt`
 - `/root/xtun-subscriptions/manifest.txt`
+- `/var/www/xtun-fallback`
 
 如果系统里有 `qrencode`，还会在 `/root/xtun-subscriptions/qr/` 生成订阅二维码 PNG；没有 `qrencode` 时只跳过二维码，不影响安装。
 
@@ -685,6 +686,29 @@ xtun change-cert-mode --cert-mode existing \
   --cert-file /etc/ssl/cloudflare/cert.pem \
   --key-file /etc/ssl/cloudflare/key.pem
 ```
+
+切换到 Cloudflare Origin CA：
+
+```bash
+CF_API_TOKEN=xxxxxxxx xtun change-cert-mode --cert-mode cf-origin-ca \
+  --cf-zone-id xxxxxxxxxxxxxxxx
+```
+
+说明：
+
+- 该命令更新的是当前 VPS 的共享 XHTTP CDN 证书。
+- 同一台机器上的默认客户端和 `add-client` 生成的命名客户端会一起使用新证书。
+- 如果你有东京、圣何塞等多台 VPS，需要分别在每台 VPS 上执行一次。
+
+### 本地静态伪装站
+
+脚本默认会把 AI 资讯风格的静态站发布到：
+
+```bash
+/var/www/xtun-fallback
+```
+
+Nginx 根路径 `/` 会直接读取这个本地站点，不再反代外部名站；`XHTTP_PATH` 仍然单独转发到本机 Xray。
 
 ### 续期 / 刷新当前证书
 

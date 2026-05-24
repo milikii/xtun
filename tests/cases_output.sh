@@ -329,7 +329,8 @@ run_service_config_helper_case() {
   write_core_health_monitor
 
   assert_contains 'server_name cdn.example.com;' "${NGINX_CONFIG_FILE}"
-  assert_contains 'proxy_pass https://www.harvard.edu;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'root /var/www/xtun-fallback;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'try_files $uri $uri/ /index.html;' "${NGINX_CONFIG_FILE}"
   assert_contains 'grpc_pass 127.0.0.1:8001;' "${NGINX_CONFIG_FILE}"
   assert_contains 'use_backend be_xhttp_cdn if { req.ssl_sni -i cdn.example.com }' "${HAPROXY_CONFIG}"
   assert_contains 'server nginx_cdn 127.0.0.1:8443 check' "${HAPROXY_CONFIG}"
@@ -347,6 +348,23 @@ run_service_config_helper_case() {
   write_xray_logrotate_config
   assert_contains '/var/log/xray/access.log /var/log/xray/error.log /var/log/xtun/operations.log {' "${XRAY_LOGROTATE_FILE}"
   assert_contains 'rotate 7' "${XRAY_LOGROTATE_FILE}"
+}
+
+run_fallback_site_deploy_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  FALLBACK_SITE_SOURCE_DIR="${ROOT_DIR}/static/fallback"
+  FALLBACK_SITE_DIR="${workdir}/site"
+  BACKUP_DIR="${workdir}/backup"
+  backup_path() { :; }
+
+  deploy_fallback_site
+
+  [[ -f "${FALLBACK_SITE_DIR}/index.html" ]]
+  [[ -f "${FALLBACK_SITE_DIR}/desk-assets/styles.css" ]]
+  [[ -f "${FALLBACK_SITE_DIR}/desk-assets/site.js" ]]
+  grep -q 'AI Signals Review' "${FALLBACK_SITE_DIR}/index.html"
 }
 
 run_xray_config_escape_case() {

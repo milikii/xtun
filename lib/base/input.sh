@@ -126,6 +126,7 @@ usage() {
 变更证书模式参数:
   --non-interactive           非交互运行。
   --cert-mode VALUE           新证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
+                              该变更作用于当前 VPS 上共享 XHTTP 域名的全部客户端链接。
   --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
   --cert-file VALUE           existing 模式使用的证书文件。
   --key-file VALUE            existing 模式使用的私钥文件。
@@ -185,6 +186,7 @@ usage() {
   ${command_name} change-warp --disable-warp
   ${command_name} change-warp-rules --add-domain chat.openai.com
   ${command_name} change-cert-mode --cert-mode self-signed
+  ${command_name} change-cert-mode --cert-mode cf-origin-ca --cf-zone-id YOUR_ZONE_ID
   ${command_name} renew-cert
   ${command_name} add-client phone
   ${command_name} show-links --client phone

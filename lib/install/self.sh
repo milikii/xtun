@@ -26,6 +26,9 @@ install_self_command() {
     staging_dir="$(mktemp -d)"
     install -m 0755 "${source_root}/xtun.sh" "${staging_dir}/xtun.sh"
     cp -a "${source_root}/lib" "${staging_dir}/lib"
+    if [[ -d "${source_root}/static" ]]; then
+      cp -a "${source_root}/static" "${staging_dir}/static"
+    fi
     source_bundle_root="${staging_dir}"
   fi
 
@@ -95,6 +98,9 @@ install_bundle_root_to_self() {
   install -d -m 0755 "$(dirname "${SELF_COMMAND_PATH}")"
   install -m 0755 "${source_bundle_root}/xtun.sh" "${target_entry}"
   cp -a "${source_bundle_root}/lib" "${SELF_INSTALL_DIR}/lib"
+  if [[ -d "${source_bundle_root}/static" ]]; then
+    cp -a "${source_bundle_root}/static" "${SELF_INSTALL_DIR}/static"
+  fi
 
   wrapper_tmp="$(mktemp)"
   cat > "${wrapper_tmp}" <<EOF
