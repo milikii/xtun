@@ -416,17 +416,13 @@ run_tls_stage_failure_case() {
   TLS_KEY_FILE="${SSL_DIR}/key.pem"
   CERT_MODE="cf-origin-ca"
   XHTTP_DOMAIN="cdn.example.com"
-  CF_ZONE_ID="zone-id"
-  CF_API_TOKEN="api-token"
+  CERT_SOURCE_PEM=""
+  KEY_SOURCE_PEM=""
   XRAY_GID="0"
   mkdir -p "${SSL_DIR}"
 
   printf 'old-cert\n' > "${TLS_CERT_FILE}"
   printf 'old-key\n' > "${TLS_KEY_FILE}"
-
-  curl() {
-    return 1
-  }
 
   set +e
   ( write_tls_assets ) >/dev/null 2>&1

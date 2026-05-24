@@ -60,13 +60,10 @@ usage() {
   --xhttp-xpadding-placement VALUE  xpadding placement，默认 queryInHeader。
   --xhttp-xpadding-method VALUE     xpadding method，默认 tokenish。
   --cert-mode VALUE           证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
-  --cert-file VALUE           当证书模式为 existing 时使用的证书文件。
-  --key-file VALUE            当证书模式为 existing 时使用的私钥文件。
-  --cert-pem VALUE            existing 模式下仅支持 @文件路径；更推荐直接使用 --cert-file。
-  --key-pem VALUE             existing 模式下仅支持 @文件路径；更推荐直接使用 --key-file。
-  --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
-  --cf-api-token VALUE        cf-origin-ca 模式仅支持 @文件路径或环境变量 CF_API_TOKEN。
-  --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期，默认 5475 天。
+  --cert-file VALUE           existing / cf-origin-ca 模式使用的证书文件。
+  --key-file VALUE            existing / cf-origin-ca 模式使用的私钥文件。
+  --cert-pem VALUE            existing / cf-origin-ca 模式下仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --key-pem VALUE             existing / cf-origin-ca 模式下仅支持 @文件路径；交互模式可直接粘贴 PEM。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA，默认 letsencrypt。
   --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
@@ -128,13 +125,10 @@ usage() {
   --cert-mode VALUE           新证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
                               该变更作用于当前 VPS 上共享 XHTTP 域名的全部客户端链接。
   --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
-  --cert-file VALUE           existing 模式使用的证书文件。
-  --key-file VALUE            existing 模式使用的私钥文件。
-  --cert-pem VALUE            existing 模式仅支持 @文件路径；更推荐使用 --cert-file。
-  --key-pem VALUE             existing 模式仅支持 @文件路径；更推荐使用 --key-file。
-  --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
-  --cf-api-token VALUE        cf-origin-ca 模式仅支持 @文件路径或环境变量 CF_API_TOKEN。
-  --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期。
+  --cert-file VALUE           existing / cf-origin-ca 模式使用的证书文件。
+  --key-file VALUE            existing / cf-origin-ca 模式使用的私钥文件。
+  --cert-pem VALUE            existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --key-pem VALUE             existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA。
   --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
@@ -143,13 +137,10 @@ usage() {
 
 续期证书参数:
   --non-interactive           非交互运行。
-  --cert-file VALUE           existing 模式使用的证书文件。
-  --key-file VALUE            existing 模式使用的私钥文件。
-  --cert-pem VALUE            existing 模式仅支持 @文件路径；更推荐使用 --cert-file。
-  --key-pem VALUE             existing 模式仅支持 @文件路径；更推荐使用 --key-file。
-  --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
-  --cf-api-token VALUE        cf-origin-ca 模式仅支持 @文件路径或环境变量 CF_API_TOKEN。
-  --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期。
+  --cert-file VALUE           existing / cf-origin-ca 模式使用的证书文件。
+  --key-file VALUE            existing / cf-origin-ca 模式使用的私钥文件。
+  --cert-pem VALUE            existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --key-pem VALUE             existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA。
   --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
@@ -186,7 +177,7 @@ usage() {
   ${command_name} change-warp --disable-warp
   ${command_name} change-warp-rules --add-domain chat.openai.com
   ${command_name} change-cert-mode --cert-mode self-signed
-  ${command_name} change-cert-mode --cert-mode cf-origin-ca --cf-zone-id YOUR_ZONE_ID
+  ${command_name} change-cert-mode --cert-mode cf-origin-ca
   ${command_name} renew-cert
   ${command_name} add-client phone
   ${command_name} show-links --client phone

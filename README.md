@@ -106,7 +106,6 @@ xtun.sh
 从 `0.4.9` 开始，下面这些敏感参数不再接受“命令行直接明文传值”：
 
 - `--warp-client-secret`
-- `--cf-api-token`
 - `--cf-dns-token`
 - `--reality-private-key`
 - `--cert-pem`
@@ -455,23 +454,29 @@ bash xtun.sh install \
 ```bash
 bash xtun.sh install \
   --cert-mode existing \
-  --cert-pem "$(cat /etc/ssl/cloudflare/cert.pem)" \
-  --key-pem "$(cat /etc/ssl/cloudflare/key.pem)"
+  --cert-pem @/etc/ssl/cloudflare/cert.pem \
+  --key-pem @/etc/ssl/cloudflare/key.pem
 ```
 
 ### 3. cf-origin-ca
 
-脚本自动向 Cloudflare Origin CA 申请证书。
+使用你在 Cloudflare 面板里生成的 Origin CA 证书和私钥。
 
-需要：
+交互模式下会直接让你粘贴：
 
-- `--cf-zone-id`
-- `--cf-api-token`
+- Cloudflare Origin CA 证书 PEM
+- Cloudflare Origin CA 私钥 PEM
 
-建议 Token 权限：
+非交互模式可使用文件：
 
-- `Zone / SSL and Certificates / Edit`
-- `Zone / Zone Settings / Edit`
+```bash
+bash xtun.sh install \
+  --cert-mode cf-origin-ca \
+  --cert-pem @/root/cf-origin.pem \
+  --key-pem @/root/cf-origin.key
+```
+
+这个模式不需要 Cloudflare API Token。
 
 ### 4. acme-dns-cf
 
@@ -690,8 +695,15 @@ xtun change-cert-mode --cert-mode existing \
 切换到 Cloudflare Origin CA：
 
 ```bash
-CF_API_TOKEN=xxxxxxxx xtun change-cert-mode --cert-mode cf-origin-ca \
-  --cf-zone-id xxxxxxxxxxxxxxxx
+xtun change-cert-mode --cert-mode cf-origin-ca
+```
+
+非交互写法：
+
+```bash
+xtun change-cert-mode --non-interactive --cert-mode cf-origin-ca \
+  --cert-pem @/root/cf-origin.pem \
+  --key-pem @/root/cf-origin.key
 ```
 
 说明：
@@ -720,7 +732,7 @@ xtun renew-cert
 
 - `self-signed`：重新生成一张新的自签名证书
 - `existing`：需要重新提供证书来源，例如 `--cert-file/--key-file` 或 `--cert-pem/--key-pem`
-- `cf-origin-ca`：重新向 Cloudflare Origin CA 申请
+- `cf-origin-ca`：重新提供 Cloudflare Origin CA 证书 PEM 和私钥 PEM
 - `acme-dns-cf`：重新执行 `acme.sh` 的申请 / 安装流程
 
 敏感参数请使用环境变量或 `@文件路径`：

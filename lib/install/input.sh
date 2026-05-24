@@ -331,9 +331,6 @@ run_install_preflight_checks() {
   preflight_check_domain_resolution "${XHTTP_DOMAIN}" "XHTTP CDN 域名"
 
   case "${CERT_MODE}" in
-    cf-origin-ca)
-      verify_cloudflare_token "${CF_API_TOKEN}" "Cloudflare API Token"
-      ;;
     acme-dns-cf)
       verify_cloudflare_token "${CF_DNS_TOKEN}" "Cloudflare DNS Token"
       ;;

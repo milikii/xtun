@@ -889,13 +889,13 @@ run_cert_mode_input_case() {
   CF_DNS_ACCOUNT_ID="account-id"
   CF_DNS_ZONE_ID="dns-zone-id"
   prompt_cert_mode_inputs
-  [[ -z "${CERT_SOURCE_FILE}" ]]
-  [[ -z "${KEY_SOURCE_FILE}" ]]
+  [[ "${CERT_SOURCE_FILE}" == "/tmp/old-cert.pem" ]]
+  [[ "${KEY_SOURCE_FILE}" == "/tmp/old-key.pem" ]]
   [[ -z "${CERT_SOURCE_PEM}" ]]
   [[ -z "${KEY_SOURCE_PEM}" ]]
-  [[ "${CF_ZONE_ID}" == "zone-id" ]]
-  [[ "${CF_API_TOKEN}" == "api-token" ]]
-  [[ "${CF_CERT_VALIDITY}" == "365" ]]
+  [[ -z "${CF_ZONE_ID}" ]]
+  [[ -z "${CF_API_TOKEN}" ]]
+  [[ "${CF_CERT_VALIDITY}" == "5475" ]]
   [[ -z "${ACME_EMAIL}" ]]
   [[ "${ACME_CA}" == "letsencrypt" ]]
   [[ -z "${CF_DNS_TOKEN}" ]]

@@ -27,9 +27,28 @@ clear_acme_dns_cf_settings() {
 }
 
 prompt_cf_origin_ca_inputs() {
-  prompt_with_default CF_ZONE_ID "Cloudflare Zone ID" "${CF_ZONE_ID:-}"
-  prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA 有效期（天）" "${CF_CERT_VALIDITY:-${DEFAULT_CF_CERT_VALIDITY}}"
-  prompt_secret CF_API_TOKEN "Cloudflare API 令牌"
+  resolve_value_source CERT_SOURCE_PEM
+  resolve_value_source KEY_SOURCE_PEM
+
+  if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    if [[ -n "${CERT_SOURCE_FILE}" || -n "${KEY_SOURCE_FILE}" ]]; then
+      [[ -n "${CERT_SOURCE_FILE}" && -n "${KEY_SOURCE_FILE}" ]] || die "cf-origin-ca 模式下，证书文件路径和私钥文件路径必须同时提供。"
+      CERT_SOURCE_PEM=""
+      KEY_SOURCE_PEM=""
+      return
+    fi
+
+    [[ -n "${CERT_SOURCE_PEM}" && -n "${KEY_SOURCE_PEM}" ]] \
+      || die "cf-origin-ca 模式下，请提供 --cert-pem/--key-pem，或 --cert-file/--key-file。"
+    CERT_SOURCE_FILE=""
+    KEY_SOURCE_FILE=""
+    return
+  fi
+
+  CERT_SOURCE_FILE=""
+  KEY_SOURCE_FILE=""
+  prompt_multiline_value CERT_SOURCE_PEM "请输入 Cloudflare Origin CA 证书 PEM 内容"
+  prompt_multiline_value KEY_SOURCE_PEM "请输入 Cloudflare Origin CA 私钥 PEM 内容"
 }
 
 prompt_optional_cloudflare_scope() {
@@ -51,6 +70,9 @@ prompt_acme_dns_cf_inputs() {
 prepare_existing_cert_inputs() {
   local input_mode=""
   local first_input=""
+
+  resolve_value_source CERT_SOURCE_PEM
+  resolve_value_source KEY_SOURCE_PEM
 
   if [[ -n "${CERT_SOURCE_FILE}" || -n "${KEY_SOURCE_FILE}" ]]; then
     [[ -n "${CERT_SOURCE_FILE}" && -n "${KEY_SOURCE_FILE}" ]] || die "existing 模式下，证书文件路径和私钥文件路径必须同时提供。"
@@ -106,8 +128,8 @@ prompt_cert_mode_inputs() {
       clear_acme_dns_cf_settings
       ;;
     cf-origin-ca)
-      clear_existing_cert_inputs
       prompt_cf_origin_ca_inputs
+      clear_cf_origin_ca_settings
       clear_acme_dns_cf_settings
       ;;
     acme-dns-cf)
@@ -119,89 +141,6 @@ prompt_cert_mode_inputs() {
       die "不支持的证书模式：${CERT_MODE}"
       ;;
   esac
-}
-
-write_cf_origin_csr() {
-  local csr_file="${1}"
-  local key_file="${2}"
-  local openssl_cfg=""
-
-  openssl_cfg="$(mktemp)"
-  cat > "${openssl_cfg}" <<EOF
-[req]
-distinguished_name = req_distinguished_name
-req_extensions = v3_req
-prompt = no
-
-[req_distinguished_name]
-CN = ${XHTTP_DOMAIN}
-
-[v3_req]
-subjectAltName = @alt_names
-
-[alt_names]
-DNS.1 = ${XHTTP_DOMAIN}
-EOF
-
-  openssl req -new -sha256 \
-    -key "${key_file}" \
-    -out "${csr_file}" \
-    -config "${openssl_cfg}" >/dev/null 2>&1
-
-  rm -f "${openssl_cfg}"
-}
-
-request_cf_origin_ca_cert() {
-  local cert_file="${1}"
-  local key_file="${2}"
-  local csr_file=""
-  local csr_json=""
-  local response=""
-  local cert_body=""
-  local error_text=""
-
-  [[ -n "${CF_ZONE_ID}" ]] || die "cf-origin-ca 模式必须提供 CF_ZONE_ID。"
-  [[ -n "${CF_API_TOKEN}" ]] || die "cf-origin-ca 模式必须提供 CF_API_TOKEN。"
-
-  csr_file="$(mktemp)"
-  openssl ecparam -name prime256v1 -genkey -noout -out "${key_file}"
-  chmod 0640 "${key_file}"
-  write_cf_origin_csr "${csr_file}" "${key_file}"
-  csr_json="$(jq -Rs . < "${csr_file}")"
-
-  response="$(curl -fsSL https://api.cloudflare.com/client/v4/certificates \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer ${CF_API_TOKEN}" \
-    --data "{\"csr\":${csr_json},\"hostnames\":[\"${XHTTP_DOMAIN}\"],\"request_type\":\"origin-ecc\",\"requested_validity\":${CF_CERT_VALIDITY}}" \
-  )" || die "调用 Cloudflare Origin CA API 失败。"
-
-  cert_body="$(printf '%s' "${response}" | jq -r '.result.certificate // empty')"
-  if [[ -z "${cert_body}" ]]; then
-    error_text="$(printf '%s' "${response}" | jq -r '.errors[0].message // .messages[0].message // "未知的 Cloudflare API 错误"')"
-    die "Cloudflare Origin CA API 未返回证书：${error_text}"
-  fi
-
-  printf '%b\n' "${cert_body}" > "${cert_file}"
-  chmod 0640 "${cert_file}"
-  rm -f "${csr_file}"
-}
-
-set_cloudflare_ssl_mode_strict() {
-  local response=""
-  local success=""
-
-  [[ -n "${CF_ZONE_ID}" ]] || return 0
-  [[ -n "${CF_API_TOKEN}" ]] || return 0
-
-  response="$(curl -fsSL -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/settings/ssl" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer ${CF_API_TOKEN}" \
-    --data '{"value":"strict"}' 2>/dev/null || true)"
-
-  success="$(printf '%s' "${response}" | jq -r '.success // empty' 2>/dev/null || true)"
-  if [[ "${success}" != "true" ]]; then
-    warn "无法自动把 Cloudflare SSL/TLS 模式切到 strict，请手动检查 Zone 设置。"
-  fi
 }
 
 write_acme_reload_helper() {
@@ -398,7 +337,7 @@ write_tls_assets() {
       write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}"
       ;;
     cf-origin-ca)
-      request_cf_origin_ca_cert "${stage_cert_file}" "${stage_key_file}"
+      write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}"
       ;;
     acme-dns-cf)
       issue_acme_cf_cert "${stage_cert_file}" "${stage_key_file}"
@@ -415,10 +354,6 @@ write_tls_assets() {
 
   ensure_managed_permissions
   validate_tls_assets
-
-  if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
-    set_cloudflare_ssl_mode_strict
-  fi
 
   trap - RETURN EXIT
 }
