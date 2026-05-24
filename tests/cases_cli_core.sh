@@ -39,9 +39,10 @@ run_single_file_bootstrap_case() {
   workdir="$(mktemp -d)"
   cp "${ROOT_DIR}/xtun.sh" "${workdir}/xtun.sh"
   old_bundle="${workdir}/old-bundle"
-  mkdir -p "${old_bundle}/lib/base"
+  mkdir -p "${old_bundle}/lib/base" "${old_bundle}/static/fallback"
   cp "${ROOT_DIR}/xtun.sh" "${old_bundle}/xtun.sh"
   printf '# helper\n' > "${old_bundle}/lib/base/helpers.sh"
+  printf '<!doctype html>\n' > "${old_bundle}/static/fallback/index.html"
 
   output="$(XTUN_SELF_INSTALL_DIR="${old_bundle}" XTUN_SELF_COMMAND_PATH="${workdir}/bin/xtun" XTUN_BOOTSTRAP_ROOT="${ROOT_DIR}" bash "${workdir}/xtun.sh" help)"
   [[ "${output}" == *$'\n  xtun.sh help'* ]]
@@ -175,12 +176,13 @@ run_update_script_command_case() {
       esac
     done
 
-    mkdir -p "${target_dir}/bundle/lib/base"
+    mkdir -p "${target_dir}/bundle/lib/base" "${target_dir}/bundle/static/fallback"
     cat > "${target_dir}/bundle/xtun.sh" <<'EOF'
 #!/usr/bin/env bash
 SCRIPT_VERSION="9.9.9"
 EOF
     printf '# helper\n' > "${target_dir}/bundle/lib/base/helpers.sh"
+    printf '<!doctype html>\n' > "${target_dir}/bundle/static/fallback/index.html"
   }
   log_step() {
     logged+="STEP:${1}"$'\n'
@@ -206,6 +208,7 @@ EOF
 
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
+  [[ -f "${SELF_INSTALL_DIR}/static/fallback/index.html" ]]
   grep -q 'SCRIPT_VERSION="9.9.9"' "${SELF_INSTALL_DIR}/xtun.sh"
   grep -q 'STEP:下载最新脚本 bundle。' <<< "${logged}"
   grep -q 'STEP:安装脚本 bundle。' <<< "${logged}"
@@ -238,13 +241,14 @@ EOF
       esac
     done
 
-    mkdir -p "${target_dir}/bundle/lib/base"
+    mkdir -p "${target_dir}/bundle/lib/base" "${target_dir}/bundle/static/fallback"
     cat > "${target_dir}/bundle/xtun.sh" <<'EOF'
 #!/usr/bin/env bash
 SCRIPT_VERSION="9.9.9"
 echo changed
 EOF
     printf '# helper\n' > "${target_dir}/bundle/lib/base/helpers.sh"
+    printf '<!doctype html>\n' > "${target_dir}/bundle/static/fallback/index.html"
   }
   stdout_output="$(update_script_cmd 2>&1)"
   grep -q '脚本内容已更新，但版本号保持为 9.9.9。' <<< "${stdout_output}"

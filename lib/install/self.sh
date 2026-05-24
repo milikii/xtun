@@ -88,7 +88,7 @@ install_bundle_root_to_self() {
   local source_bundle_root="${1}"
   local target_entry="${SELF_INSTALL_DIR}/xtun.sh"
   local wrapper_tmp=""
-  [[ -d "${source_bundle_root}/lib" && -f "${source_bundle_root}/xtun.sh" ]] || die "脚本 bundle 缺少必需文件，无法安装。"
+  bundle_root_ready "${source_bundle_root}" || die "脚本 bundle 缺少必需文件，无法安装。"
 
   backup_path "${SELF_INSTALL_DIR}"
   backup_path "${SELF_COMMAND_PATH}"

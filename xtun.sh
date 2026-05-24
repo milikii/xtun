@@ -16,7 +16,7 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
-SCRIPT_VERSION="0.5.4"
+SCRIPT_VERSION="0.5.5"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xtun"
 SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xtun"
 BOOTSTRAP_SELF_INSTALL_DIR="${XTUN_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
@@ -33,7 +33,10 @@ bootstrap_die() {
 
 bundle_root_ready() {
   local root_path="${1}"
-  [[ -n "${root_path}" && -f "${root_path}/xtun.sh" && -f "${root_path}/lib/base/helpers.sh" ]]
+  [[ -n "${root_path}" \
+    && -f "${root_path}/xtun.sh" \
+    && -f "${root_path}/lib/base/helpers.sh" \
+    && -f "${root_path}/static/fallback/index.html" ]]
 }
 
 bootstrap_default_archive_url() {
