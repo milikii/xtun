@@ -8,7 +8,7 @@
 - `Cloudflare WARP Team` 选择性出站
 - `haproxy + nginx + xray` 的混合前置与 `443` 端口复用架构
 - 可选 `Cloudflare Origin CA` / `acme.sh + Cloudflare DNS` 证书模式
-- 可选 `BBR + fq + RPS/XPS` 网络优化
+- 可选 `Joey BBRv3 + fq + RPS/XPS` 网络优化
 
 脚本主入口：
 
@@ -942,12 +942,21 @@ xtun status
 
 ## 网络优化说明
 
-如果启用网络优化，脚本会尝试配置：
+如果启用网络优化，脚本会先按当前架构集成 `byJoey/Actions-bbr-v3` 的 Joey BBRv3 内核包：
+
+- `x86_64 / amd64` 使用上游 `x86_64-*` release
+- `aarch64 / arm64` 使用上游 `arm64-*` release
+- 下载的 deb 会按 GitHub Release API 的 SHA256 digest 校验
+- 安装内核后不会自动重启；需要手动重启 VPS 后才会加载 BBRv3
+
+随后脚本会写入并应用：
 
 - `tcp_congestion_control = bbr`
 - `default_qdisc = fq`
 - 调整 `rmem/wmem/somaxconn/tcp_fastopen/tcp_mtu_probing`
 - 通过 systemd oneshot 在开机后重新应用 `fq`、`RPS`、`XPS`
+
+如果当前内核还不是 Joey BBRv3，但对应内核包已经安装，脚本会保留配置并提示重启；重启后再运行 `xtun status` 或 `modinfo tcp_bbr` 可确认生效。
 
 相关文件：
 

@@ -71,7 +71,7 @@ usage() {
   --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
   --enable-warp               启用选择性 WARP 出站。
   --disable-warp              禁用 WARP 出站。
-  --enable-net-opt            启用 BBR/FQ/RPS 网络优化。
+  --enable-net-opt            启用 Joey BBRv3 内核 + fq/RPS 网络优化。
   --disable-net-opt           禁用网络优化。
   --warp-team VALUE           Cloudflare Zero Trust 团队名。
   --warp-client-id VALUE      服务令牌 Client ID。

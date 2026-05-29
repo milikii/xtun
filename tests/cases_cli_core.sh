@@ -696,6 +696,133 @@ run_optional_component_skip_case() {
   install_warp
 }
 
+run_joey_bbr_release_parse_case() {
+  local metadata_json=""
+  local tag_name=""
+  local rows=""
+
+  metadata_json='[
+    {
+      "tag_name": "x86_64-7.0.5",
+      "published_at": "2026-05-08T12:29:14Z",
+      "assets": [
+        {
+          "name": "linux-image-7.0.5-joeyblog-bbrv3_7.0.5-1_amd64.deb",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "browser_download_url": "https://example.invalid/x86-image.deb"
+        }
+      ]
+    },
+    {
+      "tag_name": "arm64-7.0.3",
+      "published_at": "2026-05-04T16:33:05Z",
+      "assets": [
+        {
+          "name": "linux-image-7.0.3-joeyblog-bbrv3_7.0.3-1_arm64.deb",
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "browser_download_url": "https://example.invalid/arm-image.deb"
+        },
+        {
+          "name": "linux-image-7.0.3-joeyblog-bbrv3-dbg_7.0.3-1_arm64.deb",
+          "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "browser_download_url": "https://example.invalid/arm-debug.deb"
+        }
+      ]
+    }
+  ]'
+
+  [[ "$(joey_bbr_release_arch_filter aarch64)" == "arm64" ]]
+  [[ "$(joey_bbr_release_arch_filter x86_64)" == "x86_64" ]]
+  tag_name="$(joey_bbr_latest_tag_from_metadata "${metadata_json}" "arm64")"
+  [[ "${tag_name}" == "arm64-7.0.3" ]]
+  [[ "$(joey_bbr_latest_core_version_from_tag "${tag_name}")" == "7.0.3" ]]
+
+  rows="$(joey_bbr_release_asset_rows_from_metadata "${metadata_json}" "${tag_name}")"
+  printf '%s' "${rows}" | grep -q 'linux-image-7.0.3-joeyblog-bbrv3_7.0.3-1_arm64.deb'
+  printf '%s' "${rows}" | grep -qv -- '-dbg_'
+  validate_joey_bbr_asset_rows "${rows}"
+}
+
+run_joey_bbr_pending_reboot_case() {
+  local fixture_json=""
+  local downloaded=0
+  local installed=0
+
+  NET_BBRV3_REBOOT_REQUIRED="no"
+  fixture_json='[
+    {
+      "tag_name": "arm64-7.0.3",
+      "published_at": "2026-05-04T16:33:05Z",
+      "assets": [
+        {
+          "name": "linux-image-7.0.3-joeyblog-bbrv3_7.0.3-1_arm64.deb",
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "browser_download_url": "https://example.invalid/arm-image.deb"
+        }
+      ]
+    }
+  ]'
+
+  bbr_v3_active() { return 1; }
+  uname() { printf '%s\n' "aarch64"; }
+  fetch_joey_bbr_release_metadata_json() { printf '%s' "${fixture_json}"; }
+  joey_bbr_installed_kernel_version() { printf '%s\n' "7.0.3-g90210de4b779-1"; }
+  download_joey_bbrv3_assets() { downloaded=$((downloaded + 1)); }
+  install_joey_bbrv3_deb_files() { installed=$((installed + 1)); }
+  warn() { :; }
+  log_success() { :; }
+
+  install_joey_bbrv3_kernel_if_needed
+
+  [[ "${NET_BBRV3_REBOOT_REQUIRED}" == "yes" ]]
+  [[ "${downloaded}" -eq 0 ]]
+  [[ "${installed}" -eq 0 ]]
+  load_functions
+}
+
+run_install_network_joey_reboot_case() {
+  local workdir=""
+  local sysctl_calls=0
+  local systemctl_calls=""
+
+  workdir="$(mktemp -d)"
+  NET_SYSCTL_CONF="${workdir}/net.conf"
+  NET_HELPER_PATH="${workdir}/xtun-net-optimize.sh"
+  NET_SERVICE_FILE="${workdir}/xtun-net-optimize.service"
+  ENABLE_NET_OPT="yes"
+  NET_BBRV3_REBOOT_REQUIRED="no"
+
+  install_joey_bbrv3_kernel_if_needed() {
+    NET_BBRV3_REBOOT_REQUIRED="yes"
+  }
+  available_cc() { :; }
+  supports_default_qdisc() { return 1; }
+  bbr_v3_active() { return 1; }
+  modprobe() { :; }
+  backup_path() { :; }
+  sysctl() {
+    sysctl_calls=$((sysctl_calls + 1))
+    return 1
+  }
+  systemctl() {
+    systemctl_calls+="$*"$'\n'
+  }
+  warn() { :; }
+  log_success() { :; }
+
+  install_network_optimization
+
+  assert_contains 'net.core.default_qdisc = fq' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.ipv4.tcp_congestion_control = bbr' "${NET_SYSCTL_CONF}"
+  [[ -x "${NET_HELPER_PATH}" ]]
+  [[ -f "${NET_SERVICE_FILE}" ]]
+  [[ "${sysctl_calls}" -eq 1 ]]
+  printf '%s' "${systemctl_calls}" | grep -q '^daemon-reload$'
+  printf '%s' "${systemctl_calls}" | grep -q "^enable --now ${NET_SERVICE_NAME}$"
+  [[ "${ENABLE_NET_OPT}" == "yes" ]]
+  load_functions
+}
+
 run_warp_repo_file_mode_case() {
   local output=""
 
