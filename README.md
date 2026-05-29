@@ -942,12 +942,20 @@ xtun status
 
 ## 网络优化说明
 
-如果启用网络优化，脚本会先按当前架构集成 `byJoey/Actions-bbr-v3` 的 Joey BBRv3 内核包：
+如果启用网络优化，脚本会先按当前架构集成第三方项目 `byJoey/Actions-bbr-v3` 提供的 Joey BBRv3 内核包：
 
 - `x86_64 / amd64` 使用上游 `x86_64-*` release
 - `aarch64 / arm64` 使用上游 `arm64-*` release
 - 下载的 deb 会按 GitHub Release API 的 SHA256 digest 校验
+- 脚本不会直接执行上游的交互式 `install.sh`；只使用其 GitHub Release 中发布的内核 deb 资源
 - 安装内核后不会自动重启；需要手动重启 VPS 后才会加载 BBRv3
+
+执行时机：
+
+- 交互式安装时会询问“是否启用网络优化”，默认是 `y`
+- 非交互安装时传入 `--enable-net-opt` 会自动执行；传入 `--disable-net-opt` 会跳过
+- 当前网络优化只面向 Debian / Ubuntu 系，并要求当前机器架构能匹配上面的 `amd64` 或 `arm64`
+- 如果当前已经运行 Joey BBRv3，脚本只会刷新 sysctl、helper 和 systemd 服务，不会重复安装内核
 
 随后脚本会写入并应用：
 
@@ -963,6 +971,12 @@ xtun status
 - `/etc/sysctl.d/98-xtun-net.conf`
 - `/usr/local/sbin/xtun-net-optimize.sh`
 - `xtun-net-optimize.service`
+
+第三方来源：
+
+- Joey BBRv3 内核包来自 `byJoey/Actions-bbr-v3`
+- 项目地址：https://github.com/byJoey/Actions-bbr-v3
+- 上游 LICENSE 标注为 MIT；本脚本仅在安装时引用其 release 产物，请以该上游仓库的最新说明为准
 
 ## 客户端导出
 
