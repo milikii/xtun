@@ -72,6 +72,7 @@ main() {
     run_joey_bbr_release_parse_case
     run_joey_bbr_pending_reboot_case
     run_install_network_joey_reboot_case
+    run_apply_net_opt_command_case
     run_warp_repo_file_mode_case
     run_install_warp_failure_case
     run_install_warp_retry_daemon_ready_case

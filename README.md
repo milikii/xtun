@@ -954,8 +954,18 @@ xtun status
 
 - 交互式安装时会询问“是否启用网络优化”，默认是 `y`
 - 非交互安装时传入 `--enable-net-opt` 会自动执行；传入 `--disable-net-opt` 会跳过
+- 已安装过旧版网络优化的机器，更新脚本后可直接运行 `xtun apply-net-opt` 重新应用新版 Joey BBRv3 网络优化
 - 当前网络优化只面向 Debian / Ubuntu 系，并要求当前机器架构能匹配上面的 `amd64` 或 `arm64`
 - 如果当前已经运行 Joey BBRv3，脚本只会刷新 sysctl、helper 和 systemd 服务，不会重复安装内核
+
+旧机器升级网络优化的推荐步骤：
+
+```bash
+xtun update-script
+xtun apply-net-opt
+```
+
+如果命令提示已安装 Joey BBRv3 内核并需要重启，执行 `reboot` 后再用 `xtun status` 或 `modinfo tcp_bbr` 确认。
 
 随后脚本会写入并应用：
 

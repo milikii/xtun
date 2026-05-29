@@ -82,6 +82,10 @@ run_dispatch_case() {
     dispatched="list-clients"
     dispatched_args="$*"
   }
+  apply_net_opt_cmd() {
+    dispatched="apply-net-opt"
+    dispatched_args="$*"
+  }
   main_menu() {
     dispatched="menu"
     dispatched_args="$*"
@@ -111,6 +115,9 @@ run_dispatch_case() {
 
   run_cli_command list-clients
   [[ "${dispatched}" == "list-clients" ]]
+
+  run_cli_command apply-net-opt
+  [[ "${dispatched}" == "apply-net-opt" ]]
 
   run_cli_command
   [[ "${dispatched}" == "menu" ]]
@@ -143,6 +150,9 @@ run_dispatch_case() {
 
   run_menu_choice 22
   [[ "${dispatched}" == "list-clients" ]]
+
+  run_menu_choice 23
+  [[ "${dispatched}" == "apply-net-opt" ]]
 }
 
 run_client_cli_case() {

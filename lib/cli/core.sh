@@ -404,6 +404,40 @@ repair_perms_cmd() {
   log "已修复脚本托管文件权限，并尝试重启 xray、haproxy 与 nginx。"
 }
 
+apply_net_opt_cmd() {
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "未知的 apply-net-opt 参数：${1}"
+        ;;
+    esac
+  done
+
+  need_root
+  ensure_debian_family
+  start_backup_session
+  log_step "读取当前托管安装状态。"
+  load_current_install_context
+
+  ENABLE_NET_OPT="yes"
+  NET_BBRV3_REBOOT_REQUIRED="no"
+  log_step "应用 Joey BBRv3 网络优化。"
+  install_network_optimization
+  write_state_file
+
+  log_success "网络优化已应用。"
+  log "备份目录：${BACKUP_DIR}"
+  if [[ "${NET_BBRV3_REBOOT_REQUIRED:-no}" == "yes" ]]; then
+    if ! bbr_v3_active; then
+      log "请重启 VPS 后加载 Joey BBRv3 内核。"
+    fi
+  fi
+}
+
 uninstall_cmd() {
   local assume_yes=0
   local purge_packages=0
@@ -533,6 +567,7 @@ show_main_menu() {
   20. 帮助
   21. 添加客户端
   22. 查看客户端列表
+  23. 重新应用网络优化
   0. 退出
 EOF
 }
@@ -613,6 +648,9 @@ run_cli_command() {
     repair-perms)
       repair_perms_cmd
       ;;
+    apply-net-opt)
+      apply_net_opt_cmd "$@"
+      ;;
     help|--help|-h)
       usage
       ;;
@@ -646,6 +684,7 @@ run_menu_choice() {
     20) run_cli_command help ;;
     21) run_cli_command add-client ;;
     22) run_cli_command list-clients ;;
+    23) run_cli_command apply-net-opt ;;
     *)
       warn "未知的菜单项：${1}"
       return 1

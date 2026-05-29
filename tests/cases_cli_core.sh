@@ -14,6 +14,7 @@ run_usage_case() {
   [[ "${output}" == *$'\n  xtun add-client NAME [参数]'* ]]
   [[ "${output}" == *$'\n  xtun list-clients'* ]]
   [[ "${output}" == *$'\n  xtun diagnose'* ]]
+  [[ "${output}" == *$'\n  xtun apply-net-opt'* ]]
 }
 
 run_show_links_without_state_case() {
@@ -821,6 +822,75 @@ run_install_network_joey_reboot_case() {
   printf '%s' "${systemctl_calls}" | grep -q "^enable --now ${NET_SERVICE_NAME}$"
   [[ "${ENABLE_NET_OPT}" == "yes" ]]
   load_functions
+}
+
+run_apply_net_opt_command_case() {
+  local calls=""
+  local logged=""
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  ENABLE_NET_OPT="no"
+  NET_BBRV3_REBOOT_REQUIRED="stale"
+
+  need_root() {
+    calls+="root"$'\n'
+  }
+  ensure_debian_family() {
+    calls+="debian"$'\n'
+  }
+  start_backup_session() {
+    calls+="backup"$'\n'
+    BACKUP_DIR="${workdir}/backup"
+  }
+  load_current_install_context() {
+    calls+="load"$'\n'
+    ENABLE_NET_OPT="no"
+    REALITY_UUID="11111111-1111-1111-1111-111111111111"
+    XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  }
+  install_network_optimization() {
+    calls+="net:${ENABLE_NET_OPT}:${NET_BBRV3_REBOOT_REQUIRED}"$'\n'
+  }
+  write_state_file() {
+    calls+="state:${ENABLE_NET_OPT}"$'\n'
+  }
+  bbr_v3_active() {
+    return 1
+  }
+  log_step() {
+    logged+="STEP:${1}"$'\n'
+  }
+  log_success() {
+    logged+="DONE:${1}"$'\n'
+  }
+  log() {
+    logged+="${1}"$'\n'
+  }
+
+  apply_net_opt_cmd
+
+  [[ "${ENABLE_NET_OPT}" == "yes" ]]
+  [[ "${NET_BBRV3_REBOOT_REQUIRED}" == "no" ]]
+  [[ "${calls}" == $'root\ndebian\nbackup\nload\nnet:yes:no\nstate:yes\n' ]]
+  grep -q 'STEP:读取当前托管安装状态。' <<< "${logged}"
+  grep -q 'STEP:应用 Joey BBRv3 网络优化。' <<< "${logged}"
+  grep -q 'DONE:网络优化已应用。' <<< "${logged}"
+  grep -q "备份目录：${workdir}/backup" <<< "${logged}"
+
+  NET_BBRV3_REBOOT_REQUIRED="yes"
+  install_network_optimization() {
+    NET_BBRV3_REBOOT_REQUIRED="yes"
+    calls+="net-reboot"$'\n'
+  }
+  calls=""
+  logged=""
+
+  apply_net_opt_cmd
+
+  grep -q '请重启 VPS 后加载 Joey BBRv3 内核。' <<< "${logged}"
+  load_functions
+  stub_side_effects
 }
 
 run_warp_repo_file_mode_case() {
