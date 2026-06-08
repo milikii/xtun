@@ -6,5 +6,3 @@
 .health-state.tmp.*
 .health-history.tmp.*
 .codex
-.trellis/
-AGENTS.md
