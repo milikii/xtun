@@ -74,10 +74,15 @@ usage() {
   --disable-warp              禁用 WARP 出站。
   --enable-net-opt            启用 Joey BBRv3 内核 + fq/RPS 网络优化。
   --disable-net-opt           禁用网络优化。
-  --warp-team VALUE           Cloudflare Zero Trust 团队名。
-  --warp-client-id VALUE      服务令牌 Client ID。
-  --warp-client-secret VALUE  服务令牌 Client Secret；仅支持 @文件路径或环境变量 WARP_CLIENT_SECRET。
-  --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口，默认 40000。
+  --warp-private-key VALUE    WARP WireGuard 私钥；仅支持 @文件路径或环境变量 WARP_PRIVATE_KEY。
+  --warp-profile VALUE        导入 wgcf profile.conf；仅支持 @文件路径或环境变量 WARP_PROFILE。
+  --warp-address-v4 VALUE     WARP WireGuard IPv4 内网地址。
+  --warp-address-v6 VALUE     WARP WireGuard IPv6 内网地址。
+  --warp-peer-public-key VALUE WARP 对端公钥，默认使用 Cloudflare 公开值。
+  --warp-endpoint VALUE       WARP Endpoint host:port，默认 engage.cloudflareclient.com:2408。
+  --warp-reserved VALUE       WARP reserved 三字节，逗号分隔，例如 1,2,3。
+  --warp-mtu VALUE            WARP WireGuard MTU，默认 1420。
+                              全部省略时会自动注册一台免费 WARP 设备。
 
 变更 UUID 参数:
   --reality-uuid VALUE        指定新的 REALITY UUID，而不是自动生成。
@@ -109,10 +114,15 @@ usage() {
   --non-interactive           非交互运行。
   --enable-warp               启用 WARP 分流。
   --disable-warp              禁用 WARP 分流。
-  --warp-team VALUE           Cloudflare Zero Trust 团队名。
-  --warp-client-id VALUE      服务令牌 Client ID。
-  --warp-client-secret VALUE  服务令牌 Client Secret；仅支持 @文件路径或环境变量 WARP_CLIENT_SECRET。
-  --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口。
+  --warp-private-key VALUE    WARP WireGuard 私钥；仅支持 @文件路径或环境变量 WARP_PRIVATE_KEY。
+  --warp-profile VALUE        导入 wgcf profile.conf；仅支持 @文件路径或环境变量 WARP_PROFILE。
+  --warp-address-v4 VALUE     WARP WireGuard IPv4 内网地址。
+  --warp-address-v6 VALUE     WARP WireGuard IPv6 内网地址。
+  --warp-peer-public-key VALUE WARP 对端公钥。
+  --warp-endpoint VALUE       WARP Endpoint host:port。
+  --warp-reserved VALUE       WARP reserved 三字节，逗号分隔。
+  --warp-mtu VALUE            WARP WireGuard MTU。
+                              全部省略时会自动注册一台免费 WARP 设备。
 
 变更 WARP 分流规则参数:
   --non-interactive           非交互运行。
@@ -191,10 +201,7 @@ usage() {
     --xhttp-domain cdn.example.com \
     --cert-mode self-signed \
     --enable-net-opt \
-    --enable-warp \
-    --warp-team your-team \
-    --warp-client-id xxxxxxxxx.access \
-    --warp-client-secret @/root/warp-client-secret.txt
+    --enable-warp
 EOF
 }
 
@@ -232,7 +239,8 @@ prompt_with_default() {
 
 option_secret_env_name() {
   case "${1}" in
-    --warp-client-secret) printf 'WARP_CLIENT_SECRET' ;;
+    --warp-private-key) printf 'WARP_PRIVATE_KEY' ;;
+    --warp-profile) printf 'WARP_PROFILE' ;;
     --cf-api-token) printf 'CF_API_TOKEN' ;;
     --cf-dns-token) printf 'CF_DNS_TOKEN' ;;
     --reality-private-key) printf 'REALITY_PRIVATE_KEY' ;;
@@ -242,7 +250,7 @@ option_secret_env_name() {
 
 option_requires_indirect_value() {
   case "${1}" in
-    --warp-client-secret|--cf-api-token|--cf-dns-token|--reality-private-key|--cert-pem|--key-pem)
+    --warp-private-key|--warp-profile|--cf-api-token|--cf-dns-token|--reality-private-key|--cert-pem|--key-pem)
       return 0
       ;;
     *)

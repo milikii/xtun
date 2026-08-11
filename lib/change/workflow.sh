@@ -51,22 +51,17 @@ run_change_warp_action() {
     enable)
       ENABLE_WARP="yes"
       prompt_warp_settings
-      if ! install_warp; then
-        rollback_optional_component_state
-        return 1
-      fi
       if ! apply_managed_runtime_update; then
         rollback_optional_component_state
         return 1
       fi
+      warp_teardown_legacy
       finish_managed_change "WARP 分流已启用。"
       ;;
     disable)
       ENABLE_WARP="no"
       apply_managed_runtime_update
-      stop_and_disable_service_if_present "warp-svc.service"
-      stop_and_disable_service_if_present "${WARP_HEALTH_TIMER_NAME}"
-      stop_and_disable_service_if_present "${WARP_HEALTH_SERVICE_NAME}"
+      warp_teardown_legacy
       finish_managed_change "WARP 分流已禁用。"
       ;;
     *)

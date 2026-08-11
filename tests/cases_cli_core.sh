@@ -331,15 +331,15 @@ run_value_source_case() {
   workdir="$(mktemp -d)"
   printf 'secret-from-file\n' > "${workdir}/secret.txt"
 
-  WARP_CLIENT_SECRET="@${workdir}/secret.txt"
-  resolve_value_source WARP_CLIENT_SECRET
-  [[ "${WARP_CLIENT_SECRET}" == "secret-from-file" ]]
+  WARP_PRIVATE_KEY="@${workdir}/secret.txt"
+  resolve_value_source WARP_PRIVATE_KEY
+  [[ "${WARP_PRIVATE_KEY}" == "secret-from-file" ]]
 
-  WARP_CLIENT_ID=""
-  export WARP_CLIENT_ID="client-from-env"
-  resolve_value_source WARP_CLIENT_ID
-  [[ "${WARP_CLIENT_ID}" == "client-from-env" ]]
-  unset WARP_CLIENT_ID
+  WARP_ADDRESS_V4=""
+  export WARP_ADDRESS_V4="172.16.0.9"
+  resolve_value_source WARP_ADDRESS_V4
+  [[ "${WARP_ADDRESS_V4}" == "172.16.0.9" ]]
+  unset WARP_ADDRESS_V4
 }
 
 run_prompt_reuse_case() {
@@ -394,9 +394,9 @@ set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 NON_INTERACTIVE=0
-WARP_CLIENT_SECRET="secret-old"
-prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
-printf '%s' "\${WARP_CLIENT_SECRET}"
+WARP_PRIVATE_KEY="secret-old"
+prompt_secret WARP_PRIVATE_KEY "WARP WireGuard 私钥"
+printf '%s' "\${WARP_PRIVATE_KEY}"
 EOF
   output="$(printf '\n' | bash "${script_file}")"
   rm -f "${script_file}"
@@ -486,7 +486,7 @@ run_install_parse_case() {
   local workdir=""
 
   workdir="$(mktemp -d)"
-  printf 'client-secret\n' > "${workdir}/warp-secret.txt"
+  printf '%s\n' "${TEST_WARP_PRIVATE_KEY}" > "${workdir}/warp-private-key.txt"
   NON_INTERACTIVE=0
   SERVER_IP=""
   NODE_LABEL_PREFIX=""
@@ -511,10 +511,7 @@ run_install_parse_case() {
   KEY_SOURCE_FILE=""
   ENABLE_WARP=""
   ENABLE_NET_OPT=""
-  WARP_TEAM_NAME=""
-  WARP_CLIENT_ID=""
-  WARP_CLIENT_SECRET=""
-  WARP_PROXY_PORT=""
+  clear_test_warp_credentials
 
   parse_install_args \
     --non-interactive \
@@ -534,10 +531,12 @@ run_install_parse_case() {
     --cert-file /tmp/cert.pem \
     --key-file /tmp/key.pem \
     --enable-warp \
-    --warp-team team-name \
-    --warp-client-id client-id \
-    --warp-client-secret "@${workdir}/warp-secret.txt" \
-    --warp-proxy-port 41000 \
+    --warp-private-key "@${workdir}/warp-private-key.txt" \
+    --warp-address-v4 172.16.0.2 \
+    --warp-address-v6 2606:4700:110:8a1b:cafe:1:2:3 \
+    --warp-reserved '[1, 2, 3]' \
+    --warp-endpoint engage.cloudflareclient.com:2408 \
+    --warp-mtu 1280 \
     --disable-net-opt
 
   resolve_install_input_sources
@@ -559,10 +558,13 @@ run_install_parse_case() {
   [[ "${CERT_SOURCE_FILE}" == "/tmp/cert.pem" ]]
   [[ "${KEY_SOURCE_FILE}" == "/tmp/key.pem" ]]
   [[ "${ENABLE_WARP}" == "yes" ]]
-  [[ "${WARP_TEAM_NAME}" == "team-name" ]]
-  [[ "${WARP_CLIENT_ID}" == "client-id" ]]
-  [[ "${WARP_CLIENT_SECRET}" == "client-secret" ]]
-  [[ "${WARP_PROXY_PORT}" == "41000" ]]
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  [[ "${WARP_ADDRESS_V4}" == "172.16.0.2" ]]
+  [[ "${WARP_ADDRESS_V6}" == "2606:4700:110:8a1b:cafe:1:2:3" ]]
+  [[ "${WARP_ENDPOINT}" == "engage.cloudflareclient.com:2408" ]]
+  [[ "${WARP_MTU}" == "1280" ]]
+  ensure_warp_outbound_format
+  [[ "${WARP_RESERVED}" == "1,2,3" ]]
   [[ "${ENABLE_NET_OPT}" == "no" ]]
 }
 
@@ -609,7 +611,19 @@ run_sensitive_option_reject_case() {
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
-parse_install_args --warp-client-secret direct-secret
+parse_install_args --warp-private-key direct-key
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q '不支持直接明文传值'
+  printf '%s' "${output}" | grep -q 'WARP_PRIVATE_KEY'
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
+parse_install_args --warp-profile /tmp/profile.conf
 EOF
 )"; then
     return 1
@@ -694,7 +708,7 @@ run_optional_component_skip_case() {
   ENABLE_WARP="no"
 
   install_network_optimization
-  install_warp
+  ensure_warp_credentials
 }
 
 run_joey_bbr_release_parse_case() {
@@ -890,155 +904,6 @@ run_apply_net_opt_command_case() {
 
   grep -q '请重启 VPS 后加载 Joey BBRv3 内核。' <<< "${logged}"
   load_functions
-  stub_side_effects
-}
-
-run_warp_repo_file_mode_case() {
-  local output=""
-
-  if ! output="$(bash <<EOF 2>&1
-set -Eeuo pipefail
-ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
-tmp_dir="\$(mktemp -d)"
-WARP_APT_KEYRING="\${tmp_dir}/cloudflare-warp-archive-keyring.gpg"
-WARP_APT_SOURCE_LIST="\${tmp_dir}/cloudflare-client.list"
-backup_path() { :; }
-curl() {
-  printf '%s' 'pubkey' > "\${4}"
-}
-gpg() {
-  printf '%s' 'keyring' > "\${4}"
-}
-apt-get() { :; }
-install_warp_apt_repo "trixie"
-[[ "\$(stat -c '%a' "\${WARP_APT_KEYRING}")" == "644" ]]
-[[ "\$(stat -c '%a' "\${WARP_APT_SOURCE_LIST}")" == "644" ]]
-EOF
-)"; then
-    return 1
-  fi
-}
-
-run_install_warp_failure_case() {
-  local mdm_written=0
-  local monitor_written=0
-
-  ENABLE_WARP="yes"
-  install_warp_apt_repo() {
-    return 1
-  }
-  write_warp_mdm_file() {
-    mdm_written=$((mdm_written + 1))
-  }
-  install_warp_health_monitor() {
-    monitor_written=$((monitor_written + 1))
-  }
-
-  if install_warp; then
-    return 1
-  fi
-  [[ "${mdm_written}" -eq 0 ]]
-  [[ "${monitor_written}" -eq 0 ]]
-  load_functions
-}
-
-run_install_warp_retry_daemon_ready_case() {
-  local mdm_written=0
-  local monitor_written=0
-  local refresh_attempts=0
-  local sleep_calls=0
-  local active_checks=0
-  local systemctl_calls=""
-
-  ENABLE_WARP="yes"
-  WARP_SERVICE_READY_RETRIES=3
-  WARP_SERVICE_READY_DELAY_SECONDS=0
-  WARP_MDM_REFRESH_RETRIES=3
-  WARP_MDM_REFRESH_DELAY_SECONDS=0
-
-  install_warp_apt_repo() { :; }
-  service_exists() { return 0; }
-  write_warp_mdm_file() {
-    mdm_written=$((mdm_written + 1))
-  }
-  install_warp_health_monitor() {
-    monitor_written=$((monitor_written + 1))
-  }
-  systemctl() {
-    systemctl_calls+="$*"$'\n'
-    case "$*" in
-      "is-active --quiet warp-svc")
-        active_checks=$((active_checks + 1))
-        [[ "${active_checks}" -ge 2 ]]
-        ;;
-      *)
-        return 0
-        ;;
-    esac
-  }
-  warp-cli() {
-    refresh_attempts=$((refresh_attempts + 1))
-    if [[ "${refresh_attempts}" -lt 3 ]]; then
-      printf '%s\n' 'Unable to connect to the CloudflareWARP daemon: No such file or directory (os error 2)' >&2
-      printf '%s\n' 'Maybe the daemon is not running?' >&2
-      return 1
-    fi
-  }
-  sleep() {
-    sleep_calls=$((sleep_calls + 1))
-  }
-
-  install_warp
-
-  [[ "${mdm_written}" -eq 1 ]]
-  [[ "${monitor_written}" -eq 1 ]]
-  [[ "${refresh_attempts}" -eq 3 ]]
-  [[ "${sleep_calls}" -eq 3 ]]
-  printf '%s' "${systemctl_calls}" | grep -q '^enable --now warp-svc$'
-  printf '%s' "${systemctl_calls}" | grep -q '^restart warp-svc$'
-}
-
-run_install_warp_retry_exhausted_case() {
-  local refresh_attempts=0
-  local sleep_calls=0
-
-  ENABLE_WARP="yes"
-  WARP_SERVICE_READY_RETRIES=1
-  WARP_SERVICE_READY_DELAY_SECONDS=0
-  WARP_MDM_REFRESH_RETRIES=3
-  WARP_MDM_REFRESH_DELAY_SECONDS=0
-
-  install_warp_apt_repo() { :; }
-  service_exists() { return 0; }
-  write_warp_mdm_file() { :; }
-  install_warp_health_monitor() { :; }
-  systemctl() {
-    case "$*" in
-      "is-active --quiet warp-svc")
-        return 0
-        ;;
-      *)
-        return 0
-        ;;
-    esac
-  }
-  warp-cli() {
-    refresh_attempts=$((refresh_attempts + 1))
-    printf '%s\n' 'Unable to connect to the CloudflareWARP daemon: No such file or directory (os error 2)' >&2
-    printf '%s\n' 'Maybe the daemon is not running?' >&2
-    return 1
-  }
-  sleep() {
-    sleep_calls=$((sleep_calls + 1))
-  }
-
-  if install_warp; then
-    return 1
-  fi
-
-  [[ "${refresh_attempts}" -eq 3 ]]
-  [[ "${sleep_calls}" -eq 2 ]]
 }
 
 run_install_draft_case() {
@@ -1051,7 +916,7 @@ run_install_draft_case() {
   REALITY_SNI="reality.example.com"
   XHTTP_DOMAIN="cdn.example.com"
   ENABLE_WARP="yes"
-  WARP_CLIENT_SECRET="secret-value"
+  set_test_warp_credentials
 
   write_install_draft_file
 
@@ -1060,14 +925,17 @@ run_install_draft_case() {
   REALITY_SNI=""
   XHTTP_DOMAIN=""
   ENABLE_WARP=""
-  WARP_CLIENT_SECRET=""
+  clear_test_warp_credentials
   load_install_draft_file
   [[ "${SERVER_IP}" == "203.0.113.10" ]]
   [[ "${NODE_LABEL_PREFIX}" == "HKG" ]]
   [[ "${REALITY_SNI}" == "reality.example.com" ]]
   [[ "${XHTTP_DOMAIN}" == "cdn.example.com" ]]
   [[ "${ENABLE_WARP}" == "yes" ]]
-  [[ "${WARP_CLIENT_SECRET}" == "secret-value" ]]
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  [[ "${WARP_ADDRESS_V4}" == "172.16.0.2" ]]
+  [[ "${WARP_RESERVED}" == "3,4,5" ]]
+  [[ "$(stat -c '%a' "${INSTALL_DRAFT_FILE}")" == "600" ]]
 
   clear_install_draft_file
   [[ ! -f "${INSTALL_DRAFT_FILE}" ]]
@@ -1156,4 +1024,138 @@ run_cert_mode_input_case() {
   [[ -z "${CF_DNS_TOKEN}" ]]
   [[ -z "${CF_DNS_ACCOUNT_ID}" ]]
   [[ -z "${CF_DNS_ZONE_ID}" ]]
+}
+
+run_warp_credential_helper_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  clear_test_warp_credentials
+
+  [[ "$(warp_reserved_from_client_id 'AwQF')" == "3,4,5" ]]
+  [[ -z "$(warp_reserved_from_client_id '')" ]]
+
+  [[ "$(normalize_warp_reserved_value '[1, 2, 3]')" == "1,2,3" ]]
+  [[ "$(normalize_warp_reserved_value ' 0,255 ')" == "0,255" ]]
+  [[ -z "$(normalize_warp_reserved_value '')" ]]
+
+  cat > "${workdir}/profile.conf" <<'PROFILE'
+[Interface]
+PrivateKey = eHR1bi10ZXN0LXdhcnAtcHJpdmF0ZS1rZXktMzJieXQ=
+Address = 172.16.0.2/32, 2606:4700:110:8a1b:cafe:1:2:4/128
+DNS = 1.1.1.1
+MTU = 1280
+
+[Peer]
+PublicKey = eHR1bi10ZXN0LXdhcnAtcGVlci1wdWJsaWMta2V5LTM=
+AllowedIPs = 0.0.0.0/0
+Endpoint = 162.159.192.1:2408
+PROFILE
+
+  warp_import_profile "$(cat "${workdir}/profile.conf")" >/dev/null
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  [[ "${WARP_ADDRESS_V4}" == "172.16.0.2" ]]
+  [[ "${WARP_ADDRESS_V6}" == "2606:4700:110:8a1b:cafe:1:2:4" ]]
+  [[ "${WARP_PEER_PUBLIC_KEY}" == "${TEST_WARP_PEER_PUBLIC_KEY}" ]]
+  [[ "${WARP_ENDPOINT}" == "162.159.192.1:2408" ]]
+  [[ "${WARP_MTU}" == "1280" ]]
+  # wgcf 标准 profile 不含 Reserved，留空由 --warp-reserved 手工补
+  [[ -z "${WARP_RESERVED}" ]]
+  warp_credentials_ready
+  ensure_warp_outbound_format
+
+  clear_test_warp_credentials
+  printf '%s\n' 'Reserved = [9, 8, 7]' >> "${workdir}/profile.conf"
+  warp_import_profile "$(cat "${workdir}/profile.conf")" >/dev/null
+  [[ "${WARP_RESERVED}" == "9,8,7" ]]
+
+  clear_test_warp_credentials
+  if warp_import_profile "$(printf '%s\n' '[Interface]' 'Address = 172.16.0.2/32')" 2>/dev/null; then
+    return 1
+  fi
+  if warp_import_profile "$(printf '%s\n' '[Interface]' "PrivateKey = ${TEST_WARP_PRIVATE_KEY}")" 2>/dev/null; then
+    return 1
+  fi
+
+  clear_test_warp_credentials
+  ENABLE_WARP="no"
+  ensure_warp_credentials
+
+  ENABLE_WARP="yes"
+  set_test_warp_credentials
+  warp_register_free_device() {
+    return 1
+  }
+  ensure_warp_credentials
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  load_functions
+}
+
+run_warp_credential_ensure_failure_case() {
+  local output=""
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
+ENABLE_WARP="yes"
+WARP_PRIVATE_KEY=""
+WARP_ADDRESS_V4=""
+WARP_ADDRESS_V6=""
+WARP_PROFILE_SOURCE=""
+warp_legacy_team_detected() { return 1; }
+warp_register_free_device() { return 1; }
+ensure_warp_credentials
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q '\-\-warp-profile'
+  printf '%s' "${output}" | grep -q '\-\-disable-warp'
+}
+
+run_warp_legacy_teardown_case() {
+  local workdir=""
+  local stopped=()
+  local removed=()
+  local logged=""
+
+  workdir="$(mktemp -d)"
+  printf 'legacy\n' > "${workdir}/mdm.xml"
+
+  legacy_warp_paths() {
+    printf '%s\n' "${workdir}/mdm.xml" "${workdir}/missing.list"
+  }
+  service_exists() { return 1; }
+  stop_and_disable_service_if_present() {
+    stopped+=("${1}")
+  }
+  remove_managed_paths() {
+    removed=("$@")
+  }
+  systemctl() { :; }
+  log() {
+    logged+="${1}"$'\n'
+  }
+  log_step() {
+    logged+="STEP:${1}"$'\n'
+  }
+
+  warp_teardown_legacy
+
+  [[ " ${stopped[*]} " == *" xtun-warp-health.timer "* ]]
+  [[ " ${stopped[*]} " == *" xtun-warp-health.service "* ]]
+  [[ " ${stopped[*]} " == *" warp-svc.service "* ]]
+  [[ "${removed[*]}" == "${workdir}/mdm.xml" ]]
+  printf '%s' "${logged}" | grep -q 'STEP:清理旧版 WARP Team 托管文件。'
+  printf '%s' "${logged}" | grep -q 'apt-get purge -y cloudflare-warp'
+
+  rm -f "${workdir}/mdm.xml"
+  stopped=()
+  removed=()
+  logged=""
+  warp_teardown_legacy
+  [[ "${#removed[@]}" -eq 0 ]]
+  [[ -z "${logged}" ]]
+  load_functions
 }

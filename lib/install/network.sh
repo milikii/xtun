@@ -349,7 +349,7 @@ write_net_service() {
   tmp_file="$(mktemp)"
   cat > "${tmp_file}" <<EOF
 [Unit]
-Description=Apply Xray WARP Team network optimizations
+Description=Apply Xray network optimizations
 After=network-online.target
 Wants=network-online.target
 

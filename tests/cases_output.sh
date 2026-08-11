@@ -23,10 +23,7 @@ run_warp_enabled_case() {
   FINGERPRINT="chrome"
   ENABLE_WARP="yes"
   ENABLE_NET_OPT="no"
-  WARP_PROXY_PORT="40000"
-  WARP_TEAM_NAME="team-name"
-  WARP_CLIENT_ID="client-id.access"
-  WARP_CLIENT_SECRET=$'sec\'ret $? []'
+  set_test_warp_credentials
   CERT_MODE="existing"
   CF_ZONE_ID="zone-id"
   CF_CERT_VALIDITY="5475"
@@ -48,14 +45,26 @@ run_warp_enabled_case() {
   write_output_file
 
   jq -e '.routing.rules | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
-  jq -e '.outbounds[] | select(.tag == "WARP") | .settings.servers[0].port == 40000' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.outbounds[] | select(.tag == "WARP") | .protocol == "wireguard"' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.outbounds[] | select(.tag == "WARP") | .settings.secretKey == "'"${TEST_WARP_PRIVATE_KEY}"'"' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.outbounds[] | select(.tag == "WARP") | .settings.address == ["172.16.0.2/32", "2606:4700:110:8a1b:cafe:1:2:3/128"]' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.outbounds[] | select(.tag == "WARP") | .settings.reserved == [3, 4, 5]' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.outbounds[] | select(.tag == "WARP") | .settings.peers[0].endpoint == "'"${DEFAULT_WARP_ENDPOINT}"'"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingObfsMode == true' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingHeader == "Referer"' "${XRAY_CONFIG_FILE}" >/dev/null
   bash -n "${STATE_FILE}"
 
   # shellcheck disable=SC1090
   source "${STATE_FILE}"
-  [[ "${WARP_CLIENT_SECRET}" == $'sec\'ret $? []' ]]
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  [[ "${WARP_RESERVED}" == "3,4,5" ]]
+
+  if grep -q "${TEST_WARP_PRIVATE_KEY}" "${OUTPUT_FILE}"; then
+    return 1
+  fi
+  if grep -q "${TEST_WARP_PRIVATE_KEY}" "${SUBSCRIPTION_MANIFEST_FILE}"; then
+    return 1
+  fi
 
   assert_contains '&ech=' "${OUTPUT_FILE}"
   assert_contains 'extra=' "${OUTPUT_FILE}"
@@ -115,7 +124,6 @@ run_multi_client_config_output_case() {
   FINGERPRINT="chrome"
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
-  WARP_PROXY_PORT="40000"
   CERT_MODE="existing"
   NODE_CLIENTS_TEXT="phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444"
 
@@ -174,7 +182,6 @@ run_warp_disabled_case() {
   FINGERPRINT="chrome"
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
-  WARP_PROXY_PORT="40000"
   CERT_MODE="self-signed"
   XHTTP_ECH_CONFIG_LIST=""
   XHTTP_ECH_FORCE_QUERY=""
@@ -221,7 +228,7 @@ run_warp_rules_file_case() {
   XHTTP_UUID="99999999-9999-9999-9999-999999999999"
   XHTTP_PATH="/assets/v4"
   ENABLE_WARP="yes"
-  WARP_PROXY_PORT="41000"
+  set_test_warp_credentials
   printf '%s\n' 'domain:custom.example.com' 'geosite:google' > "${WARP_RULES_FILE}"
 
   write_xray_config
@@ -280,7 +287,6 @@ run_output_default_transport_fields_case() {
   FINGERPRINT=""
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
-  WARP_PROXY_PORT="40000"
   CERT_MODE="existing"
   XHTTP_ECH_CONFIG_LIST=""
   XHTTP_ECH_FORCE_QUERY=""
@@ -386,7 +392,6 @@ run_xray_config_escape_case() {
   XHTTP_VLESS_DECRYPTION='enc"value'
   XHTTP_VLESS_ENCRYPTION='enc"value'
   ENABLE_WARP="no"
-  WARP_PROXY_PORT="40000"
 
   write_xray_config
 
@@ -483,7 +488,6 @@ EOF
   XHTTP_VLESS_DECRYPTION="none"
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
-  WARP_PROXY_PORT="40000"
   CERT_MODE="existing"
 
   write_output_file
@@ -492,4 +496,72 @@ EOF
   [[ -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]
   assert_contains "Raw QR PNG:" "${SUBSCRIPTION_MANIFEST_FILE}"
   assert_contains "${SUBSCRIPTION_RAW_QR_FILE}" "${OUTPUT_FILE}"
+}
+
+run_warp_outbound_json_shape_case() {
+  local outbound=""
+
+  reset_feature_defaults
+  ENABLE_WARP="yes"
+  set_test_warp_credentials
+
+  outbound="$(xray_warp_outbound_json)"
+  jq -e '.tag == "WARP"' <<<"${outbound}" >/dev/null
+  jq -e '.protocol == "wireguard"' <<<"${outbound}" >/dev/null
+  jq -e '.settings.secretKey == "'"${TEST_WARP_PRIVATE_KEY}"'"' <<<"${outbound}" >/dev/null
+  jq -e '.settings.address == ["172.16.0.2/32", "2606:4700:110:8a1b:cafe:1:2:3/128"]' <<<"${outbound}" >/dev/null
+  jq -e '.settings.peers | length == 1' <<<"${outbound}" >/dev/null
+  jq -e '.settings.peers[0].publicKey == "'"${TEST_WARP_PEER_PUBLIC_KEY}"'"' <<<"${outbound}" >/dev/null
+  jq -e '.settings.peers[0].allowedIPs == ["0.0.0.0/0", "::/0"]' <<<"${outbound}" >/dev/null
+  jq -e '.settings.peers[0].endpoint == "'"${DEFAULT_WARP_ENDPOINT}"'"' <<<"${outbound}" >/dev/null
+  jq -e '.settings.reserved == [3, 4, 5]' <<<"${outbound}" >/dev/null
+  jq -e '.settings.mtu == '"${DEFAULT_WARP_MTU}" <<<"${outbound}" >/dev/null
+  jq -e '.settings.domainStrategy == "'"${DEFAULT_WARP_DOMAIN_STRATEGY}"'"' <<<"${outbound}" >/dev/null
+
+  WARP_RESERVED=""
+  outbound="$(xray_warp_outbound_json)"
+  jq -e '.settings | has("reserved") | not' <<<"${outbound}" >/dev/null
+
+  WARP_ADDRESS_V6=""
+  jq -e '. == ["172.16.0.2/32"]' <<<"$(xray_warp_addresses_json)" >/dev/null
+  WARP_ADDRESS_V4=""
+  WARP_ADDRESS_V6="2606:4700:110:8a1b:cafe:1:2:3"
+  jq -e '. == ["2606:4700:110:8a1b:cafe:1:2:3/128"]' <<<"$(xray_warp_addresses_json)" >/dev/null
+  WARP_ADDRESS_V6=""
+  jq -e '. == []' <<<"$(xray_warp_addresses_json)" >/dev/null
+
+  WARP_RESERVED="1, 2,3"
+  jq -e '. == [1, 2, 3]' <<<"$(xray_warp_reserved_json)" >/dev/null
+}
+
+run_warp_config_json_valid_case() {
+  local workdir=""
+  local config_text=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.60"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="www.scu.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PRIVATE_KEY="private-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION=""
+  XHTTP_VLESS_DECRYPTION="none"
+  ENABLE_WARP="yes"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  set_test_warp_credentials
+
+  config_text="$(xray_config_text)"
+  jq -e '.outbounds | map(.tag) == ["direct", "WARP", "block"]' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules | map(.outboundTag) == ["direct", "WARP"]' <<<"${config_text}" >/dev/null
+  jq -e '[.routing.rules[] | select(.outboundTag == "WARP") | .domain[]] | length > 0' <<<"${config_text}" >/dev/null
+  jq -e '.outbounds[] | select(.tag == "WARP") | .settings.peers[0].endpoint | test(":[0-9]+$")' <<<"${config_text}" >/dev/null
 }

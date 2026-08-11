@@ -24,6 +24,8 @@ main() {
     run_multi_client_config_output_case
     run_warp_disabled_case
     run_warp_rules_file_case
+    run_warp_outbound_json_shape_case
+    run_warp_config_json_valid_case
     run_output_helper_case
     run_output_default_transport_fields_case
     run_xray_config_escape_case
@@ -58,8 +60,6 @@ main() {
     run_optional_component_rollback_case
     run_install_rollback_helper_case
     run_tls_stage_failure_case
-    run_warp_xml_escape_case
-    run_warp_health_monitor_case
     run_restart_optional_service_case
     run_change_helper_case
     run_install_parse_case
@@ -73,10 +73,9 @@ main() {
     run_joey_bbr_pending_reboot_case
     run_install_network_joey_reboot_case
     run_apply_net_opt_command_case
-    run_warp_repo_file_mode_case
-    run_install_warp_failure_case
-    run_install_warp_retry_daemon_ready_case
-    run_install_warp_retry_exhausted_case
+    run_warp_credential_helper_case
+    run_warp_credential_ensure_failure_case
+    run_warp_legacy_teardown_case
     run_cert_mode_input_case
     run_change_command_case
     run_change_warp_enable_rollback_case
