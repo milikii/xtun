@@ -450,7 +450,7 @@ subscription_qr_status_text() {
 
 subscription_manifest_text() {
   cat <<EOF
-# Xray WARP Team 订阅文件
+# Xray 订阅文件
 
 Raw VLESS:
 ${SUBSCRIPTION_RAW_FILE}
@@ -676,7 +676,11 @@ output_runtime_summary_block() {
 
 ## WARP
 - 已启用: ${ENABLE_WARP}
-- 本地 SOCKS5 端口: ${WARP_PROXY_PORT}
+- 出站模式: wireguard（Xray 内置，无守护进程）
+- 出口: Cloudflare WARP
+- Endpoint: ${WARP_ENDPOINT:-${DEFAULT_WARP_ENDPOINT}}
+- 内网地址: $(warp_output_addresses_text)
+- reserved: ${WARP_RESERVED:-未设置}
 
 ## XHTTP ECH
 - 已启用: $(xhttp_ech_status_text)
@@ -745,7 +749,7 @@ output_file_text() {
   cf_ssl_mode="$(cloudflare_ssl_mode_text)"
 
   cat <<EOF
-# Xray WARP Team 部署信息
+# Xray 部署信息
 
 $(output_client_summary_block)
 

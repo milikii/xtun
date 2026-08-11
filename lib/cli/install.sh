@@ -52,10 +52,14 @@ install_value_specs() {
 --cf-dns-token:CF_DNS_TOKEN
 --cf-dns-account-id:CF_DNS_ACCOUNT_ID
 --cf-dns-zone-id:CF_DNS_ZONE_ID
---warp-team:WARP_TEAM_NAME
---warp-client-id:WARP_CLIENT_ID
---warp-client-secret:WARP_CLIENT_SECRET
---warp-proxy-port:WARP_PROXY_PORT
+--warp-private-key:WARP_PRIVATE_KEY
+--warp-profile:WARP_PROFILE_SOURCE
+--warp-address-v4:WARP_ADDRESS_V4
+--warp-address-v6:WARP_ADDRESS_V6
+--warp-peer-public-key:WARP_PEER_PUBLIC_KEY
+--warp-endpoint:WARP_ENDPOINT
+--warp-reserved:WARP_RESERVED
+--warp-mtu:WARP_MTU
 EOF
 }
 
@@ -156,7 +160,7 @@ write_install_managed_files() {
 
 install_optional_components() {
   install_network_optimization
-  install_warp
+  warp_teardown_legacy
 }
 
 install_cmd() {

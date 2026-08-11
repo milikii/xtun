@@ -27,42 +27,9 @@ output_field_value() {
   sed -n "s/^- ${field_name}: //p" "${OUTPUT_FILE}" | head -n 1
 }
 
-warp_mdm_value() {
-  local key_name="${1}"
-
-  [[ -f "${WARP_MDM_FILE}" ]] || return 0
-
-  awk -v key_name="${key_name}" '
-    $0 ~ "<key>" key_name "</key>" {
-      getline
-      line=$0
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-      if (line ~ /^<string>/) {
-        sub(/^<string>/, "", line)
-        sub(/<\/string>$/, "", line)
-        print line
-        exit
-      }
-      if (line ~ /^<integer>/) {
-        sub(/^<integer>/, "", line)
-        sub(/<\/integer>$/, "", line)
-        print line
-        exit
-      }
-    }
-  ' "${WARP_MDM_FILE}" 2>/dev/null || true
-}
-
-load_warp_mdm_context() {
-  WARP_TEAM_NAME="${WARP_TEAM_NAME:-$(warp_mdm_value 'organization')}"
-  WARP_CLIENT_ID="${WARP_CLIENT_ID:-$(warp_mdm_value 'auth_client_id')}"
-  WARP_CLIENT_SECRET="${WARP_CLIENT_SECRET:-$(warp_mdm_value 'auth_client_secret')}"
-  WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(warp_mdm_value 'proxy_port')}"
-}
-
 state_file_key_allowed() {
   case "${1}" in
-    STATE_VERSION|SERVER_IP|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|WARP_PROXY_PORT|WARP_TEAM_NAME|WARP_CLIENT_ID|WARP_CLIENT_SECRET|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|CF_ZONE_ID|CF_API_TOKEN|CF_CERT_VALIDITY|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|NODE_CLIENTS_TEXT|CORE_HEALTH_LAST_CHECK_AT|CORE_HEALTH_LAST_ACTION|CORE_HEALTH_LAST_REASON|WARP_HEALTH_LAST_CHECK_AT|WARP_HEALTH_LAST_ACTION|WARP_HEALTH_LAST_REASON)
+    STATE_VERSION|SERVER_IP|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|WARP_PRIVATE_KEY|WARP_ADDRESS_V4|WARP_ADDRESS_V6|WARP_PEER_PUBLIC_KEY|WARP_ENDPOINT|WARP_RESERVED|WARP_MTU|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|CF_ZONE_ID|CF_API_TOKEN|CF_CERT_VALIDITY|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|NODE_CLIENTS_TEXT|CORE_HEALTH_LAST_CHECK_AT|CORE_HEALTH_LAST_ACTION|CORE_HEALTH_LAST_REASON)
       return 0
       ;;
     *)
@@ -228,10 +195,14 @@ reset_loaded_runtime_context() {
   FINGERPRINT=""
   ENABLE_WARP=""
   ENABLE_NET_OPT=""
-  WARP_PROXY_PORT=""
-  WARP_TEAM_NAME=""
-  WARP_CLIENT_ID=""
-  WARP_CLIENT_SECRET=""
+  WARP_PRIVATE_KEY=""
+  WARP_ADDRESS_V4=""
+  WARP_ADDRESS_V6=""
+  WARP_PEER_PUBLIC_KEY=""
+  WARP_ENDPOINT=""
+  WARP_RESERVED=""
+  WARP_MTU=""
+  WARP_PROFILE_SOURCE=""
   WARP_RULES_TEXT=""
   CERT_MODE=""
   CERT_SOURCE_FILE=""
@@ -261,9 +232,6 @@ reset_loaded_runtime_context() {
   CORE_HEALTH_LAST_CHECK_AT=""
   CORE_HEALTH_LAST_ACTION=""
   CORE_HEALTH_LAST_REASON=""
-  WARP_HEALTH_LAST_CHECK_AT=""
-  WARP_HEALTH_LAST_ACTION=""
-  WARP_HEALTH_LAST_REASON=""
   STATE_JQ_MISSING_WARNED=""
 }
 
@@ -330,7 +298,6 @@ load_existing_state() {
   if [[ -f "${HEALTH_STATE_FILE}" ]]; then
     load_shell_kv_file "${HEALTH_STATE_FILE}"
   fi
-  load_warp_mdm_context
 }
 
 config_has_warp_outbound() {
@@ -355,7 +322,13 @@ load_config_runtime_context() {
       ENABLE_WARP="no"
     fi
   fi
-  WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')}"
+  WARP_PRIVATE_KEY="${WARP_PRIVATE_KEY:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.secretKey')}"
+  WARP_ADDRESS_V4="${WARP_ADDRESS_V4:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.address[] | select(test(":") | not) | split("/")[0]')}"
+  WARP_ADDRESS_V6="${WARP_ADDRESS_V6:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.address[] | select(test(":")) | split("/")[0]')}"
+  WARP_PEER_PUBLIC_KEY="${WARP_PEER_PUBLIC_KEY:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.peers[0].publicKey')}"
+  WARP_ENDPOINT="${WARP_ENDPOINT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.peers[0].endpoint')}"
+  WARP_RESERVED="${WARP_RESERVED:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.reserved | map(tostring) | join(",")')}"
+  WARP_MTU="${WARP_MTU:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.mtu | tostring')}"
 }
 
 load_output_runtime_context() {
@@ -380,7 +353,9 @@ normalize_runtime_defaults() {
   XHTTP_XPADDING_PLACEMENT="${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}"
   XHTTP_XPADDING_METHOD="${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}"
   ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
-  WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+  WARP_PEER_PUBLIC_KEY="${WARP_PEER_PUBLIC_KEY:-${DEFAULT_WARP_PEER_PUBLIC_KEY}}"
+  WARP_ENDPOINT="${WARP_ENDPOINT:-${DEFAULT_WARP_ENDPOINT}}"
+  WARP_MTU="${WARP_MTU:-${DEFAULT_WARP_MTU}}"
 }
 
 sync_xhttp_vless_encryption_state() {
@@ -635,10 +610,13 @@ state_file_text() {
   write_state_kv "FINGERPRINT" "${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   write_state_kv "ENABLE_WARP" "${ENABLE_WARP}"
   write_state_kv "ENABLE_NET_OPT" "${ENABLE_NET_OPT}"
-  write_state_kv "WARP_PROXY_PORT" "${WARP_PROXY_PORT}"
-  write_state_kv "WARP_TEAM_NAME" "${WARP_TEAM_NAME}"
-  write_state_kv "WARP_CLIENT_ID" "${WARP_CLIENT_ID}"
-  write_state_kv "WARP_CLIENT_SECRET" "${WARP_CLIENT_SECRET}"
+  write_state_kv "WARP_PRIVATE_KEY" "${WARP_PRIVATE_KEY}"
+  write_state_kv "WARP_ADDRESS_V4" "${WARP_ADDRESS_V4}"
+  write_state_kv "WARP_ADDRESS_V6" "${WARP_ADDRESS_V6}"
+  write_state_kv "WARP_PEER_PUBLIC_KEY" "${WARP_PEER_PUBLIC_KEY}"
+  write_state_kv "WARP_ENDPOINT" "${WARP_ENDPOINT}"
+  write_state_kv "WARP_RESERVED" "${WARP_RESERVED}"
+  write_state_kv "WARP_MTU" "${WARP_MTU}"
   write_state_kv "WARP_RULES_TEXT" "${WARP_RULES_TEXT}"
   write_state_kv "CERT_MODE" "${CERT_MODE}"
   write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID}"

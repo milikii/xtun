@@ -149,10 +149,14 @@ init_change_warp_request() {
 
   request_ref=(
     [target_mode]=""
-    [warp_team_name]=""
-    [warp_client_id]=""
-    [warp_client_secret]=""
-    [warp_proxy_port]=""
+    [warp_private_key]=""
+    [warp_profile_source]=""
+    [warp_address_v4]=""
+    [warp_address_v6]=""
+    [warp_peer_public_key]=""
+    [warp_endpoint]=""
+    [warp_reserved]=""
+    [warp_mtu]=""
   )
 }
 
@@ -163,10 +167,14 @@ parse_change_warp_args() {
     "--disable-warp:target_mode:disable"
   )
   local value_specs=(
-    "--warp-team:warp_team_name"
-    "--warp-client-id:warp_client_id"
-    "--warp-client-secret:warp_client_secret"
-    "--warp-proxy-port:warp_proxy_port"
+    "--warp-private-key:warp_private_key"
+    "--warp-profile:warp_profile_source"
+    "--warp-address-v4:warp_address_v4"
+    "--warp-address-v6:warp_address_v6"
+    "--warp-peer-public-key:warp_peer_public_key"
+    "--warp-endpoint:warp_endpoint"
+    "--warp-reserved:warp_reserved"
+    "--warp-mtu:warp_mtu"
   )
 
   parse_request_args_by_specs "${request_name}" literal_specs value_specs "未知的 change-warp 参数：" "${@:2}"
@@ -176,10 +184,14 @@ apply_warp_change_request() {
   local request_name="${1}"
 
   apply_request_overrides "${request_name}" \
-    "warp_team_name:WARP_TEAM_NAME" \
-    "warp_client_id:WARP_CLIENT_ID" \
-    "warp_client_secret:WARP_CLIENT_SECRET" \
-    "warp_proxy_port:WARP_PROXY_PORT"
+    "warp_private_key:WARP_PRIVATE_KEY" \
+    "warp_profile_source:WARP_PROFILE_SOURCE" \
+    "warp_address_v4:WARP_ADDRESS_V4" \
+    "warp_address_v6:WARP_ADDRESS_V6" \
+    "warp_peer_public_key:WARP_PEER_PUBLIC_KEY" \
+    "warp_endpoint:WARP_ENDPOINT" \
+    "warp_reserved:WARP_RESERVED" \
+    "warp_mtu:WARP_MTU"
 }
 
 init_change_uuid_request() {

@@ -338,20 +338,6 @@ rollback_install_runtime_state() {
 rollback_optional_component_state() {
   local paths=()
 
-  if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
-    stop_and_disable_service_if_present "${WARP_HEALTH_TIMER_NAME}"
-    stop_and_disable_service_if_present "${WARP_HEALTH_SERVICE_NAME}"
-    stop_and_disable_service_if_present "warp-svc.service"
-    paths+=(
-      "${WARP_APT_KEYRING}"
-      "${WARP_APT_SOURCE_LIST}"
-      "${WARP_MDM_FILE}"
-      "${WARP_HEALTH_HELPER}"
-      "${WARP_HEALTH_SERVICE_FILE}"
-      "${WARP_HEALTH_TIMER_FILE}"
-    )
-  fi
-
   if [[ "${ENABLE_NET_OPT:-no}" == "yes" ]]; then
     stop_and_disable_service_if_present "${NET_SERVICE_NAME}"
     paths+=(
@@ -363,7 +349,7 @@ rollback_optional_component_state() {
 
   [[ "${#paths[@]}" -gt 0 ]] || return 0
 
-  warn "检测到可选组件应用失败，正在回滚 WARP / 网络优化托管文件。"
+  warn "检测到可选组件应用失败，正在回滚网络优化托管文件。"
   rollback_managed_paths "${paths[@]}"
   systemctl daemon-reload >/dev/null 2>&1 || true
 
@@ -388,11 +374,6 @@ restart_services() {
   systemctl restart nginx
   systemctl enable --now "${CORE_HEALTH_TIMER_NAME}"
   log_success "${CORE_HEALTH_TIMER_NAME} 已启动。"
-
-  if [[ "${ENABLE_WARP}" == "yes" ]]; then
-    systemctl enable --now warp-svc
-    log_success "warp-svc 已启动。"
-  fi
 }
 
 finalize_installation() {

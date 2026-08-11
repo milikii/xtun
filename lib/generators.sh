@@ -240,22 +240,59 @@ xray_block_outbound_json() {
   }'
 }
 
+xray_warp_addresses_json() {
+  local addresses=()
+
+  [[ -z "${WARP_ADDRESS_V4}" ]] || addresses+=("${WARP_ADDRESS_V4}/32")
+  [[ -z "${WARP_ADDRESS_V6}" ]] || addresses+=("${WARP_ADDRESS_V6}/128")
+
+  if [[ "${#addresses[@]}" -eq 0 ]]; then
+    jq -cn '[]'
+    return
+  fi
+
+  jq -cn '$ARGS.positional' --args "${addresses[@]}"
+}
+
+xray_warp_reserved_json() {
+  local reserved=""
+
+  reserved="$(printf '%s' "${WARP_RESERVED}" | tr -d ' ')"
+  if [[ -z "${reserved}" ]]; then
+    jq -cn '[]'
+    return
+  fi
+
+  jq -cn --arg reserved "${reserved}" '$reserved | split(",") | map(tonumber)'
+}
+
 xray_warp_outbound_json() {
   jq -cn \
-    --arg warp_proxy_port "${WARP_PROXY_PORT}" \
+    --arg secret_key "${WARP_PRIVATE_KEY}" \
+    --argjson addresses "$(xray_warp_addresses_json)" \
+    --arg peer_public_key "${WARP_PEER_PUBLIC_KEY:-${DEFAULT_WARP_PEER_PUBLIC_KEY}}" \
+    --arg endpoint "${WARP_ENDPOINT:-${DEFAULT_WARP_ENDPOINT}}" \
+    --argjson reserved "$(xray_warp_reserved_json)" \
+    --arg mtu "${WARP_MTU:-${DEFAULT_WARP_MTU}}" \
+    --arg domain_strategy "${WARP_DOMAIN_STRATEGY:-${DEFAULT_WARP_DOMAIN_STRATEGY}}" \
     '{
       tag: "WARP",
-      protocol: "socks",
+      protocol: "wireguard",
       settings: {
-        servers: [
+        secretKey: $secret_key,
+        address: $addresses,
+        peers: [
           {
-            address: "127.0.0.1",
-            port: ($warp_proxy_port | tonumber),
-            users: []
+            publicKey: $peer_public_key,
+            allowedIPs: ["0.0.0.0/0", "::/0"],
+            endpoint: $endpoint
           }
-        ]
+        ],
+        mtu: ($mtu | tonumber),
+        domainStrategy: $domain_strategy
       }
-    }'
+    }
+    | if ($reserved | length) > 0 then .settings.reserved = $reserved else . end'
 }
 
 xray_outbounds_json() {
@@ -276,6 +313,7 @@ xray_outbounds_json() {
 
 write_xray_config() {
   generate_xhttp_vless_encryption_if_needed
+  ensure_warp_credentials
   write_generated_file_atomically "${XRAY_CONFIG_FILE}" xray_config_text
 
   ensure_managed_permissions

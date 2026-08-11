@@ -1,292 +1,239 @@
 # shellcheck shell=bash
 
 # ------------------------------
-# WARP 安装层
-# 负责 Cloudflare WARP 客户端与 MDM 配置
+# WARP 出站层
+# 负责 Cloudflare WARP 的 WireGuard 凭据供给
+# 出站由 Xray 内置 wireguard 协议承载，不安装守护进程
 # ------------------------------
 
-xml_escape() {
-  printf '%s' "${1}" \
-    | sed \
-      -e 's/&/\&amp;/g' \
-      -e 's/</\&lt;/g' \
-      -e 's/>/\&gt;/g' \
-      -e 's/"/\&quot;/g' \
-      -e "s/'/\&apos;/g"
+warp_generate_x25519_keypair() {
+  local key_pem=""
+  local private_key=""
+  local public_key=""
+
+  key_pem="$(openssl genpkey -algorithm X25519 2>/dev/null)" || return 1
+  private_key="$(printf '%s\n' "${key_pem}" | openssl pkey -outform DER 2>/dev/null | tail -c 32 | base64 -w0)" || return 1
+  public_key="$(printf '%s\n' "${key_pem}" | openssl pkey -pubout -outform DER 2>/dev/null | tail -c 32 | base64 -w0)" || return 1
+
+  [[ -n "${private_key}" && -n "${public_key}" ]] || return 1
+  printf '%s\n%s\n' "${private_key}" "${public_key}"
 }
 
-write_warp_mdm_file() {
-  local escaped_client_id=""
-  local escaped_client_secret=""
-  local escaped_team_name=""
-  local tmp_file=""
+warp_reserved_from_client_id() {
+  local client_id="${1:-}"
+  local decoded_bytes=""
 
-  ensure_warp_proxy_port_format
-  mkdir -p /var/lib/cloudflare-warp
-  backup_path "${WARP_MDM_FILE}"
-  escaped_client_id="$(xml_escape "${WARP_CLIENT_ID}")"
-  escaped_client_secret="$(xml_escape "${WARP_CLIENT_SECRET}")"
-  escaped_team_name="$(xml_escape "${WARP_TEAM_NAME}")"
-  tmp_file="$(mktemp "$(dirname "${WARP_MDM_FILE}")/.mdm.xml.tmp.XXXXXX")"
-  cat > "${tmp_file}" <<EOF
-<dict>
-    <key>auth_client_id</key>
-    <string>${escaped_client_id}</string>
-    <key>auth_client_secret</key>
-    <string>${escaped_client_secret}</string>
-    <key>organization</key>
-    <string>${escaped_team_name}</string>
-    <key>auto_connect</key>
-    <integer>1</integer>
-    <key>onboarding</key>
-    <false/>
-    <key>service_mode</key>
-    <string>proxy</string>
-    <key>proxy_port</key>
-    <integer>${WARP_PROXY_PORT}</integer>
-    <key>warp_tunnel_protocol</key>
-    <string>masque</string>
-</dict>
-EOF
-
-  chmod 0600 "${tmp_file}"
-  mv -f "${tmp_file}" "${WARP_MDM_FILE}"
+  [[ -n "${client_id}" ]] || return 0
+  decoded_bytes="$(printf '%s' "${client_id}" | base64 -d 2>/dev/null | od -An -tu1 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | paste -sd, -)" || return 0
+  printf '%s' "${decoded_bytes}"
 }
 
-install_warp_apt_repo() {
-  local repo_codename="${1}"
-  local key_tmp=""
-  local keyring_tmp=""
-  local source_tmp=""
+warp_register_free_device() {
+  local install_id=""
+  local keypair=""
+  local private_key=""
+  local public_key=""
+  local response=""
+  local client_id=""
+  local address_v4=""
+  local address_v6=""
+  local peer_public_key=""
+  local peer_host=""
+  local peer_port=""
 
-  key_tmp="$(mktemp)"
-  keyring_tmp="$(mktemp "$(dirname "${WARP_APT_KEYRING}")/.cloudflare-warp-archive-keyring.gpg.tmp.XXXXXX")"
-  source_tmp="$(mktemp "$(dirname "${WARP_APT_SOURCE_LIST}")/.cloudflare-client.list.tmp.XXXXXX")"
-  backup_path "${WARP_APT_KEYRING}"
-  backup_path "${WARP_APT_SOURCE_LIST}"
-  curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o "${key_tmp}"
-  gpg --yes --dearmor --output "${keyring_tmp}" "${key_tmp}"
-  rm -f "${key_tmp}"
+  log_step "正在向 Cloudflare 注册免费 WARP 设备。"
+  keypair="$(warp_generate_x25519_keypair)" || {
+    warn "生成 WireGuard 密钥对失败。"
+    return 1
+  }
+  private_key="$(printf '%s\n' "${keypair}" | sed -n '1p')"
+  public_key="$(printf '%s\n' "${keypair}" | sed -n '2p')"
+  install_id="$(head -c 16 /dev/urandom | base64 -w0 | tr -d '=+/' | cut -c1-22)"
 
-  cat > "${source_tmp}" <<EOF
-deb [signed-by=${WARP_APT_KEYRING}] https://pkg.cloudflareclient.com/ ${repo_codename} main
-EOF
-  mv -f "${keyring_tmp}" "${WARP_APT_KEYRING}"
-  mv -f "${source_tmp}" "${WARP_APT_SOURCE_LIST}"
-  chown 0:0 "${WARP_APT_KEYRING}" "${WARP_APT_SOURCE_LIST}"
-  chmod 0644 "${WARP_APT_KEYRING}" "${WARP_APT_SOURCE_LIST}"
+  response="$(curl -fsSL --max-time 20 \
+    -X POST "${WARP_REGISTER_API:-${DEFAULT_WARP_REGISTER_API}}" \
+    -H 'Content-Type: application/json' \
+    -H 'CF-Client-Version: a-6.30-3596' \
+    -H 'User-Agent: okhttp/3.12.1' \
+    --data "$(jq -cn \
+      --arg key "${public_key}" \
+      --arg install_id "${install_id}" \
+      '{key: $key, install_id: $install_id, fcm_token: "", tos: "2019-06-21T00:00:00.000+02:00", model: "PC", serial_number: $install_id, locale: "en_US"}')" \
+    2>/dev/null)" || {
+    warn "调用 Cloudflare 注册接口失败；机房 IP 常被拒绝注册。"
+    warn "可以在别处执行 wgcf register 取得 profile.conf，再用 --warp-profile @文件路径 导入。"
+    return 1
+  }
 
-  apt-get update
-  apt-get install -y cloudflare-warp
-}
+  address_v4="$(printf '%s' "${response}" | jq -r '.config.interface.addresses.v4 // empty' 2>/dev/null)"
+  address_v6="$(printf '%s' "${response}" | jq -r '.config.interface.addresses.v6 // empty' 2>/dev/null)"
+  peer_public_key="$(printf '%s' "${response}" | jq -r '.config.peers[0].public_key // empty' 2>/dev/null)"
+  peer_host="$(printf '%s' "${response}" | jq -r '.config.peers[0].endpoint.host // empty' 2>/dev/null)"
+  client_id="$(printf '%s' "${response}" | jq -r '.config.client_id // empty' 2>/dev/null)"
 
-write_warp_health_helper() {
-  local tmp_file=""
-
-  tmp_file="$(mktemp)"
-  cat > "${tmp_file}" <<EOF
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-proxy_port='${WARP_PROXY_PORT}'
-health_state_file='${HEALTH_STATE_FILE}'
-health_history_file='${HEALTH_HISTORY_FILE}'
-
-write_health_state() {
-  local action="\${1}"
-  local reason="\${2}"
-  local tmp_file=""
-
-  mkdir -p "\$(dirname "\${health_state_file}")"
-  tmp_file="\$(mktemp "\$(dirname "\${health_state_file}")/.health-state.tmp.XXXXXX")"
-  if [[ -f "\${health_state_file}" ]]; then
-    grep -v '^WARP_HEALTH_' "\${health_state_file}" > "\${tmp_file}" 2>/dev/null || true
+  if [[ -z "${address_v4}" ]]; then
+    warn "Cloudflare 注册响应缺少内网地址，无法启用 WARP 出站。"
+    warn "可以在别处执行 wgcf register 取得 profile.conf，再用 --warp-profile @文件路径 导入。"
+    return 1
   fi
-  {
-    printf 'WARP_HEALTH_LAST_CHECK_AT=%q\n' "\$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    printf 'WARP_HEALTH_LAST_ACTION=%q\n' "\${action}"
-    printf 'WARP_HEALTH_LAST_REASON=%q\n' "\${reason}"
-  } >> "\${tmp_file}"
-  mv -f "\${tmp_file}" "\${health_state_file}"
-  chmod 0640 "\${health_state_file}" 2>/dev/null || true
-}
 
-append_health_history() {
-  local action="\${1}"
-  local reason="\${2}"
-  local tmp_file=""
-
-  mkdir -p "\$(dirname "\${health_history_file}")"
-  tmp_file="\$(mktemp "\$(dirname "\${health_history_file}")/.health-history.tmp.XXXXXX")"
-  if [[ -f "\${health_history_file}" ]]; then
-    tail -n 49 "\${health_history_file}" > "\${tmp_file}" 2>/dev/null || true
+  WARP_PRIVATE_KEY="${private_key}"
+  WARP_ADDRESS_V4="${address_v4}"
+  WARP_ADDRESS_V6="${address_v6}"
+  WARP_PEER_PUBLIC_KEY="${peer_public_key:-${DEFAULT_WARP_PEER_PUBLIC_KEY}}"
+  WARP_RESERVED="$(warp_reserved_from_client_id "${client_id}")"
+  WARP_MTU="${WARP_MTU:-${DEFAULT_WARP_MTU}}"
+  if [[ -n "${peer_host}" ]]; then
+    peer_port="${DEFAULT_WARP_ENDPOINT##*:}"
+    case "${peer_host}" in
+      *:*) WARP_ENDPOINT="${peer_host}" ;;
+      *) WARP_ENDPOINT="${peer_host}:${peer_port}" ;;
+    esac
+  else
+    WARP_ENDPOINT="${DEFAULT_WARP_ENDPOINT}"
   fi
-  printf '%s | warp | %s | %s\n' "\$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\${action}" "\${reason}" >> "\${tmp_file}"
-  mv -f "\${tmp_file}" "\${health_history_file}"
-  chmod 0640 "\${health_history_file}" 2>/dev/null || true
+
+  log_success "免费 WARP 设备注册成功。"
 }
 
-if ! systemctl is-active --quiet warp-svc; then
-  systemctl restart warp-svc >/dev/null 2>&1 || true
-  sleep 3
-fi
+warp_profile_value() {
+  local profile_text="${1}"
+  local key_name="${2}"
 
-if command -v curl >/dev/null 2>&1; then
-  if ! curl --socks5-hostname "127.0.0.1:\${proxy_port}" -fsSL --max-time 8 https://api.ipify.org >/dev/null 2>&1; then
-    warp-cli --accept-tos mdm refresh >/dev/null 2>&1 || true
-    systemctl restart warp-svc >/dev/null 2>&1 || true
-    write_health_state "restarted" "warp socks5 probe failed"
-    append_health_history "restarted" "warp socks5 probe failed"
-    exit 0
-  fi
-fi
-
-write_health_state "ok" "warp socks5 probe passed"
-append_health_history "ok" "warp socks5 probe passed"
-EOF
-
-  backup_path "${WARP_HEALTH_HELPER}"
-  install -m 0755 "${tmp_file}" "${WARP_HEALTH_HELPER}"
-  rm -f "${tmp_file}"
+  printf '%s\n' "${profile_text}" \
+    | sed -n "s/^[[:space:]]*${key_name}[[:space:]]*=[[:space:]]*//Ip" \
+    | head -n 1 \
+    | tr -d '\r'
 }
 
-write_warp_health_service() {
-  local tmp_file=""
+warp_import_profile() {
+  local profile_text="${1}"
+  local address_line=""
+  local address_entry=""
+  local address_v4=""
+  local address_v6=""
+  local private_key=""
+  local peer_public_key=""
+  local endpoint=""
+  local mtu=""
+  local reserved=""
 
-  tmp_file="$(mktemp)"
-  cat > "${tmp_file}" <<EOF
-[Unit]
-Description=Check and recover Cloudflare WARP proxy health
-After=network-online.target warp-svc.service
-Wants=network-online.target
+  private_key="$(warp_profile_value "${profile_text}" 'PrivateKey')"
+  [[ -n "${private_key}" ]] || {
+    warn "导入的 WARP profile 缺少 PrivateKey。"
+    return 1
+  }
 
-[Service]
-Type=oneshot
-ExecStart=${WARP_HEALTH_HELPER}
-EOF
-
-  backup_path "${WARP_HEALTH_SERVICE_FILE}"
-  install -m 0644 "${tmp_file}" "${WARP_HEALTH_SERVICE_FILE}"
-  rm -f "${tmp_file}"
-}
-
-write_warp_health_timer() {
-  local tmp_file=""
-
-  tmp_file="$(mktemp)"
-  cat > "${tmp_file}" <<EOF
-[Unit]
-Description=Run Cloudflare WARP health recovery periodically
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-Unit=${WARP_HEALTH_SERVICE_NAME}
-
-[Install]
-WantedBy=timers.target
-EOF
-
-  backup_path "${WARP_HEALTH_TIMER_FILE}"
-  install -m 0644 "${tmp_file}" "${WARP_HEALTH_TIMER_FILE}"
-  rm -f "${tmp_file}"
-}
-
-install_warp_health_monitor() {
-  write_warp_health_helper
-  write_warp_health_service
-  write_warp_health_timer
-  systemctl daemon-reload
-  systemctl enable --now "${WARP_HEALTH_TIMER_NAME}"
-}
-
-warp_daemon_not_ready_output() {
-  local output="${1:-}"
-
-  [[ "${output}" == *"Unable to connect to the CloudflareWARP daemon"* ]] \
-    || [[ "${output}" == *"Maybe the daemon is not running?"* ]] \
-    || [[ "${output}" == *"No such file or directory (os error 2)"* ]]
-}
-
-wait_for_warp_service_active() {
-  local max_attempts="${WARP_SERVICE_READY_RETRIES:-15}"
-  local delay_seconds="${WARP_SERVICE_READY_DELAY_SECONDS:-1}"
-  local attempt=1
-
-  while (( attempt <= max_attempts )); do
-    if systemctl is-active --quiet warp-svc; then
-      return 0
-    fi
-
-    if (( attempt == 1 )); then
-      log "等待 warp-svc 守护进程就绪。"
-    fi
-    sleep "${delay_seconds}"
-    attempt=$((attempt + 1))
-  done
-
-  warn "等待 warp-svc 守护进程就绪超时。"
-  return 1
-}
-
-refresh_warp_mdm_with_retry() {
-  local max_attempts="${WARP_MDM_REFRESH_RETRIES:-10}"
-  local delay_seconds="${WARP_MDM_REFRESH_DELAY_SECONDS:-2}"
-  local attempt=1
-  local output_file=""
-  local output=""
-  local status=0
-
-  output_file="$(mktemp)"
-
-  while (( attempt <= max_attempts )); do
-    : > "${output_file}"
-    if warp-cli --accept-tos mdm refresh > "${output_file}" 2>&1; then
-      rm -f "${output_file}"
-      return 0
+  address_line="$(warp_profile_value "${profile_text}" 'Address')"
+  while IFS= read -r address_entry; do
+    [[ -n "${address_entry}" ]] || continue
+    if [[ "${address_entry}" == *:* ]]; then
+      address_v6="${address_entry%%/*}"
     else
-      status=$?
+      address_v4="${address_entry%%/*}"
     fi
+  done < <(printf '%s\n' "${address_line}" | tr ',' '\n' | tr -d ' ')
 
-    output="$(<"${output_file}")"
-    if (( attempt < max_attempts )) && warp_daemon_not_ready_output "${output}"; then
-      if (( attempt == 1 )); then
-        log "等待 Cloudflare WARP daemon 接受托管配置。"
-      fi
-      sleep "${delay_seconds}"
-      attempt=$((attempt + 1))
-      continue
-    fi
+  [[ -n "${address_v4}" || -n "${address_v6}" ]] || {
+    warn "导入的 WARP profile 缺少 Address。"
+    return 1
+  }
 
-    printf '%s\n' "${output}" >&2
-    rm -f "${output_file}"
-    return "${status}"
-  done
+  peer_public_key="$(warp_profile_value "${profile_text}" 'PublicKey')"
+  endpoint="$(warp_profile_value "${profile_text}" 'Endpoint')"
+  mtu="$(warp_profile_value "${profile_text}" 'MTU')"
+  reserved="$(warp_profile_value "${profile_text}" 'Reserved')"
 
-  printf '%s\n' "${output}" >&2
-  rm -f "${output_file}"
-  return "${status}"
+  WARP_PRIVATE_KEY="${private_key}"
+  WARP_ADDRESS_V4="${address_v4}"
+  WARP_ADDRESS_V6="${address_v6}"
+  WARP_PEER_PUBLIC_KEY="${peer_public_key:-${DEFAULT_WARP_PEER_PUBLIC_KEY}}"
+  WARP_ENDPOINT="${endpoint:-${DEFAULT_WARP_ENDPOINT}}"
+  WARP_MTU="${mtu:-${DEFAULT_WARP_MTU}}"
+  if [[ -n "${reserved}" ]]; then
+    WARP_RESERVED="$(normalize_warp_reserved_value "${reserved}")"
+  fi
+
+  log_success "已从 WARP profile 导入 WireGuard 凭据。"
 }
 
-install_warp() {
-  local repo_codename=""
+warp_credentials_ready() {
+  [[ -n "${WARP_PRIVATE_KEY}" ]] || return 1
+  [[ -n "${WARP_ADDRESS_V4}" || -n "${WARP_ADDRESS_V6}" ]] || return 1
+  [[ -n "${WARP_PEER_PUBLIC_KEY:-${DEFAULT_WARP_PEER_PUBLIC_KEY}}" ]] || return 1
+  return 0
+}
+
+ensure_warp_credentials() {
+  local profile_text=""
 
   [[ "${ENABLE_WARP}" == "yes" ]] || return 0
 
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  repo_codename="${VERSION_CODENAME:-}"
-  [[ -n "${repo_codename}" ]] || die "VERSION_CODENAME 为空，无法安装 Cloudflare WARP。"
+  if ! warp_credentials_ready; then
+    if [[ -n "${WARP_PROFILE_SOURCE}" ]]; then
+      profile_text="${WARP_PROFILE_SOURCE}"
+      WARP_PROFILE_SOURCE=""
+      warp_import_profile "${profile_text}" || die "导入 WARP profile 失败。"
+    else
+      if warp_legacy_team_detected; then
+        log "检测到旧版 WARP Team（warp-svc + SOCKS5）配置，正在迁移到 Xray 原生 wireguard 出站。"
+      fi
+      warp_register_free_device \
+        || die "无法取得 WARP WireGuard 凭据；请用 --warp-profile @文件路径 导入 wgcf profile.conf，或用 --disable-warp 关闭 WARP 分流。"
+    fi
+    warp_credentials_ready || die "WARP WireGuard 凭据不完整，无法启用 WARP 出站。"
+  fi
 
-  log "正在安装 Cloudflare WARP 客户端。"
-  install_warp_apt_repo "${repo_codename}" || return 1
-  command -v warp-cli >/dev/null 2>&1 || die "Cloudflare WARP 客户端安装失败：未找到 warp-cli。"
-  service_exists "warp-svc.service" || die "Cloudflare WARP 客户端安装失败：未找到 warp-svc.service。"
-  write_warp_mdm_file || return 1
-  install_warp_health_monitor || return 1
-  systemctl enable --now warp-svc || return 1
-  wait_for_warp_service_active || return 1
-  refresh_warp_mdm_with_retry || return 1
-  systemctl restart warp-svc || return 1
-  wait_for_warp_service_active || return 1
+  ensure_warp_outbound_format
+}
+
+legacy_warp_paths() {
+  printf '%s\n' \
+    "/var/lib/cloudflare-warp/mdm.xml" \
+    "/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg" \
+    "/etc/apt/sources.list.d/cloudflare-client.list" \
+    "/usr/local/sbin/xtun-warp-health.sh" \
+    "/etc/systemd/system/xtun-warp-health.service" \
+    "/etc/systemd/system/xtun-warp-health.timer"
+}
+
+warp_legacy_team_detected() {
+  local path=""
+
+  [[ "$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .protocol')" == "socks" ]] && return 0
+  service_exists "warp-svc.service" && return 0
+  while IFS= read -r path; do
+    [[ -e "${path}" ]] && return 0
+  done < <(legacy_warp_paths)
+
+  return 1
+}
+
+warp_teardown_legacy() {
+  local paths=()
+  local path=""
+  local had_legacy="no"
+
+  if service_exists "xtun-warp-health.timer" || service_exists "warp-svc.service"; then
+    had_legacy="yes"
+  fi
+  stop_and_disable_service_if_present "xtun-warp-health.timer"
+  stop_and_disable_service_if_present "xtun-warp-health.service"
+  stop_and_disable_service_if_present "warp-svc.service"
+
+  while IFS= read -r path; do
+    if [[ -e "${path}" || -L "${path}" ]]; then
+      paths+=("${path}")
+      had_legacy="yes"
+    fi
+  done < <(legacy_warp_paths)
+
+  [[ "${had_legacy}" == "yes" ]] || return 0
+
+  log_step "清理旧版 WARP Team 托管文件。"
+  if [[ "${#paths[@]}" -gt 0 ]]; then
+    remove_managed_paths "${paths[@]}"
+  fi
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  log "已停用 warp-svc；若要彻底移除守护进程请执行：apt-get purge -y cloudflare-warp && rm -rf /var/lib/cloudflare-warp"
 }

@@ -143,42 +143,32 @@ prompt_cert_mode_selection() {
 }
 
 prompt_warp_settings() {
-  resolve_value_source WARP_TEAM_NAME
-  resolve_value_source WARP_CLIENT_ID
-  resolve_value_source WARP_CLIENT_SECRET
-  resolve_value_source WARP_PROXY_PORT
-  prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust 团队名" "${WARP_TEAM_NAME:-}"
-  prompt_with_default WARP_CLIENT_ID "Cloudflare 服务令牌 Client ID" "${WARP_CLIENT_ID:-}"
-  prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
-  prompt_with_default WARP_PROXY_PORT "本地 WARP SOCKS5 端口" "${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+  local use_profile="no"
+
+  resolve_value_source WARP_PRIVATE_KEY
+  resolve_value_source WARP_PROFILE_SOURCE
+  resolve_value_source WARP_RESERVED
+  resolve_value_source WARP_ENDPOINT
+
+  if warp_credentials_ready || [[ -n "${WARP_PROFILE_SOURCE}" ]]; then
+    return
+  fi
+
+  log "WARP 出站由 Xray 内置 wireguard 承载，默认自动注册一台免费 WARP 设备。"
+  prompt_yes_no use_profile "是否改为导入已有的 wgcf profile.conf？ [y/n]" "n"
+  use_profile="$(normalize_yes_no_value "use_profile" "${use_profile}")"
+  [[ "${use_profile}" == "yes" ]] || return
+
+  prompt_multiline_value WARP_PROFILE_SOURCE "粘贴 wgcf profile.conf 内容"
+  [[ -n "${WARP_PROFILE_SOURCE}" ]] || die "未提供 WARP profile 内容。"
 }
 
 default_warp_rules_text() {
   cat <<'EOF'
-geosite:google
-geosite:youtube
 geosite:openai
-geosite:netflix
-geosite:disney
-domain:gemini.google.com
+domain:chatgpt.com
 domain:claude.ai
 domain:anthropic.com
-domain:api.anthropic.com
-domain:console.anthropic.com
-domain:statsig.anthropic.com
-domain:sentry.io
-domain:x.com
-domain:twitter.com
-domain:t.co
-domain:twimg.com
-domain:github.com
-domain:api.github.com
-domain:githubcopilot.com
-domain:copilot-proxy.githubusercontent.com
-domain:origin-tracker.githubusercontent.com
-domain:copilot-telemetry.githubusercontent.com
-domain:collector.github.com
-domain:default.exp-tas.com
 EOF
 }
 
@@ -259,10 +249,8 @@ write_warp_rules_file() {
 resolve_install_input_sources() {
   resolve_value_source CERT_SOURCE_PEM
   resolve_value_source KEY_SOURCE_PEM
-  resolve_value_source WARP_TEAM_NAME
-  resolve_value_source WARP_CLIENT_ID
-  resolve_value_source WARP_CLIENT_SECRET
-  resolve_value_source WARP_PROXY_PORT
+  resolve_value_source WARP_PRIVATE_KEY
+  resolve_value_source WARP_PROFILE_SOURCE
   resolve_value_source CF_API_TOKEN
   resolve_value_source CF_DNS_TOKEN
 }
@@ -438,8 +426,46 @@ ensure_xhttp_xpadding_format() {
   esac
 }
 
-ensure_warp_proxy_port_format() {
-  validate_port_value "WARP 本地 SOCKS5 端口" "${WARP_PROXY_PORT}"
+normalize_warp_reserved_value() {
+  local raw_value="${1:-}"
+  local byte=""
+  local normalized=""
+
+  raw_value="$(printf '%s' "${raw_value}" | tr -d '\r' | tr -d '[]' | tr -d ' ')"
+  [[ -n "${raw_value}" ]] || return 0
+
+  while IFS= read -r byte; do
+    [[ -n "${byte}" ]] || continue
+    [[ "${byte}" =~ ^[0-9]+$ ]] || die "WARP reserved 只能是逗号分隔的 0-255 整数：${1}"
+    (( byte >= 0 && byte <= 255 )) || die "WARP reserved 只能是逗号分隔的 0-255 整数：${1}"
+    normalized+="${byte},"
+  done < <(printf '%s\n' "${raw_value}" | tr ',' '\n')
+
+  printf '%s' "${normalized%,}"
+}
+
+is_valid_wireguard_key() {
+  local key="${1:-}"
+
+  [[ "${key}" =~ ^[A-Za-z0-9+/]{42}[A-Za-z0-9+/=]{2}$ ]]
+}
+
+ensure_warp_outbound_format() {
+  is_valid_wireguard_key "${WARP_PRIVATE_KEY}" \
+    || die "WARP WireGuard 私钥必须是 44 位 base64 字符串。"
+  is_valid_wireguard_key "${WARP_PEER_PUBLIC_KEY:-${DEFAULT_WARP_PEER_PUBLIC_KEY}}" \
+    || die "WARP 对端公钥必须是 44 位 base64 字符串。"
+  [[ -n "${WARP_ADDRESS_V4}" || -n "${WARP_ADDRESS_V6}" ]] \
+    || die "启用 WARP 时必须提供至少一个 WireGuard 内网地址。"
+  if [[ -n "${WARP_ADDRESS_V4}" ]]; then
+    is_ipv4 "${WARP_ADDRESS_V4}" || die "WARP IPv4 内网地址不合法：${WARP_ADDRESS_V4}"
+  fi
+  if [[ -n "${WARP_ADDRESS_V6}" ]]; then
+    [[ "${WARP_ADDRESS_V6}" =~ ^[0-9A-Fa-f:]+$ ]] || die "WARP IPv6 内网地址不合法：${WARP_ADDRESS_V6}"
+  fi
+  validate_hostport_value "WARP Endpoint" "${WARP_ENDPOINT:-${DEFAULT_WARP_ENDPOINT}}"
+  validate_port_value "WARP MTU" "${WARP_MTU:-${DEFAULT_WARP_MTU}}"
+  WARP_RESERVED="$(normalize_warp_reserved_value "${WARP_RESERVED}")"
 }
 
 validate_install_inputs() {
@@ -450,10 +476,7 @@ validate_install_inputs() {
   ensure_xhttp_ech_format
   ensure_xhttp_xpadding_format
 
-  if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
-    [[ -n "${WARP_TEAM_NAME}" ]] || die "启用 WARP 时必须提供团队名。"
-    [[ -n "${WARP_CLIENT_ID}" ]] || die "启用 WARP 时必须提供 Client ID。"
-    [[ -n "${WARP_CLIENT_SECRET}" ]] || die "启用 WARP 时必须提供 Client Secret。"
-    ensure_warp_proxy_port_format
+  if [[ "${ENABLE_WARP:-no}" == "yes" && -n "${WARP_PRIVATE_KEY}" ]]; then
+    ensure_warp_outbound_format
   fi
 }

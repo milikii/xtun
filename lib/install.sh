@@ -27,8 +27,7 @@ managed_package_names() {
     "nginx" \
     "nginx-common" \
     "jq" \
-    "uuid-runtime" \
-    "cloudflare-warp"
+    "uuid-runtime"
 }
 
 xray_archive_name() {
@@ -240,16 +239,6 @@ ensure_managed_permissions() {
       chmod 0640 /var/log/xray/error.log
     fi
   fi
-
-  if [[ -f "${WARP_APT_KEYRING}" ]]; then
-    chown 0:0 "${WARP_APT_KEYRING}"
-    chmod 0644 "${WARP_APT_KEYRING}"
-  fi
-
-  if [[ -f "${WARP_APT_SOURCE_LIST}" ]]; then
-    chown 0:0 "${WARP_APT_SOURCE_LIST}"
-    chmod 0644 "${WARP_APT_SOURCE_LIST}"
-  fi
 }
 
 ensure_xray_user() {
@@ -362,10 +351,13 @@ install_draft_file_text() {
   write_state_kv "CF_DNS_ZONE_ID" "${CF_DNS_ZONE_ID-}"
   write_state_kv "ENABLE_WARP" "${ENABLE_WARP-}"
   write_state_kv "ENABLE_NET_OPT" "${ENABLE_NET_OPT-}"
-  write_state_kv "WARP_TEAM_NAME" "${WARP_TEAM_NAME-}"
-  write_state_kv "WARP_CLIENT_ID" "${WARP_CLIENT_ID-}"
-  write_state_kv "WARP_CLIENT_SECRET" "${WARP_CLIENT_SECRET-}"
-  write_state_kv "WARP_PROXY_PORT" "${WARP_PROXY_PORT-}"
+  write_state_kv "WARP_PRIVATE_KEY" "${WARP_PRIVATE_KEY-}"
+  write_state_kv "WARP_ADDRESS_V4" "${WARP_ADDRESS_V4-}"
+  write_state_kv "WARP_ADDRESS_V6" "${WARP_ADDRESS_V6-}"
+  write_state_kv "WARP_PEER_PUBLIC_KEY" "${WARP_PEER_PUBLIC_KEY-}"
+  write_state_kv "WARP_ENDPOINT" "${WARP_ENDPOINT-}"
+  write_state_kv "WARP_RESERVED" "${WARP_RESERVED-}"
+  write_state_kv "WARP_MTU" "${WARP_MTU-}"
 }
 
 load_install_draft_file() {

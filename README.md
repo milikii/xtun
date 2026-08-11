@@ -5,7 +5,7 @@
 - `VLESS + REALITY + Vision` 直连节点
 - `VLESS + XHTTP + TLS + CDN + VLESS Encryption` 节点
 - `上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality` 上下行分离节点
-- `Cloudflare WARP Team` 选择性出站
+- `Cloudflare WARP` 选择性出站（Xray 内置 `wireguard`，无守护进程）
 - `haproxy + nginx + xray` 的混合前置与 `443` 端口复用架构
 - 可选 `Cloudflare Origin CA` / `acme.sh + Cloudflare DNS` 证书模式
 - 可选 `BBR + fq + RPS/XPS` 网络优化
@@ -64,7 +64,7 @@ xtun.sh
 适合：
 
 - 你想一台 VPS 同时提供 `Reality`、`xhttp CDN`、`xhttp split`
-- 你需要 `WARP Team` 作为一部分出站
+- 你需要 `WARP` 作为一部分出站（默认只给 AI 站点用）
 - 你希望后续直接改：
   - `Reality 域名/SNI`
   - `XHTTP 路径`
@@ -92,20 +92,25 @@ xtun.sh
     - `cdn.example.com` 用于 CDN
     - `reality.example.com` 用于 Reality
 
-如果你要启用 WARP Team，还需要：
+如果你要启用 WARP，默认不需要准备任何东西：脚本会自己生成 WireGuard 密钥对，
+并向 Cloudflare 注册一台免费 WARP 设备。
 
-- Cloudflare Zero Trust 团队名
-- Service Token 的 `Client ID`
-- Service Token 的 `Client Secret`
+只有在下面两种情况下才需要你自己提供凭据：
+
+- 机房 IP 被 Cloudflare 拒绝注册（常见）
+- 你已经有 WARP+ / Zero Trust 的 `wgcf profile.conf` 想直接复用
+
+这两种情况都用同一条路径导入：`--warp-profile @/root/profile.conf`。
 
 敏感参数建议不要直接写在 shell history 里。当前脚本支持：
 
-- 直接用环境变量，例如：`WARP_CLIENT_SECRET=xxx bash xtun.sh install ...`
-- 用 `@文件路径` 读取，例如：`--warp-client-secret @/root/secret.txt`
+- 直接用环境变量，例如：`WARP_PRIVATE_KEY=xxx bash xtun.sh install ...`
+- 用 `@文件路径` 读取，例如：`--warp-private-key @/root/warp-key.txt`
 
 从 `0.4.9` 开始，下面这些敏感参数不再接受“命令行直接明文传值”：
 
-- `--warp-client-secret`
+- `--warp-private-key`
+- `--warp-profile`
 - `--cf-dns-token`
 - `--reality-private-key`
 - `--cert-pem`
@@ -164,16 +169,14 @@ bash xtun.sh install --non-interactive \
   --cert-mode existing \
   --cert-file /etc/ssl/cloudflare/cert.pem \
   --key-file /etc/ssl/cloudflare/key.pem \
-  --enable-warp \
-  --warp-team your-team \
-  --warp-client-id xxxxxxxxx.access \
-  --warp-client-secret @/root/warp-client-secret.txt
+  --enable-warp
 ```
 
-等价的更安全写法：
+`--enable-warp` 之后不需要再传任何 WARP 参数：写 `config.json` 时会自动注册免费 WARP 设备。
+
+如果机房 IP 注册被拒，或者你想复用已有的 `wgcf profile.conf`：
 
 ```bash
-export WARP_CLIENT_SECRET=xxxxxxxxx
 bash xtun.sh install --non-interactive \
   --server-ip 203.0.113.10 \
   --node-label-prefix HKG \
@@ -184,8 +187,7 @@ bash xtun.sh install --non-interactive \
   --cert-file /etc/ssl/cloudflare/cert.pem \
   --key-file /etc/ssl/cloudflare/key.pem \
   --enable-warp \
-  --warp-team your-team \
-  --warp-client-id xxxxxxxxx.access
+  --warp-profile @/root/profile.conf
 ```
 
 如果你明确不需要 WARP：
@@ -221,7 +223,7 @@ bash xtun.sh install --non-interactive \
 - 状态文件带 `STATE_VERSION`，脚本读取旧版本状态文件时会给出提示
 - 交互安装失败后会保留一份安装 draft，方便再次进入时继续填写
 - 安装前会做预检：443 端口占用、CDN 域名解析、Cloudflare Token 在线校验（在相关模式下）
-- 启用 WARP 时会额外安装一个健康检查 timer，定期验证本地 WARP SOCKS5 是否可用
+- 启用 WARP 时不安装任何守护进程或额外 timer，出站完全由 `xray` 进程内的 `wireguard` 承载
 - 默认保留最近 5 次备份，超出的旧备份会自动清理
 - 使用文件锁避免两个终端同时运行脚本互相踩配置
 
@@ -278,56 +280,78 @@ xpadding 默认使用：
 Header=Referer, key=x_padding, placement=queryInHeader, method=tokenish
 ```
 
-## WARP Team 教程
+## WARP 出站教程（WireGuard）
 
-### WARP Team 在这套脚本里做什么
+### WARP 在这套脚本里做什么
 
 这套脚本里的 WARP 不是“整机全局代理”，而是：
 
-- 让 `Xray` 的一部分目标域名走 `Cloudflare WARP Team`
+- 让 `Xray` 的一部分目标域名走 `Cloudflare WARP`
 - 其它流量仍按原规则直连
 
-默认会走 WARP 的目标包括：
+出站由 `Xray` 内置的 `wireguard` 协议直接承载，写进 `config.json` 的 `WARP` 出站里。
+不装 `cloudflare-warp` 包、不跑 `warp-svc` 守护进程、不加 APT 源、不占本地端口、不写机密文件。
 
-- `geosite:google`
-- `geosite:youtube`
+默认会走 WARP 的目标只有 4 条 AI 域名：
+
 - `geosite:openai`
-- `geosite:netflix`
-- `geosite:disney`
-- `gemini.google.com`
+- `chatgpt.com`
 - `claude.ai`
-- `anthropic.com` 及常用 API 域名
-- `x.com / twitter.com / t.co / twimg.com`
-- `github.com` 和 Copilot 相关域名
+- `anthropic.com`
 
-Telegram 默认直连。
+其余流量（含 Google、YouTube、GitHub、Telegram、Netflix）默认全部直连。
+需要更多就用 `xtun change-warp-rules --add-domain` 自己加。
+
+> 默认规则里刻意不放 `geosite:netflix`：`fast.com` 会被它匹配进去，导致测速走 WARP，看起来像“线路变慢了”。
 
 ### 需要准备什么
 
-需要 3 个值：
+默认什么都不用准备。`--enable-warp` 之后，脚本在写 `config.json` 时会：
 
-- `团队名`
-- `Client ID`
-- `Client Secret`
+1. 用 `openssl genpkey -algorithm X25519` 生成一对 WireGuard 密钥
+2. 用公钥向 `https://api.cloudflareclient.com/v0a2158/reg` 注册一台免费 WARP 设备
+3. 从响应里取内网地址、对端公钥、endpoint 与 `client_id`（解码成 `reserved` 三字节）
+
+如果注册失败（机房 IP 常被拒），脚本会明确提示你改用 profile 导入，而不是静默降级。
+
+此时在任意能注册的机器上跑 [`wgcf`](https://github.com/ViRb3/wgcf)：
+
+```bash
+wgcf register
+wgcf generate     # 产出 wgcf-profile.conf
+```
+
+把 `wgcf-profile.conf` 拷到 VPS，然后：
+
+```bash
+xtun change-warp --enable-warp --warp-profile @/root/wgcf-profile.conf
+```
+
+`profile.conf` 里的 `PrivateKey` / `Address` / `PublicKey` / `Endpoint` / `MTU` 会被自动读走。
+wgcf 的标准 profile **不含** `Reserved` 行，留空即可；如果你手里那份带了，或者你知道自己需要，可以用 `--warp-reserved '[1, 2, 3]'` 手工补。
 
 ### 安装时怎么填
 
-交互安装时会问：
+交互安装时只会问：
 
 - 是否启用选择性 WARP 出站
-- Cloudflare Zero Trust 团队名
-- Cloudflare 服务令牌 Client ID
-- Cloudflare 服务令牌 Client Secret
-- 本地 WARP SOCKS5 端口
+- 凭据来源：自动注册免费 WARP（默认），或导入 `wgcf profile.conf`
 
-非交互安装时直接传：
+非交互安装时可以传的参数：
 
-```bash
---warp-team your-team
---warp-client-id xxxxx.access
---warp-client-secret xxxxx
---warp-proxy-port 40000
-```
+| 参数 | 说明 |
+| --- | --- |
+| `--enable-warp` / `--disable-warp` | 开关选择性 WARP 出站 |
+| `--warp-profile @文件` | 导入 `wgcf profile.conf`（只接受 `@文件` 或 `WARP_PROFILE` 环境变量） |
+| `--warp-private-key @文件` | 直接给 WireGuard 私钥（只接受 `@文件` 或 `WARP_PRIVATE_KEY` 环境变量） |
+| `--warp-address-v4` | WireGuard 内网 IPv4，例如 `172.16.0.2` |
+| `--warp-address-v6` | WireGuard 内网 IPv6 |
+| `--warp-peer-public-key` | 对端公钥，默认 Cloudflare 公用 WARP 公钥 |
+| `--warp-endpoint` | 对端 endpoint，默认 `engage.cloudflareclient.com:2408` |
+| `--warp-reserved` | `reserved` 三字节，接受 `1,2,3` 或 `[1, 2, 3]` |
+| `--warp-mtu` | MTU，默认 `1420` |
+
+> `--warp-private-key` 与 `--warp-profile` 都禁止命令行明文传值，只能走 `@文件路径` 或环境变量。
 
 ### 装好后如何验证
 
@@ -337,16 +361,35 @@ Telegram 默认直连。
 xtun status
 ```
 
-再看原始服务状态：
+`WARP 出站` 一行会显示 `wireguard · 内网地址 · endpoint · reserved`。
+
+再看诊断：
 
 ```bash
-systemctl status --no-pager warp-svc
+xtun diagnose
 ```
 
-如果要查看当前 MDM 配置：
+会检查 `config.json` 里是否真有 `wireguard` 出站、私钥是否存在、endpoint 能否解析。
+
+想确认出口 IP 真的是 Cloudflare 的（会临时起一个第二 `xray` 进程，跑完自动退出）：
 
 ```bash
-sed -n '1,200p' /var/lib/cloudflare-warp/mdm.xml
+xtun diagnose --warp-probe
+```
+
+直接看生成的出站：
+
+```bash
+jq '.outbounds[] | select(.tag == "WARP")' /usr/local/etc/xray/config.json
+```
+
+**最有效的验收始终是客户端实测**：连上节点后打开 `chatgpt.com` / `claude.ai`。
+
+出问题时看 `xray` 自己的日志，不再有第二个守护进程需要排查：
+
+```bash
+journalctl -u xray -n 100 --no-pager
+tail -n 100 /var/log/xray/error.log
 ```
 
 ### 以后如何开关 WARP
@@ -357,29 +400,41 @@ sed -n '1,200p' /var/lib/cloudflare-warp/mdm.xml
 xtun change-warp --disable-warp
 ```
 
-重新启用：
+重新启用（凭据已在 `node-meta.env` 里就直接复用，不会重复注册）：
 
 ```bash
 xtun change-warp --enable-warp
 ```
 
-如果要重新指定 WARP Team 参数：
+换一套凭据：
 
 ```bash
-xtun change-warp --enable-warp \
-  --warp-team your-team \
-  --warp-client-id xxxxx.access \
-  --warp-client-secret xxxxx \
-  --warp-proxy-port 40000
+xtun change-warp --enable-warp --warp-profile @/root/wgcf-profile.conf
 ```
 
-启用后还会自动安装：
+私钥保存在 `/usr/local/etc/xray/node-meta.env`（`chmod 0600`），
+不会出现在 `xtun-output.md`、订阅文件或任何面板输出里。
 
-- `/usr/local/sbin/xtun-warp-health.sh`
-- `xtun-warp-health.service`
-- `xtun-warp-health.timer`
+### 从旧版 WARP Team 迁移
 
-它会定期探测本地 WARP SOCKS5 是否还能正常获取出口 IP；如果失败，会自动执行 `mdm refresh + restart warp-svc`。
+如果这台机器是用 `0.4.x` 的 `WARP Team`（`warp-svc` + `mdm.xml` + 本地 SOCKS5）装起来的：
+
+```bash
+xtun change-warp --enable-warp
+```
+
+脚本会识别出旧配置，切换到 `wireguard` 出站，并顺手停用禁用 `warp-svc.service`
+与 `xtun-warp-health.timer`、删掉 `mdm.xml` / APT 源 / keyring / health 三件套。
+
+确认客户端实测通了之后，再自己收尾删包（脚本刻意不自动 purge）：
+
+```bash
+apt-get purge -y cloudflare-warp
+rm -rf /var/lib/cloudflare-warp
+```
+
+> 迁移的代价：`wireguard` 出站用的是公用免费 WARP，拿不到 Zero Trust 的专属出口 IP。
+> 换来的是少一个守护进程、少一个 timer、少一个监听端口、少三个机密。
 
 ### 维护 WARP 分流规则
 
@@ -401,7 +456,7 @@ xtun change-warp-rules --add-domain chat.openai.com
 xtun change-warp-rules --del-domain github.com
 ```
 
-恢复到脚本默认规则集合：
+恢复到脚本默认规则集合（就是上面那 4 条）：
 
 ```bash
 xtun change-warp-rules --reset-defaults
@@ -542,13 +597,12 @@ xtun status
 
 - `443 / 2443 / 8001 / 8443` 监听情况
 - 当前证书到期时间
-- `WARP` 出口 IP 探测结果
+- `WARP 出站` 摘要：`wireguard · 内网地址 · endpoint · reserved`
 - 当前 `WARP` 规则数量
 - 最近一次备份目录
-- `xtun-warp-health.timer` 的运行状态
-- 最近一次核心 / WARP 自恢复结果
+- 最近一次核心自恢复结果
 - 最近一条自恢复历史记录
-- 近 1 小时 / 24 小时的核心与 WARP 自恢复次数
+- 近 1 小时 / 24 小时的核心自恢复次数
 - 一个简化的稳定性信号：`稳定 / 观察中 / 高风险`
 
 ### 查看原始 systemd 输出
@@ -565,18 +619,24 @@ xtun diagnose
 
 这个命令会集中输出：
 
-- `xray / haproxy / nginx / warp-svc` 当前状态
+- `xray / haproxy / nginx` 当前状态
 - 关键监听端口 `443 / 2443 / 8001 / 8443`
 - `Xray / nginx / haproxy` 配置自检结果
 - 本地 `TLS` 握手探测结果
-- 最近一次核心 / WARP 自恢复信息
+- `WARP 出站` 摘要、规则数量、endpoint 是否可解析
+- 最近一次核心自恢复信息
 - 最近一条自恢复历史记录
 - 近 1 小时 / 24 小时恢复次数
 - 稳定性信号
 
+加上 `--warp-probe` 还会实测一次 WARP 出口 IP：临时起一个只带
+`socks inbound + wireguard outbound` 的第二 `xray` 进程，`curl` 一次后立刻退出。
+默认不跑，因为它要多花几秒。
+
 并且：
 
 - 如果关键服务、关键监听端口、配置自检或本地 TLS 探测失败，`diagnose` 会以非 0 退出
+- 启用 WARP 但 `config.json` 缺 `wireguard` 出站、私钥缺失或 endpoint 无法解析，同样以非 0 退出
 - 可以直接拿它做脚本化巡检或外层监控
 - 失败时会额外输出按 `服务 / 端口 / 配置 / 连接 / WARP` 分类的摘要，减少排障噪音
 
@@ -819,11 +879,14 @@ xtun uninstall --purge --yes
   - `nginx`
   - `jq`
   - `uuid-runtime`
-  - `cloudflare-warp`
 - 还会额外清理：
   - `/root/.acme.sh`
-  - `/var/lib/cloudflare-warp`
   - `/var/log/xtun`
+  - `/var/lib/cloudflare-warp` 与旧版 WARP Team 残留（APT 源、keyring、health timer）
+
+> 新版 WARP 出站不装任何软件包，所以 `--purge` 里也不再有 `cloudflare-warp`。
+> 如果这台机器有 `0.4.x` 留下的 `cloudflare-warp` 包，卸载后自己执行一次
+> `apt-get purge -y cloudflare-warp`。
 
 ### 操作日志
 

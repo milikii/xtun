@@ -111,21 +111,17 @@ health_history_count_text() {
 
 stability_signal_text() {
   local core_1h=""
-  local warp_1h=""
   local core_24h=""
-  local warp_24h=""
 
   core_1h="$(health_history_count_text 1 core)"
-  warp_1h="$(health_history_count_text 1 warp)"
   core_24h="$(health_history_count_text 24 core)"
-  warp_24h="$(health_history_count_text 24 warp)"
 
-  if (( core_1h >= 2 || warp_1h >= 2 )); then
+  if (( core_1h >= 2 )); then
     style_text "${C_RED}" "高风险"
     return
   fi
 
-  if (( core_24h >= 3 || warp_24h >= 3 )); then
+  if (( core_24h >= 3 )); then
     style_text "${C_YELLOW}" "观察中"
     return
   fi
@@ -137,13 +133,11 @@ show_dashboard() {
   local xray_state=""
   local haproxy_state=""
   local nginx_state=""
-  local warp_state=""
   local core_health_state=""
   local net_state=""
   local xray_enabled=""
   local haproxy_enabled=""
   local nginx_enabled=""
-  local warp_enabled=""
   local core_health_enabled=""
   local net_enabled=""
   local version_line=""
@@ -153,19 +147,17 @@ show_dashboard() {
   xray_state="$(service_active_state 'xray.service')"
   haproxy_state="$(service_active_state 'haproxy.service')"
   nginx_state="$(service_active_state 'nginx.service')"
-  warp_state="$(service_active_state 'warp-svc.service')"
   core_health_state="$(service_active_state "${CORE_HEALTH_TIMER_NAME}")"
   net_state="$(service_active_state "${NET_SERVICE_NAME}")"
   xray_enabled="$(service_enable_state 'xray.service')"
   haproxy_enabled="$(service_enable_state 'haproxy.service')"
   nginx_enabled="$(service_enable_state 'nginx.service')"
-  warp_enabled="$(service_enable_state 'warp-svc.service')"
   core_health_enabled="$(service_enable_state "${CORE_HEALTH_TIMER_NAME}")"
   net_enabled="$(service_enable_state "${NET_SERVICE_NAME}")"
   version_line="$(xray_version_line)"
 
   divider
-  printf '%b%s%b\n' "${C_BOLD}${C_CYAN}" "Xray WARP 管理面板" "${C_RESET}"
+  printf '%b%s%b\n' "${C_BOLD}${C_CYAN}" "Xray 管理面板" "${C_RESET}"
   divider
   panel_row "脚本版本" "${SCRIPT_VERSION}"
   panel_row "更新时间" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
@@ -191,13 +183,12 @@ show_dashboard() {
   panel_row "xray" "$(service_badge "${xray_state}") ($(service_install_state_label "${xray_enabled}"))"
   panel_row "haproxy" "$(service_badge "${haproxy_state}") ($(service_install_state_label "${haproxy_enabled}"))"
   panel_row "nginx" "$(service_badge "${nginx_state}") ($(service_install_state_label "${nginx_enabled}"))"
-  panel_row "warp-svc" "$(service_badge "${warp_state}") ($(service_install_state_label "${warp_enabled}"))"
   panel_row "核心巡检" "$(service_badge "${core_health_state}") ($(service_install_state_label "${core_health_enabled}"))"
   panel_row "网络优化" "$(service_badge "${net_state}") ($(service_install_state_label "${net_enabled}"))"
 
   divider
   printf '%b%s%b\n' "${C_BOLD}" "功能开关" "${C_RESET}"
-  panel_row "WARP 分流" "$(bool_badge "${ENABLE_WARP:-no}")  端口=${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+  panel_row "WARP 分流" "$(bool_badge "${ENABLE_WARP:-no}")  模式=wireguard"
   panel_row "WARP 规则数" "$(warp_rule_count_text)"
   panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
   panel_row "VLESS Encryption" "$(bool_badge "${XHTTP_VLESS_ENCRYPTION_ENABLED:-${DEFAULT_XHTTP_VLESS_ENCRYPTION_ENABLED}}")"
@@ -218,13 +209,12 @@ show_dashboard() {
   panel_row "HAProxy 自检" "$(haproxy_config_check_text)"
   panel_row "本地 TLS 探测" "$(local_tls_probe_text)"
   panel_row "证书到期" "$(cert_expiry_text)"
-  panel_row "WARP 出口 IP" "$(warp_exit_ip_text)"
+  panel_row "WARP 出站" "$(warp_outbound_text)"
   panel_row "最近备份" "$(latest_backup_label)"
   panel_row "核心自恢复" "$(health_event_text CORE_HEALTH)"
-  panel_row "WARP 自恢复" "$(health_event_text WARP_HEALTH)"
   panel_row "最近恢复记录" "$(latest_health_history_text)"
-  panel_row "近1小时恢复" "core=$(health_history_count_text 1 core) warp=$(health_history_count_text 1 warp)"
-  panel_row "近24小时恢复" "core=$(health_history_count_text 24 core) warp=$(health_history_count_text 24 warp)"
+  panel_row "近1小时恢复" "core=$(health_history_count_text 1 core)"
+  panel_row "近24小时恢复" "core=$(health_history_count_text 24 core)"
   panel_row "稳定性信号" "$(stability_signal_text)"
   divider
 }

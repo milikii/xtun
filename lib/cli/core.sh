@@ -213,8 +213,6 @@ xray_managed_service_units() {
     "haproxy.service" \
     "nginx.service" \
     "${CORE_HEALTH_TIMER_NAME}" \
-    "warp-svc.service" \
-    "${WARP_HEALTH_TIMER_NAME}" \
     "${NET_SERVICE_NAME}"
 }
 
@@ -224,12 +222,6 @@ restart_service_units() {
     "haproxy.service" \
     "nginx.service" \
     "${CORE_HEALTH_TIMER_NAME}"
-
-  if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
-    printf '%s\n' \
-      "warp-svc.service" \
-      "${WARP_HEALTH_TIMER_NAME}"
-  fi
 
   if [[ "${ENABLE_NET_OPT:-no}" == "yes" ]]; then
     printf '%s\n' "${NET_SERVICE_NAME}"
@@ -280,13 +272,12 @@ status_cmd() {
 
 diagnose_cmd() {
   local failures=0
+  local run_warp_probe=0
   local xray_state=""
   local haproxy_state=""
   local nginx_state=""
-  local warp_state=""
   local core_health_state=""
-  local warp_health_state=""
-  local warp_exit_ip=""
+  local warp_probe_result=""
   local -a service_failures=()
   local -a port_failures=()
   local -a config_failures=()
@@ -295,6 +286,9 @@ diagnose_cmd() {
 
   while [[ $# -gt 0 ]]; do
     case "${1}" in
+      --warp-probe)
+        run_warp_probe=1
+        ;;
       --help|-h|help)
         usage
         exit 0
@@ -311,19 +305,14 @@ diagnose_cmd() {
   xray_state="$(service_active_state 'xray.service')"
   haproxy_state="$(service_active_state 'haproxy.service')"
   nginx_state="$(service_active_state 'nginx.service')"
-  warp_state="$(service_active_state 'warp-svc.service')"
   core_health_state="$(service_active_state "${CORE_HEALTH_TIMER_NAME}")"
-  warp_health_state="$(service_active_state "${WARP_HEALTH_TIMER_NAME}")"
-  warp_exit_ip="$(warp_exit_ip_text)"
 
-  printf '%s\n' "Xray WARP 诊断"
+  printf '%s\n' "Xray 诊断"
   printf '%s\n' "脚本版本: ${SCRIPT_VERSION}"
   printf '%s\n' "xray: ${xray_state}"
   printf '%s\n' "haproxy: ${haproxy_state}"
   printf '%s\n' "nginx: ${nginx_state}"
-  printf '%s\n' "warp-svc: ${warp_state}"
   printf '%s\n' "核心巡检: ${core_health_state}"
-  printf '%s\n' "WARP 巡检: ${warp_health_state}"
   printf '%s\n' "监听 443: $(listening_port_text 443)"
   printf '%s\n' "监听 2443: $(listening_port_text 2443)"
   printf '%s\n' "监听 8001: $(listening_port_text 8001)"
@@ -333,12 +322,17 @@ diagnose_cmd() {
   printf '%s\n' "HAProxy 配置: $(haproxy_config_check_text)"
   printf '%s\n' "本地 TLS 探测: $(local_tls_probe_text)"
   printf '%s\n' "证书到期: $(cert_expiry_text)"
-  printf '%s\n' "WARP 出口 IP: ${warp_exit_ip}"
+  printf '%s\n' "WARP 出站: $(warp_outbound_text)"
+  printf '%s\n' "WARP 规则数: $(warp_rule_count_text)"
+  printf '%s\n' "WARP Endpoint 解析: $(warp_endpoint_resolve_text)"
+  if [[ "${run_warp_probe}" -eq 1 ]]; then
+    warp_probe_result="$(warp_egress_probe_text)"
+    printf '%s\n' "WARP 出口 IP: ${warp_probe_result}"
+  fi
   printf '%s\n' "核心自恢复: $(health_event_text CORE_HEALTH)"
-  printf '%s\n' "WARP 自恢复: $(health_event_text WARP_HEALTH)"
   printf '%s\n' "最近恢复记录: $(latest_health_history_text)"
-  printf '%s\n' "近1小时恢复: core=$(health_history_count_text 1 core) warp=$(health_history_count_text 1 warp)"
-  printf '%s\n' "近24小时恢复: core=$(health_history_count_text 24 core) warp=$(health_history_count_text 24 warp)"
+  printf '%s\n' "近1小时恢复: core=$(health_history_count_text 1 core)"
+  printf '%s\n' "近24小时恢复: core=$(health_history_count_text 24 core)"
   printf '%s\n' "稳定性信号: $(stability_signal_text)"
 
   [[ "${xray_state}" == "active" ]] || service_failures+=("xray 未运行")
@@ -354,9 +348,12 @@ diagnose_cmd() {
   [[ "$(local_tls_probe_state)" == "ok" ]] || tls_failures+=("本地 TLS 探测失败")
 
   if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
-    [[ "${warp_state}" == "active" ]] || warp_failures+=("warp-svc 未运行")
-    [[ "${warp_health_state}" == "active" ]] || warp_failures+=("WARP 巡检未运行")
-    [[ "${warp_exit_ip}" != 未探测* ]] || warp_failures+=("WARP 出口 IP 未探测成功")
+    config_has_warp_outbound || warp_failures+=("config.json 缺少 WARP 出站")
+    [[ -n "${WARP_PRIVATE_KEY:-}" ]] || warp_failures+=("WARP WireGuard 私钥缺失")
+    [[ "$(warp_endpoint_resolve_state)" != "fail" ]] || warp_failures+=("WARP Endpoint 无法解析")
+    if [[ "${run_warp_probe}" -eq 1 ]]; then
+      [[ "${warp_probe_result}" != 未探测* ]] || warp_failures+=("WARP 出口 IP 未探测成功")
+    fi
   fi
 
   failures=$(( ${#service_failures[@]} + ${#port_failures[@]} + ${#config_failures[@]} + ${#tls_failures[@]} + ${#warp_failures[@]} ))
@@ -449,6 +446,7 @@ uninstall_cmd() {
   while IFS= read -r unit_name; do
     stop_and_disable_service_if_present "${unit_name}"
   done < <(xray_managed_service_units)
+  warp_teardown_legacy
 
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" && -x "${ACME_SH_BIN}" && -n "${XHTTP_DOMAIN:-}" ]]; then
     "${ACME_SH_BIN}" --remove -d "${XHTTP_DOMAIN}" --ecc >/dev/null 2>&1 || true
@@ -472,12 +470,6 @@ uninstall_cmd() {
     "${NGINX_CONFIG_FILE}" \
     "${FALLBACK_SITE_DIR}" \
     "${SSL_DIR}" \
-    "${WARP_APT_KEYRING}" \
-    "${WARP_APT_SOURCE_LIST}" \
-    "${WARP_MDM_FILE}" \
-    "${WARP_HEALTH_HELPER}" \
-    "${WARP_HEALTH_SERVICE_FILE}" \
-    "${WARP_HEALTH_TIMER_FILE}" \
     "${NET_SYSCTL_CONF}" \
     "${NET_HELPER_PATH}" \
     "${NET_SERVICE_FILE}" \

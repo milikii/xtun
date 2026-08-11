@@ -4,6 +4,9 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+TEST_WARP_PRIVATE_KEY="eHR1bi10ZXN0LXdhcnAtcHJpdmF0ZS1rZXktMzJieXQ="
+TEST_WARP_PEER_PUBLIC_KEY="eHR1bi10ZXN0LXdhcnAtcGVlci1wdWJsaWMta2V5LTM="
+
 load_functions() {
   # ------------------------------
   # 只加载函数定义，不执行 main
@@ -54,6 +57,28 @@ reset_feature_defaults() {
 stub_side_effects() {
   ensure_managed_permissions() { :; }
   backup_path() { :; }
+}
+
+set_test_warp_credentials() {
+  WARP_PRIVATE_KEY="${TEST_WARP_PRIVATE_KEY}"
+  WARP_ADDRESS_V4="172.16.0.2"
+  WARP_ADDRESS_V6="2606:4700:110:8a1b:cafe:1:2:3"
+  WARP_PEER_PUBLIC_KEY="${TEST_WARP_PEER_PUBLIC_KEY}"
+  WARP_ENDPOINT="${DEFAULT_WARP_ENDPOINT}"
+  WARP_RESERVED="3,4,5"
+  WARP_MTU="${DEFAULT_WARP_MTU}"
+  WARP_PROFILE_SOURCE=""
+}
+
+clear_test_warp_credentials() {
+  WARP_PRIVATE_KEY=""
+  WARP_ADDRESS_V4=""
+  WARP_ADDRESS_V6=""
+  WARP_PEER_PUBLIC_KEY="${DEFAULT_WARP_PEER_PUBLIC_KEY}"
+  WARP_ENDPOINT="${DEFAULT_WARP_ENDPOINT}"
+  WARP_RESERVED=""
+  WARP_MTU="${DEFAULT_WARP_MTU}"
+  WARP_PROFILE_SOURCE=""
 }
 
 capture_function_definition() {

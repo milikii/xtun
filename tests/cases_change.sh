@@ -6,7 +6,7 @@ run_change_helper_case() {
   local -A cert_request=()
 
   workdir="$(mktemp -d)"
-  printf 'client-secret\n' > "${workdir}/warp-secret.txt"
+  printf '%s\n' "${TEST_WARP_PRIVATE_KEY}" > "${workdir}/warp-private-key.txt"
   original_prompt="$(declare -f prompt_with_default)"
   NON_INTERACTIVE=0
   init_change_uuid_request uuid_request
@@ -24,18 +24,23 @@ run_change_helper_case() {
   parse_change_warp_args warp_request \
     --non-interactive \
     --enable-warp \
-    --warp-team team-name \
-    --warp-client-id client-id \
-    --warp-client-secret "@${workdir}/warp-secret.txt" \
-    --warp-proxy-port 41000
-  WARP_CLIENT_SECRET="${warp_request[warp_client_secret]}"
+    --warp-private-key "@${workdir}/warp-private-key.txt" \
+    --warp-address-v4 172.16.0.2 \
+    --warp-address-v6 2606:4700:110:8a1b:cafe:1:2:3 \
+    --warp-reserved '[1, 2, 3]' \
+    --warp-endpoint engage.cloudflareclient.com:2408 \
+    --warp-mtu 1280
+  WARP_PRIVATE_KEY="${warp_request[warp_private_key]}"
   resolve_install_input_sources
   [[ "${NON_INTERACTIVE}" -eq 1 ]]
   [[ "${warp_request[target_mode]}" == "enable" ]]
-  [[ "${warp_request[warp_team_name]}" == "team-name" ]]
-  [[ "${warp_request[warp_client_id]}" == "client-id" ]]
-  [[ "${WARP_CLIENT_SECRET}" == "client-secret" ]]
-  [[ "${warp_request[warp_proxy_port]}" == "41000" ]]
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  [[ "${warp_request[warp_address_v4]}" == "172.16.0.2" ]]
+  [[ "${warp_request[warp_address_v6]}" == "2606:4700:110:8a1b:cafe:1:2:3" ]]
+  [[ "${warp_request[warp_reserved]}" == "[1, 2, 3]" ]]
+  [[ "${warp_request[warp_endpoint]}" == "engage.cloudflareclient.com:2408" ]]
+  [[ "${warp_request[warp_mtu]}" == "1280" ]]
+  [[ "$(normalize_warp_reserved_value "${warp_request[warp_reserved]}")" == "1,2,3" ]]
 
   NON_INTERACTIVE=0
   init_change_cert_mode_request cert_request
@@ -122,10 +127,6 @@ run_change_command_case() {
     CERT_MODE="existing"
     XHTTP_DOMAIN="cdn.old.example.com"
     ENABLE_WARP="no"
-    WARP_TEAM_NAME="old-team"
-    WARP_CLIENT_ID="old-id"
-    WARP_CLIENT_SECRET="old-secret"
-    WARP_PROXY_PORT="40000"
     WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
   }
   ensure_xray_user() { :; }
@@ -200,10 +201,6 @@ run_change_command_case() {
     CERT_MODE="existing"
     XHTTP_DOMAIN="cdn.old.example.com"
     ENABLE_WARP="no"
-    WARP_TEAM_NAME="old-team"
-    WARP_CLIENT_ID="old-id"
-    WARP_CLIENT_SECRET="old-secret"
-    WARP_PROXY_PORT="40000"
     WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
   }
 
@@ -237,7 +234,7 @@ run_change_warp_enable_rollback_case() {
   begin_managed_change() { :; }
   apply_warp_change_request() { :; }
   prompt_warp_settings() { :; }
-  install_warp() { :; }
+  warp_teardown_legacy() { :; }
   apply_managed_runtime_update() {
     return 1
   }
@@ -271,7 +268,6 @@ run_renew_cert_command_case() {
     REALITY_SNI="old.example.com"
     REALITY_TARGET="www.harvard.edu:443"
     XHTTP_PATH="/old"
-    WARP_PROXY_PORT="40000"
   }
   ensure_xray_user() { :; }
   apply_managed_update() {
@@ -357,11 +353,12 @@ run_diagnose_command_case() {
   local probe_file=""
 
   probe_file="$(mktemp)"
+  printf '0' > "${probe_file}"
 
   load_dashboard_context() { :; }
   service_active_state() {
     case "${1}" in
-      xray.service|haproxy.service|nginx.service|warp-svc.service|${CORE_HEALTH_TIMER_NAME}|${WARP_HEALTH_TIMER_NAME})
+      xray.service|haproxy.service|nginx.service|${CORE_HEALTH_TIMER_NAME})
         printf 'active'
         ;;
       *)
@@ -380,7 +377,11 @@ run_diagnose_command_case() {
   haproxy_config_check_text() { printf '通过'; }
   local_tls_probe_text() { printf '通过'; }
   cert_expiry_text() { printf 'Jun  1 00:00:00 2026 GMT'; }
-  warp_exit_ip_text() {
+  warp_endpoint_resolve_state() { printf 'ok'; }
+  warp_endpoint_resolve_text() { printf '通过'; }
+  warp_rule_count_text() { printf '4'; }
+  config_has_warp_outbound() { return 0; }
+  warp_egress_probe_text() {
     local count=0
     count="$(cat "${probe_file}" 2>/dev/null || printf '0')"
     printf '%s' "$((count + 1))" > "${probe_file}"
@@ -389,10 +390,22 @@ run_diagnose_command_case() {
   health_event_text() { printf 'ok'; }
   latest_health_history_text() { printf 'latest history'; }
 
+  ENABLE_WARP="yes"
+  set_test_warp_credentials
+
   output="$(diagnose_cmd)"
-  printf '%s' "${output}" | grep -q 'Xray WARP 诊断'
+  printf '%s' "${output}" | grep -q 'Xray 诊断'
   printf '%s' "${output}" | grep -q '监听 443: 运行中'
+  printf '%s' "${output}" | grep -q 'WARP 出站: wireguard · 172.16.0.2'
+  printf '%s' "${output}" | grep -q 'WARP 规则数: 4'
   printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
+  if printf '%s' "${output}" | grep -q 'WARP 出口 IP'; then
+    return 1
+  fi
+  [[ "$(cat "${probe_file}")" == "0" ]]
+
+  output="$(diagnose_cmd --warp-probe)"
+  printf '%s' "${output}" | grep -q 'WARP 出口 IP: 203.0.113.99'
   [[ "$(cat "${probe_file}")" == "1" ]]
 
   service_active_state() { printf 'failed'; }
@@ -404,5 +417,13 @@ run_diagnose_command_case() {
   [[ "${status}" -ne 0 ]]
   printf '%s' "${output}" | grep -q '诊断摘要: 检测到'
   printf '%s' "${output}" | grep -q '服务: xray 未运行'
-  [[ "$(cat "${probe_file}")" == "1" ]]
+  [[ "$(cat "${probe_file}")" == "0" ]]
+
+  WARP_PRIVATE_KEY=""
+  set +e
+  output="$(diagnose_cmd 2>&1)"
+  status=$?
+  set -e
+  [[ "${status}" -ne 0 ]]
+  printf '%s' "${output}" | grep -q 'WARP: WARP WireGuard 私钥缺失'
 }

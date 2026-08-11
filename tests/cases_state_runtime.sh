@@ -6,7 +6,6 @@ run_state_context_case() {
 
   NGINX_CONF_DIR="${workdir}/nginx"
   NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
-  WARP_MDM_FILE="${workdir}/warp-mdm.xml"
   HEALTH_STATE_FILE="${workdir}/health-state.env"
   HEALTH_HISTORY_FILE="${workdir}/health-history.log"
   NET_SERVICE_FILE="${workdir}/net.service"
@@ -58,12 +57,30 @@ run_state_context_case() {
   "outbounds": [
     {
       "tag": "WARP",
+      "protocol": "wireguard",
       "settings": {
-        "servers": [
+        "secretKey": "eHR1bi10ZXN0LXdhcnAtcHJpdmF0ZS1rZXktMzJieXQ=",
+        "address": [
+          "172.16.0.2/32",
+          "2606:4700:110:8a1b:cafe:1:2:3/128"
+        ],
+        "peers": [
           {
-            "port": 41000
+            "publicKey": "eHR1bi10ZXN0LXdhcnAtcGVlci1wdWJsaWMta2V5LTM=",
+            "allowedIPs": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "endpoint": "engage.cloudflareclient.com:2408"
           }
-        ]
+        ],
+        "reserved": [
+          3,
+          4,
+          5
+        ],
+        "mtu": 1280,
+        "domainStrategy": "ForceIPv4v6"
       }
     }
   ]
@@ -100,22 +117,19 @@ EOF
 CORE_HEALTH_LAST_CHECK_AT='2026-04-21T12:00:00Z'
 CORE_HEALTH_LAST_ACTION='ok'
 CORE_HEALTH_LAST_REASON='services healthy'
-WARP_HEALTH_LAST_CHECK_AT='2026-04-21T12:05:00Z'
-WARP_HEALTH_LAST_ACTION='restarted'
-WARP_HEALTH_LAST_REASON='warp socks5 probe failed'
 EOF
 
   cat > "${HEALTH_HISTORY_FILE}" <<'EOF'
 2026-04-21T12:00:00Z | core | ok | services healthy
 2026-04-21T12:10:00Z | core | restarted | service inactive
-2026-04-21T12:05:00Z | warp | restarted | warp socks5 probe failed
 EOF
 
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
   REALITY_PUBLIC_KEY="" XHTTP_UUID="" XHTTP_DOMAIN="" XHTTP_PATH="" XHTTP_VLESS_DECRYPTION="" \
   XHTTP_VLESS_ENCRYPTION_ENABLED="" TLS_ALPN="" SERVER_IP="" NODE_LABEL_PREFIX="" FINGERPRINT="" \
-  ENABLE_WARP="" ENABLE_NET_OPT="" WARP_PROXY_PORT="" WARP_TEAM_NAME="" WARP_CLIENT_ID="" \
-  WARP_CLIENT_SECRET="" CERT_MODE="" ACME_CA="" XHTTP_ECH_CONFIG_LIST="" XHTTP_ECH_FORCE_QUERY="" \
+  ENABLE_WARP="" ENABLE_NET_OPT="" WARP_PRIVATE_KEY="" WARP_ADDRESS_V4="" WARP_ADDRESS_V6="" \
+  WARP_PEER_PUBLIC_KEY="" WARP_ENDPOINT="" WARP_RESERVED="" WARP_MTU="" \
+  CERT_MODE="" ACME_CA="" XHTTP_ECH_CONFIG_LIST="" XHTTP_ECH_FORCE_QUERY="" \
   XHTTP_XPADDING_ENABLED="" XHTTP_XPADDING_KEY="" XHTTP_XPADDING_HEADER="" XHTTP_XPADDING_PLACEMENT="" \
   XHTTP_XPADDING_METHOD=""
 
@@ -127,7 +141,13 @@ EOF
   [[ "${REALITY_PUBLIC_KEY}" == "public-key-value" ]]
   [[ "${FINGERPRINT}" == "firefox" ]]
   [[ "${ENABLE_WARP}" == "yes" ]]
-  [[ "${WARP_PROXY_PORT}" == "41000" ]]
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  [[ "${WARP_ADDRESS_V4}" == "172.16.0.2" ]]
+  [[ "${WARP_ADDRESS_V6}" == "2606:4700:110:8a1b:cafe:1:2:3" ]]
+  [[ "${WARP_PEER_PUBLIC_KEY}" == "${TEST_WARP_PEER_PUBLIC_KEY}" ]]
+  [[ "${WARP_ENDPOINT}" == "engage.cloudflareclient.com:2408" ]]
+  [[ "${WARP_RESERVED}" == "3,4,5" ]]
+  [[ "${WARP_MTU}" == "1280" ]]
   [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]
   [[ "${ENABLE_NET_OPT}" == "no" ]]
   [[ -z "${XHTTP_ECH_CONFIG_LIST}" ]]
@@ -135,19 +155,18 @@ EOF
   [[ "${XHTTP_XPADDING_ENABLED}" == "no" ]]
   [[ "${XHTTP_XPADDING_KEY}" == "x_padding" ]]
   [[ "${CORE_HEALTH_LAST_ACTION}" == "ok" ]]
-  [[ "${WARP_HEALTH_LAST_ACTION}" == "restarted" ]]
-  [[ "$(latest_health_history_text)" == "2026-04-21T12:05:00Z | warp | restarted | warp socks5 probe failed" ]]
+  [[ "$(latest_health_history_text)" == "2026-04-21T12:10:00Z | core | restarted | service inactive" ]]
   HEALTH_HISTORY_NOW='2026-04-21T12:30:00Z'
   [[ "$(health_history_count_text 1 core)" == "1" ]]
-  [[ "$(health_history_count_text 1 warp)" == "1" ]]
   [[ "$(health_history_count_text 24 core)" == "1" ]]
   [[ "$(stability_signal_text)" == *"稳定"* ]]
 
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
   REALITY_PUBLIC_KEY="" XHTTP_UUID="" XHTTP_DOMAIN="" XHTTP_PATH="" XHTTP_VLESS_DECRYPTION="" \
   XHTTP_VLESS_ENCRYPTION_ENABLED="" TLS_ALPN="" SERVER_IP="" NODE_LABEL_PREFIX="" FINGERPRINT="" \
-  ENABLE_WARP="" ENABLE_NET_OPT="" WARP_PROXY_PORT="" WARP_TEAM_NAME="" WARP_CLIENT_ID="" \
-  WARP_CLIENT_SECRET="" CERT_MODE="" ACME_CA="" XHTTP_ECH_CONFIG_LIST="" XHTTP_ECH_FORCE_QUERY="" \
+  ENABLE_WARP="" ENABLE_NET_OPT="" WARP_PRIVATE_KEY="" WARP_ADDRESS_V4="" WARP_ADDRESS_V6="" \
+  WARP_PEER_PUBLIC_KEY="" WARP_ENDPOINT="" WARP_RESERVED="" WARP_MTU="" \
+  CERT_MODE="" ACME_CA="" XHTTP_ECH_CONFIG_LIST="" XHTTP_ECH_FORCE_QUERY="" \
   XHTTP_XPADDING_ENABLED="" XHTTP_XPADDING_KEY="" XHTTP_XPADDING_HEADER="" XHTTP_XPADDING_PLACEMENT="" \
   XHTTP_XPADDING_METHOD=""
 
@@ -208,17 +227,17 @@ run_state_file_decode_case() {
   prepare_workspace "${workdir}"
 cat > "${STATE_FILE}" <<'EOF'
 STATE_VERSION=1
-WARP_CLIENT_SECRET=sec\'ret\ 0\ \[\]
+CF_API_TOKEN=tok\'en\ 0\ \[\]
 XHTTP_ECH_CONFIG_LIST=$'line1\nline2'
 WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
-WARP_TEAM_NAME=$'tab\tbackslash\\done'
+NODE_CLIENTS_TEXT=$'tab\tbackslash\\done'
 EOF
 
   load_existing_state
-  [[ "${WARP_CLIENT_SECRET}" == "sec'ret 0 []" ]]
+  [[ "${CF_API_TOKEN}" == "tok'en 0 []" ]]
   [[ "${XHTTP_ECH_CONFIG_LIST}" == $'line1\nline2' ]]
   [[ "${WARP_RULES_TEXT}" == $'geosite:google\ndomain:github.com' ]]
-  [[ "${WARP_TEAM_NAME}" == $'tab\tbackslash\\done' ]]
+  [[ "${NODE_CLIENTS_TEXT}" == $'tab\tbackslash\\done' ]]
 }
 
 run_node_client_state_case() {
@@ -247,7 +266,6 @@ run_node_client_state_case() {
   FINGERPRINT="chrome"
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
-  WARP_PROXY_PORT="40000"
   CERT_MODE="existing"
   NODE_CLIENTS_TEXT=$'phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444\nlaptop|55555555-5555-5555-5555-555555555555|66666666-6666-6666-6666-666666666666'
 
@@ -280,7 +298,6 @@ run_runtime_context_reset_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
-  WARP_MDM_FILE="${workdir}/missing-mdm.xml"
   WARP_RULES_FILE="${workdir}/missing-rules.list"
   HEALTH_STATE_FILE="${workdir}/missing-health.env"
 
@@ -519,15 +536,24 @@ run_optional_component_rollback_case() {
   }
 
   rollback_optional_component_state
-  [[ " ${stopped[*]} " == *" warp-svc.service "* ]]
-  [[ " ${stopped[*]} " == *" ${WARP_HEALTH_TIMER_NAME} "* ]]
   [[ " ${stopped[*]} " == *" ${NET_SERVICE_NAME} "* ]]
-  [[ " ${rolled[*]} " == *" ${WARP_APT_KEYRING} "* ]]
-  [[ " ${rolled[*]} " == *" ${WARP_APT_SOURCE_LIST} "* ]]
-  [[ " ${rolled[*]} " == *" ${WARP_MDM_FILE} "* ]]
+  [[ " ${stopped[*]} " != *" warp-svc.service "* ]]
   [[ " ${rolled[*]} " == *" ${NET_SYSCTL_CONF} "* ]]
+  [[ " ${rolled[*]} " == *" ${NET_HELPER_PATH} "* ]]
+  [[ " ${rolled[*]} " == *" ${NET_SERVICE_FILE} "* ]]
   [[ "${sysctl_calls}" -eq 1 ]]
   printf '%s' "${warned}" | grep -q '可选组件应用失败'
+
+  stopped=()
+  rolled=()
+  sysctl_calls=0
+  warned=""
+  ENABLE_NET_OPT="no"
+  rollback_optional_component_state
+  [[ "${#stopped[@]}" -eq 0 ]]
+  [[ "${#rolled[@]}" -eq 0 ]]
+  [[ "${sysctl_calls}" -eq 0 ]]
+  [[ -z "${warned}" ]]
   load_functions
 }
 
@@ -599,60 +625,6 @@ run_install_rollback_helper_case() {
   [[ "$(cat "${ACME_RELOAD_HELPER}")" == "old-helper" ]]
 }
 
-run_warp_xml_escape_case() {
-  local workdir=""
-
-  workdir="$(mktemp -d)"
-  WARP_MDM_FILE="${workdir}/mdm.xml"
-  WARP_CLIENT_ID='id&<>"'"'"'value'
-  WARP_CLIENT_SECRET='sec&<>"'"'"'value'
-  WARP_TEAM_NAME='team&<>"'"'"'value'
-  WARP_PROXY_PORT="40000"
-
-  write_warp_mdm_file
-
-  python3 - <<'PY' "${WARP_MDM_FILE}"
-import sys
-import xml.etree.ElementTree as ET
-
-path = sys.argv[1]
-root = ET.parse(path).getroot()
-values = [node.text for node in root.findall('string')]
-assert values[0] == 'id&<>"\'value'
-assert values[1] == 'sec&<>"\'value'
-assert values[2] == 'team&<>"\'value'
-print('xml ok')
-PY
-}
-
-run_warp_health_monitor_case() {
-  local workdir=""
-
-  workdir="$(mktemp -d)"
-  WARP_HEALTH_HELPER="${workdir}/warp-health.sh"
-  WARP_HEALTH_SERVICE_FILE="${workdir}/warp-health.service"
-  WARP_HEALTH_TIMER_FILE="${workdir}/warp-health.timer"
-  WARP_HEALTH_SERVICE_NAME="xtun-warp-health.service"
-  WARP_HEALTH_TIMER_NAME="xtun-warp-health.timer"
-  HEALTH_STATE_FILE="${workdir}/health-state.env"
-  HEALTH_HISTORY_FILE="${workdir}/health-history.log"
-  WARP_PROXY_PORT="41000"
-
-  write_warp_health_helper
-  write_warp_health_service
-  write_warp_health_timer
-
-  assert_contains 'proxy_port='\''41000'\''' "${WARP_HEALTH_HELPER}"
-  assert_contains "health_state_file='${HEALTH_STATE_FILE}'" "${WARP_HEALTH_HELPER}"
-  assert_contains "health_history_file='${HEALTH_HISTORY_FILE}'" "${WARP_HEALTH_HELPER}"
-  assert_contains 'dirname "${health_state_file}"' "${WARP_HEALTH_HELPER}"
-  assert_contains '$(date -u '\''+%Y-%m-%dT%H:%M:%SZ'\'')' "${WARP_HEALTH_HELPER}"
-  assert_contains 'curl --socks5-hostname "127.0.0.1:${proxy_port}"' "${WARP_HEALTH_HELPER}"
-  assert_contains "ExecStart=${WARP_HEALTH_HELPER}" "${WARP_HEALTH_SERVICE_FILE}"
-  assert_contains 'OnUnitActiveSec=5min' "${WARP_HEALTH_TIMER_FILE}"
-  assert_contains "Unit=${WARP_HEALTH_SERVICE_NAME}" "${WARP_HEALTH_TIMER_FILE}"
-}
-
 run_restart_optional_service_case() {
   local restarted=()
 
@@ -671,7 +643,6 @@ run_restart_optional_service_case() {
   [[ " ${restarted[*]} " == *" nginx.service "* ]]
   [[ " ${restarted[*]} " == *" ${CORE_HEALTH_TIMER_NAME} "* ]]
   [[ " ${restarted[*]} " != *" warp-svc.service "* ]]
-  [[ " ${restarted[*]} " != *" ${WARP_HEALTH_TIMER_NAME} "* ]]
   [[ " ${restarted[*]} " != *" ${NET_SERVICE_NAME} "* ]]
 
   restarted=()
@@ -681,8 +652,7 @@ run_restart_optional_service_case() {
   }
 
   restart_cmd
-  [[ " ${restarted[*]} " == *" warp-svc.service "* ]]
-  [[ " ${restarted[*]} " == *" ${WARP_HEALTH_TIMER_NAME} "* ]]
   [[ " ${restarted[*]} " == *" ${NET_SERVICE_NAME} "* ]]
+  [[ " ${restarted[*]} " != *" warp-svc.service "* ]]
   load_functions
 }

@@ -204,26 +204,159 @@ latest_backup_label() {
   fi
 }
 
-warp_exit_ip_text() {
-  local ip=""
+warp_outbound_text() {
+  local summary=""
 
   if [[ "${ENABLE_WARP:-no}" != "yes" ]]; then
     printf '未启用'
     return
   fi
 
-  if [[ "$(service_active_state 'warp-svc.service')" != "active" ]]; then
-    printf '未探测 (warp-svc 未运行)'
+  summary="wireguard"
+  [[ -z "${WARP_ADDRESS_V4:-}" ]] || summary+=" · ${WARP_ADDRESS_V4}"
+  [[ -z "${WARP_ADDRESS_V6:-}" ]] || summary+=" · ${WARP_ADDRESS_V6}"
+  summary+=" · ${WARP_ENDPOINT:-${DEFAULT_WARP_ENDPOINT}}"
+  [[ -z "${WARP_RESERVED:-}" ]] || summary+=" · reserved=${WARP_RESERVED}"
+  printf '%s' "${summary}"
+}
+
+warp_output_addresses_text() {
+  local addresses=""
+
+  [[ -z "${WARP_ADDRESS_V4:-}" ]] || addresses="${WARP_ADDRESS_V4}/32"
+  if [[ -n "${WARP_ADDRESS_V6:-}" ]]; then
+    [[ -z "${addresses}" ]] || addresses+=", "
+    addresses+="${WARP_ADDRESS_V6}/128"
+  fi
+
+  printf '%s' "${addresses:-未设置}"
+}
+
+warp_endpoint_host() {
+  local endpoint="${WARP_ENDPOINT:-${DEFAULT_WARP_ENDPOINT}}"
+
+  if [[ "${endpoint}" == *:* ]]; then
+    printf '%s' "${endpoint%:*}"
+  else
+    printf '%s' "${endpoint}"
+  fi
+}
+
+warp_endpoint_resolve_state() {
+  local host=""
+
+  if [[ "${ENABLE_WARP:-no}" != "yes" ]]; then
+    printf 'unknown'
     return
   fi
 
-  if ! command -v curl >/dev/null 2>&1; then
-    printf '未探测 (curl 不存在)'
+  host="$(warp_endpoint_host)"
+  if [[ -z "${host}" ]]; then
+    printf 'fail'
+    return
+  fi
+  if is_ipv4 "${host}"; then
+    printf 'ok'
+    return
+  fi
+  if ! command -v getent >/dev/null 2>&1; then
+    printf 'unknown'
     return
   fi
 
-  ip="$(curl --socks5-hostname "127.0.0.1:${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}" \
-    -fsSL --max-time 4 https://api.ipify.org 2>/dev/null | tr -d '\r\n')"
+  if getent ahosts "${host}" 2>/dev/null | grep -q .; then
+    printf 'ok'
+  else
+    printf 'fail'
+  fi
+}
+
+warp_endpoint_resolve_text() {
+  check_badge "$(warp_endpoint_resolve_state)"
+}
+
+warp_probe_port() {
+  local port=0
+  local attempt=0
+
+  while [[ "${attempt}" -lt 20 ]]; do
+    port=$((41000 + RANDOM % 4000))
+    if ! is_port_listening "${port}"; then
+      printf '%s' "${port}"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+warp_egress_probe_text() {
+  local port=""
+  local config_file=""
+  local probe_pid=""
+  local ip=""
+  local waited=0
+
+  if [[ "${ENABLE_WARP:-no}" != "yes" ]]; then
+    printf '未启用'
+    return
+  fi
+  if [[ ! -x "${XRAY_BIN}" ]] || ! command -v curl >/dev/null 2>&1; then
+    printf '未探测 (缺少 xray 或 curl)'
+    return
+  fi
+  if [[ -z "${WARP_PRIVATE_KEY:-}" ]]; then
+    printf '未探测 (缺少 WireGuard 私钥)'
+    return
+  fi
+  if ! port="$(warp_probe_port)"; then
+    printf '未探测 (找不到空闲端口)'
+    return
+  fi
+  if ! config_file="$(mktemp "${TMPDIR:-/tmp}/xtun-warp-probe.XXXXXX.json")"; then
+    printf '未探测 (无法创建临时配置)'
+    return
+  fi
+
+  chmod 0600 "${config_file}"
+  if ! jq -cn \
+    --argjson outbound "$(xray_warp_outbound_json)" \
+    --arg port "${port}" \
+    '{
+       log: { loglevel: "none" },
+       inbounds: [
+         {
+           listen: "127.0.0.1",
+           port: ($port | tonumber),
+           protocol: "socks",
+           settings: { udp: false }
+         }
+       ],
+       outbounds: [$outbound]
+     }' > "${config_file}" 2>/dev/null; then
+    rm -f "${config_file}"
+    printf '未探测 (生成临时配置失败)'
+    return
+  fi
+
+  "${XRAY_BIN}" run -c "${config_file}" >/dev/null 2>&1 &
+  probe_pid="$!"
+  while [[ "${waited}" -lt 40 ]]; do
+    is_port_listening "${port}" && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+
+  if is_port_listening "${port}"; then
+    ip="$(curl --socks5-hostname "127.0.0.1:${port}" \
+      -fsSL --max-time 8 https://api.ipify.org 2>/dev/null | tr -d '\r\n')"
+  fi
+
+  kill "${probe_pid}" >/dev/null 2>&1 || true
+  wait "${probe_pid}" 2>/dev/null || true
+  rm -f "${config_file}"
+
   if [[ -n "${ip}" ]]; then
     printf '%s' "${ip}"
   else
