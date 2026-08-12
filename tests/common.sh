@@ -7,6 +7,78 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_WARP_PRIVATE_KEY="eHR1bi10ZXN0LXdhcnAtcHJpdmF0ZS1rZXktMzJieXQ="
 TEST_WARP_PEER_PUBLIC_KEY="eHR1bi10ZXN0LXdhcnAtcGVlci1wdWJsaWMta2V5LTM="
 
+TEST_SANDBOX_ROOT="${TEST_SANDBOX_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/xtun-test-sandbox.XXXXXX")}"
+
+prepare_test_sandbox_root() {
+  # ------------------------------
+  # 真实 xray 二进制以软链接进沙箱
+  # 用例照旧能跑 xray vlessenc / -test，
+  # 而卸载、回滚类用例删掉的只是这条软链
+  # ------------------------------
+  install -d -m 0755 "${TEST_SANDBOX_ROOT}/usr/local/bin"
+  if [[ -x /usr/local/bin/xray && ! -e "${TEST_SANDBOX_ROOT}/usr/local/bin/xray" ]]; then
+    ln -s /usr/local/bin/xray "${TEST_SANDBOX_ROOT}/usr/local/bin/xray"
+  fi
+}
+
+prepare_test_sandbox_root
+
+# 下列路径变量由 source 进来的 xtun.sh 各层使用
+# shellcheck disable=SC2034
+sandbox_managed_paths() {
+  # ------------------------------
+  # 把全部托管路径改写到临时沙箱
+  # 测试若以 root 运行，回滚/卸载类用例会真的删文件，
+  # 这里保证它们永远删不到真实部署
+  # ------------------------------
+  local root="${TEST_SANDBOX_ROOT}"
+
+  [[ -n "${root}" ]] || return 0
+
+  SELF_INSTALL_DIR="${root}/usr/local/lib/xtun"
+  SELF_COMMAND_PATH="${root}/usr/local/sbin/xtun"
+  XRAY_BIN="${root}/usr/local/bin/xray"
+  XRAY_CONFIG_DIR="${root}/usr/local/etc/xray"
+  XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
+  XRAY_ASSET_DIR="${root}/usr/local/share/xray"
+  XRAY_SERVICE_FILE="${root}/etc/systemd/system/xray.service"
+  XRAY_LOGROTATE_FILE="${root}/etc/logrotate.d/xtun"
+  STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
+  HEALTH_STATE_FILE="${XRAY_CONFIG_DIR}/health-state.env"
+  HEALTH_HISTORY_FILE="${XRAY_CONFIG_DIR}/health-history.log"
+  WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
+  HAPROXY_CONFIG="${root}/etc/haproxy/haproxy.cfg"
+  NGINX_CONF_DIR="${root}/etc/nginx/conf.d"
+  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+  NGINX_SERVICE_FILE="${root}/lib/systemd/system/nginx.service"
+  FALLBACK_SITE_DIR="${root}/var/www/xtun-fallback"
+  SSL_DIR="${root}/etc/ssl/xtun"
+  TLS_CERT_FILE="${SSL_DIR}/cert.pem"
+  TLS_KEY_FILE="${SSL_DIR}/key.pem"
+  CORE_HEALTH_HELPER="${root}/usr/local/sbin/xtun-core-health.sh"
+  CORE_HEALTH_SERVICE_FILE="${root}/etc/systemd/system/${CORE_HEALTH_SERVICE_NAME}"
+  CORE_HEALTH_TIMER_FILE="${root}/etc/systemd/system/${CORE_HEALTH_TIMER_NAME}"
+  NET_SYSCTL_CONF="${root}/etc/sysctl.d/98-xtun-net.conf"
+  NET_HELPER_PATH="${root}/usr/local/sbin/xtun-net-optimize.sh"
+  NET_SERVICE_FILE="${root}/etc/systemd/system/${NET_SERVICE_NAME}"
+  ACME_HOME="${root}/root/.acme.sh"
+  ACME_SH_BIN="${ACME_HOME}/acme.sh"
+  ACME_RELOAD_HELPER="${root}/usr/local/sbin/xtun-cert-reload.sh"
+  OP_LOG_DIR="${root}/var/log/xtun"
+  OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
+  OUTPUT_FILE="${root}/root/xtun-output.md"
+  SUBSCRIPTION_DIR="${root}/root/xtun-subscriptions"
+  SUBSCRIPTION_RAW_FILE="${SUBSCRIPTION_DIR}/vless-raw.txt"
+  SUBSCRIPTION_BASE64_FILE="${SUBSCRIPTION_DIR}/vless-base64.txt"
+  SUBSCRIPTION_MANIFEST_FILE="${SUBSCRIPTION_DIR}/manifest.txt"
+  SUBSCRIPTION_QR_DIR="${SUBSCRIPTION_DIR}/qr"
+  SUBSCRIPTION_RAW_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-raw.png"
+  SUBSCRIPTION_BASE64_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-base64.png"
+  BACKUP_ROOT="${root}/root/xtun-backups"
+  INSTALL_DRAFT_FILE="${root}/root/.xtun-install-draft.env"
+  SCRIPT_LOCK_FILE="${root}/run/xtun.lock"
+}
+
 load_functions() {
   # ------------------------------
   # 只加载函数定义，不执行 main
@@ -14,6 +86,7 @@ load_functions() {
   # ------------------------------
   # shellcheck disable=SC1090
   source <(sed '$d' "${ROOT_DIR}/xtun.sh")
+  sandbox_managed_paths
 }
 
 prepare_workspace() {

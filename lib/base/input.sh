@@ -34,6 +34,7 @@ usage() {
   ${command_name} status [--raw]
   ${command_name} restart
   ${command_name} repair-perms
+  ${command_name} version
   ${command_name} help
 
 安装参数:

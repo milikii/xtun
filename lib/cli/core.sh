@@ -608,6 +608,9 @@ run_cli_command() {
     help|--help|-h)
       usage
       ;;
+    version|--version|-v)
+      printf 'xtun.sh v%s\n' "${SCRIPT_VERSION}"
+      ;;
     *)
       die "未知命令：${command}"
       ;;

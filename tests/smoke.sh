@@ -17,8 +17,64 @@ run_smoke_case() {
   )
 }
 
+# ------------------------------
+# 真实部署路径的存在性快照
+# 测试以 root 在生产机上跑时，任何用例都不该删掉这些
+# ------------------------------
+REAL_MANAGED_CANARY=(
+  /usr/local/etc/xray
+  /usr/local/lib/xtun
+  /usr/local/sbin/xtun
+  /usr/local/bin/xray
+  /usr/local/share/xray
+  /usr/local/sbin/xtun-core-health.sh
+  /usr/local/sbin/xtun-net-optimize.sh
+  /etc/systemd/system/xray.service
+  /etc/haproxy/haproxy.cfg
+  /etc/nginx/conf.d/xtun.conf
+  /etc/ssl/xtun
+  /etc/logrotate.d/xtun
+  /var/www/xtun-fallback
+  /var/log/xtun
+  /root/xtun-output.md
+  /root/xtun-subscriptions
+)
+
+canary_snapshot() {
+  local path=""
+
+  for path in "${REAL_MANAGED_CANARY[@]}"; do
+    if [[ -e "${path}" ]]; then
+      printf '%s\n' "${path}"
+    fi
+  done
+
+  return 0
+}
+
+assert_canary_intact() {
+  local before="${1}"
+  local missing=""
+
+  [[ -n "${before}" ]] || return 0
+
+  missing="$(comm -23 <(printf '%s\n' "${before}") <(canary_snapshot | LC_ALL=C sort) || true)"
+  if [[ -n "${missing}" ]]; then
+    printf '[fail] 测试删除了真实部署文件：\n%s\n' "${missing}" >&2
+    printf '[fail] 说明某个用例逃出了 TEST_SANDBOX_ROOT，请检查 sandbox_managed_paths。\n' >&2
+    return 1
+  fi
+}
+
+cleanup_test_sandbox() {
+  case "${TEST_SANDBOX_ROOT:-}" in
+    */xtun-test-sandbox.*) rm -rf "${TEST_SANDBOX_ROOT}" ;;
+  esac
+}
+
 main() {
   local case_name=""
+  local canary_before=""
   local -a cases=(
     run_warp_enabled_case
     run_multi_client_config_output_case
@@ -86,11 +142,14 @@ main() {
 
   load_functions
   stub_side_effects
+  canary_before="$(canary_snapshot | LC_ALL=C sort)"
+  trap cleanup_test_sandbox EXIT
 
   for case_name in "${cases[@]}"; do
     run_smoke_case "${case_name}"
   done
 
+  assert_canary_intact "${canary_before}"
   printf 'smoke ok\n'
 }
 
