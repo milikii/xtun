@@ -63,10 +63,37 @@ need_root() {
   fi
 }
 
+script_lock_dir_owner_alive() {
+  local lock_dir="${1}"
+  local owner_pid=""
+
+  owner_pid="$(cat "${lock_dir}/pid" 2>/dev/null || true)"
+  [[ "${owner_pid}" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "${owner_pid}" 2>/dev/null || return 1
+  return 0
+}
+
+acquire_script_lock_dir() {
+  local lock_dir="${1}"
+
+  if ! mkdir "${lock_dir}" 2>/dev/null; then
+    # 目录还在但持有者已经消失（被 kill -9、断线、或 EXIT trap 被后续 trap 覆盖），
+    # 属于陈旧锁，回收后重试一次，避免机器被永久锁死。
+    script_lock_dir_owner_alive "${lock_dir}" && return 1
+    rm -rf "${lock_dir}" 2>/dev/null || true
+    mkdir "${lock_dir}" 2>/dev/null || return 1
+  fi
+
+  printf '%s\n' "$$" > "${lock_dir}/pid" 2>/dev/null || true
+  SCRIPT_LOCK_DIR="${lock_dir}"
+  SCRIPT_LOCK_HELD=1
+}
+
 acquire_script_lock() {
-  local lock_dir=""
   local lock_file="${SCRIPT_LOCK_FILE}"
   local lock_opened=0
+
+  [[ "${SCRIPT_LOCK_HELD}" -eq 1 ]] && return 0
 
   mkdir -p "$(dirname "${lock_file}")" 2>/dev/null || true
   if command -v flock >/dev/null 2>&1; then
@@ -82,22 +109,28 @@ acquire_script_lock() {
 
     [[ "${lock_opened}" -eq 1 ]] || die "无法创建脚本锁文件。"
     flock -n 9 || die "检测到另一个 xtun 进程正在运行，请稍后重试。"
+    SCRIPT_LOCK_HELD=1
     return
   fi
 
-  lock_dir="${lock_file}.d"
-  if mkdir "${lock_dir}" 2>/dev/null; then
-    trap 'rmdir "'"${lock_dir}"'" 2>/dev/null || true' EXIT
-    return
-  fi
-
-  lock_dir="/tmp/$(basename "${SCRIPT_LOCK_FILE}").d"
-  if mkdir "${lock_dir}" 2>/dev/null; then
-    trap 'rmdir "'"${lock_dir}"'" 2>/dev/null || true' EXIT
-    return
-  fi
+  acquire_script_lock_dir "${lock_file}.d" && return
+  acquire_script_lock_dir "/tmp/$(basename "${SCRIPT_LOCK_FILE}").d" && return
 
   die "检测到另一个 xtun 进程正在运行，请稍后重试。"
+}
+
+release_script_lock() {
+  [[ "${SCRIPT_LOCK_HELD}" -eq 1 ]] || return 0
+
+  if [[ -n "${SCRIPT_LOCK_DIR}" ]]; then
+    rm -rf "${SCRIPT_LOCK_DIR}" 2>/dev/null || true
+    SCRIPT_LOCK_DIR=""
+  else
+    flock -u 9 2>/dev/null || true
+    exec 9>&- 2>/dev/null || true
+  fi
+
+  SCRIPT_LOCK_HELD=0
 }
 
 . "${SCRIPT_ROOT}/lib/base/input.sh"

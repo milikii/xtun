@@ -160,12 +160,19 @@ run_change_command_case() {
   [[ "${runtime_target}" == "www.harvard.edu:443" ]]
   [[ "${shown_links}" -eq 1 ]]
 
+  # --opt=value 与 --opt value 必须等价
+  runtime_sni=""
+  NON_INTERACTIVE=0
+  change_sni_cmd --non-interactive --reality-sni=eq.example.com
+  [[ "${runtime_sni}" == "eq.example.com" ]]
+  [[ "${shown_links}" -eq 2 ]]
+
   NON_INTERACTIVE=0
   change_label_prefix_cmd --non-interactive
   [[ "${state_written}" -eq 1 ]]
   [[ "${output_written}" -eq 1 ]]
   [[ "${written_prefix}" == "HKG" ]]
-  [[ "${shown_links}" -eq 2 ]]
+  [[ "${shown_links}" -eq 3 ]]
 
   load_current_install_context() {
     return 99
@@ -209,7 +216,7 @@ run_change_command_case() {
   [[ "${runtime_updated}" -eq 1 ]]
   [[ "${rules_written}" == *$'domain:chat.openai.com'* ]]
   [[ "${rules_written}" != *$'domain:github.com'* ]]
-  [[ "${shown_links}" -eq 4 ]]
+  [[ "${shown_links}" -eq 5 ]]
 
   load_existing_state() {
     WARP_RULES_TEXT=$'geosite:google\ndomain:chat.openai.com'

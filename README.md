@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.6.0`
+当前版本：`0.7.0`
 
 ## 能安装什么
 
@@ -63,6 +63,10 @@ xtun
 ```
 
 后续维护都可以直接运行 `xtun`，不用再进入仓库目录。
+
+菜单顶部只画一块精简面板（服务状态、监听 443、WARP 开关、稳定性信号），不跑配置自检和 TLS 握手，所以翻菜单不会卡。需要完整体检时走菜单 `4`、`xtun status` 或 `xtun diagnose`。
+
+停在菜单提示符上不会占住脚本锁，另一个终端里的 `xtun` 仍然可以正常执行变更；锁只在具体的写命令执行期间持有。
 
 ## 安装前准备
 
@@ -261,6 +265,8 @@ xtun show-links --qr
 xtun show-links --client phone
 ```
 
+`show-links` 属于查看类命令：不加 `--client` 时只读输出文件，加了 `--client` 也只是按当前状态重新生成输出与订阅文件（写入是原子的），不会新开备份会话去挤掉真正的变更备份。
+
 ### 多客户端
 
 默认安装会保留一组 `default` 客户端。新增客户端会复用服务端配置，但生成独立的 Reality UUID 和 XHTTP UUID。
@@ -291,6 +297,10 @@ xtun change-uuid --xhttp-only
 ```
 
 这些 `change-*` 命令会走现有校验、重启、回滚流程。应用失败时会回滚最近一次托管变更。
+
+回滚只还原托管的配置文件。健康状态、自恢复历史和 `/var/log/xtun` 下的操作日志不进回滚清单——它们本来就不进备份，排障时恰恰要看这份现场记录。
+
+参数支持 `--opt value` 和 `--opt=value` 两种写法，例如 `xtun change-sni --reality-sni=reality.example.com`。
 
 ### 服务维护
 
@@ -329,6 +339,8 @@ xtun uninstall --purge --yes
 ```
 
 `--purge` 会尝试卸载 `haproxy`、`nginx`、`jq`、`uuid-runtime`，并清理 `/root/.acme.sh`、`/var/log/xtun` 等路径。旧版本装过 `cloudflare-warp` 的机器，也会一并清掉遗留的 APT 源、keyring 和 `/var/lib/cloudflare-warp`。
+
+不带 `--yes` 时会要求二次确认：普通卸载回答 `y`，`--purge` 需要完整输入 `purge`（确认前会先列出这次会做的四件事）。菜单里的 `17. 卸载托管文件` 和 `18. 完全卸载（含软件包）` 同样要走这道确认，不会一按回车就删。
 
 ## WARP 出站
 

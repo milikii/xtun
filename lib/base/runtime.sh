@@ -276,15 +276,16 @@ rollback_managed_runtime_state() {
     "${HAPROXY_CONFIG}"
     "${NGINX_CONFIG_FILE}"
     "${WARP_RULES_FILE}"
-    "${HEALTH_STATE_FILE}"
-    "${HEALTH_HISTORY_FILE}"
     "${CORE_HEALTH_HELPER}"
     "${CORE_HEALTH_SERVICE_FILE}"
     "${CORE_HEALTH_TIMER_FILE}"
     "${XRAY_LOGROTATE_FILE}"
-    "${OP_LOG_DIR}"
     "${FALLBACK_SITE_DIR}"
   )
+
+  # 健康状态、恢复历史与操作日志不进回滚清单：
+  # 它们从来不进 backup_path，而 restore_backup_path 对没有备份条目的路径是直接 rm -rf。
+  # 一次回滚会连带删掉排障时最需要的现场记录。
 
   if [[ "${include_tls_assets}" == "yes" ]]; then
     paths+=("${TLS_CERT_FILE}" "${TLS_KEY_FILE}" "${ACME_RELOAD_HELPER}")

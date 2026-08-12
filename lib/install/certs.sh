@@ -330,7 +330,11 @@ write_tls_assets() {
   stage_cert_file="$(tls_stage_cert_file)"
   stage_key_file="$(tls_stage_key_file)"
   cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"
-  trap 'cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"' RETURN EXIT
+  # 只挂 RETURN：EXIT 是单槽的，装上去会顶掉 install_draft_session_begin 的
+  # EXIT trap（草稿保存），末尾的 trap - 还会把它一并摘掉。
+  # 暂存文件名是固定的，且每次进函数都会先清一遍，
+  # 所以 die 路径上残留的暂存文件下一次证书操作就会被覆盖清理。
+  trap 'cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"' RETURN
 
   case "${CERT_MODE}" in
     existing)
@@ -354,8 +358,6 @@ write_tls_assets() {
 
   ensure_managed_permissions
   validate_tls_assets
-
-  trap - RETURN EXIT
 }
 
 cleanup_previous_acme_cert() {

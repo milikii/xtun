@@ -140,6 +140,8 @@ main() {
     run_diagnose_command_case
     run_missing_option_value_case
     run_dispatch_case
+    run_script_lock_scope_case
+    run_script_lock_stale_dir_case
     run_client_cli_case
     run_install_flow_case
   )

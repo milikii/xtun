@@ -127,7 +127,7 @@ run_dispatch_case() {
 
   run_menu_choice 18
   [[ "${dispatched}" == "uninstall" ]]
-  [[ "${dispatched_args}" == "--purge --yes" ]]
+  [[ "${dispatched_args}" == "--purge" ]]
 
   run_menu_choice 19
   [[ "${dispatched}" == "status" ]]
@@ -235,9 +235,10 @@ run_client_cli_case() {
 
   output="$(show_links --client phone)"
   [[ "$(cat "${write_marker}")" == "phone" ]]
-  [[ "$(cat "${write_backup_marker}")" == "2" ]]
   [[ "${output}" == "client=phone" ]]
-  [[ "$(cat "${backup_marker}")" == "2" ]]
+  # show-links 只是按状态重新生成输出文件，不该再开一次备份会话挤掉真正的变更备份
+  [[ "$(cat "${write_backup_marker}")" == "1" ]]
+  [[ "$(cat "${backup_marker}")" == "1" ]]
 }
 
 run_install_flow_case() {
@@ -344,4 +345,103 @@ run_logging_case() {
   [[ "${output}" == *"[信息] 日志测试"* ]]
   grep -q '日志测试' "${OP_LOG_FILE}"
   grep -q '日志测试' "${SESSION_LOG_FILE}"
+}
+
+run_script_lock_scope_case() {
+  local acquired=0
+  local released=0
+
+  load_functions
+  stub_side_effects
+
+  acquire_script_lock() {
+    acquired=$((acquired + 1))
+    SCRIPT_LOCK_HELD=1
+  }
+  release_script_lock() {
+    released=$((released + 1))
+    SCRIPT_LOCK_HELD=0
+  }
+
+  status_cmd() { :; }
+  diagnose_cmd() { :; }
+  list_clients_cmd() { :; }
+  show_links() { :; }
+  change_sni_cmd() { :; }
+  main_menu() { :; }
+
+  SCRIPT_LOCK_HELD=0
+  SCRIPT_LOCK_DIR=""
+
+  # 只读命令不抢锁：菜单停在提示符上时，另一个 xtun 仍能改配置
+  run_cli_command status
+  run_cli_command diagnose
+  run_cli_command list-clients
+  run_cli_command show-links
+  run_cli_command version >/dev/null
+  run_cli_command help >/dev/null
+  run_cli_command
+  [[ "${acquired}" -eq 0 ]]
+
+  # 写命令必须成对加锁 / 解锁
+  run_cli_command change-sni --reality-sni a.example.com
+  [[ "${acquired}" -eq 1 ]]
+  [[ "${released}" -eq 1 ]]
+  [[ "${SCRIPT_LOCK_HELD}" -eq 0 ]]
+
+  # show-links --client 会重写输出与订阅文件，算写命令
+  run_cli_command show-links --client phone
+  [[ "${acquired}" -eq 2 ]]
+  run_cli_command show-links --client=phone
+  [[ "${acquired}" -eq 3 ]]
+
+  # 命令失败也要解锁，否则同一进程内的后续命令拿不到锁
+  change_sni_cmd() { return 3; }
+  if run_cli_command change-sni; then
+    return 1
+  fi
+  [[ "${acquired}" -eq 4 ]]
+  [[ "${released}" -eq 4 ]]
+  [[ "${SCRIPT_LOCK_HELD}" -eq 0 ]]
+}
+
+run_script_lock_stale_dir_case() {
+  local workdir=""
+  local lock_dir=""
+  local dead_pid=""
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  lock_dir="${workdir}/xtun.lock.d"
+  dead_pid="$(bash -c 'echo $$')"
+  while kill -0 "${dead_pid}" 2>/dev/null; do
+    dead_pid="$(bash -c 'echo $$')"
+  done
+
+  SCRIPT_LOCK_HELD=0
+  SCRIPT_LOCK_DIR=""
+
+  # 陈旧锁：目录还在但持有者已经消失（EXIT trap 被 install 流程覆盖时就是这样）
+  mkdir "${lock_dir}"
+  printf '%s\n' "${dead_pid}" > "${lock_dir}/pid"
+  acquire_script_lock_dir "${lock_dir}"
+  [[ "${SCRIPT_LOCK_HELD}" -eq 1 ]]
+  [[ "${SCRIPT_LOCK_DIR}" == "${lock_dir}" ]]
+  [[ "$(cat "${lock_dir}/pid")" == "$$" ]]
+
+  release_script_lock
+  [[ "${SCRIPT_LOCK_HELD}" -eq 0 ]]
+  [[ ! -d "${lock_dir}" ]]
+
+  # 持有者还活着时不能抢锁
+  mkdir "${lock_dir}"
+  printf '%s\n' "$$" > "${lock_dir}/pid"
+  if acquire_script_lock_dir "${lock_dir}"; then
+    return 1
+  fi
+  [[ "${SCRIPT_LOCK_HELD}" -eq 0 ]]
+
+  rm -rf "${workdir}"
 }

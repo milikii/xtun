@@ -80,10 +80,14 @@ list_clients_cmd() {
 select_output_client_if_requested() {
   local client_name="${1:-}"
 
+  # 这里只是按状态重新生成输出与订阅文件，写入本身是原子的（mktemp + mv），
+  # 所以不另开备份会话：show-links 属于查看类命令，
+  # 开一次会话就会挤掉一份真正的变更备份（默认只保留 5 份）。
+  # 从 add-client 等变更流程调进来时，BACKUP_DIR 已经由该流程设好，
+  # backup_path 会照常写进那一次会话。
   if [[ -n "${client_name}" ]]; then
     load_current_install_context
     node_client_exists "${client_name}" || die "找不到客户端：${client_name}"
-    start_backup_session
     write_output_file "${client_name}"
     return
   fi
@@ -92,7 +96,6 @@ select_output_client_if_requested() {
     load_current_install_context
     if [[ "$(node_client_count)" -gt 1 ]]; then
       client_name="$(prompt_node_client_selection "请选择要输出链接的客户端")"
-      start_backup_session
       write_output_file "${client_name}"
     fi
   fi
@@ -278,6 +281,8 @@ diagnose_cmd() {
   local nginx_state=""
   local core_health_state=""
   local warp_probe_result=""
+  local core_1h=""
+  local core_24h=""
   local -a service_failures=()
   local -a port_failures=()
   local -a config_failures=()
@@ -331,9 +336,11 @@ diagnose_cmd() {
   fi
   printf '%s\n' "核心自恢复: $(health_event_text CORE_HEALTH)"
   printf '%s\n' "最近恢复记录: $(latest_health_history_text)"
-  printf '%s\n' "近1小时恢复: core=$(health_history_count_text 1 core)"
-  printf '%s\n' "近24小时恢复: core=$(health_history_count_text 24 core)"
-  printf '%s\n' "稳定性信号: $(stability_signal_text)"
+  core_1h="$(health_history_count 1 core)"
+  core_24h="$(health_history_count 24 core)"
+  printf '%s\n' "近1小时恢复: core=${core_1h}"
+  printf '%s\n' "近24小时恢复: core=${core_24h}"
+  printf '%s\n' "稳定性信号: $(stability_signal_text "${core_1h}" "${core_24h}")"
 
   [[ "${xray_state}" == "active" ]] || service_failures+=("xray 未运行")
   [[ "${haproxy_state}" == "active" ]] || service_failures+=("haproxy 未运行")
@@ -467,13 +474,21 @@ uninstall_cmd() {
 
   if [[ "${assume_yes}" -ne 1 ]]; then
     if [[ "${purge_packages}" -eq 1 ]]; then
-      read -r -p "该操作会停止服务、删除脚本托管文件，并尝试卸载脚本安装的软件包。是否继续？ [y/N]: " answer
+      printf '%s\n' "该操作会："
+      printf '%s\n' "  1. 停止并禁用 xray、haproxy、nginx、核心巡检与网络优化服务"
+      printf '%s\n' "  2. 删除全部脚本托管文件（含证书、订阅、备份以外的输出）"
+      printf '%s\n' "  3. 尝试卸载 $(managed_package_names | paste -sd' ' -)"
+      printf '%s\n' "  4. 清理 ${ACME_HOME}、${OP_LOG_DIR} 等路径"
+      read -r -p "确认请输入 purge（其它任何输入都会取消）: " answer
+      if [[ "${answer}" != "purge" ]]; then
+        die "已取消卸载。"
+      fi
     else
       read -r -p "该操作会停止服务并删除脚本托管文件，但保留已安装的软件包。是否继续？ [y/N]: " answer
-    fi
-    answer="$(printf '%s' "${answer}" | tr 'A-Z' 'a-z')"
-    if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
-      die "已取消卸载。"
+      answer="$(printf '%s' "${answer}" | tr 'A-Z' 'a-z')"
+      if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
+        die "已取消卸载。"
+      fi
     fi
   fi
 
@@ -569,7 +584,61 @@ pause_after_menu_action() {
   read -r -p "按回车继续..." _
 }
 
+script_lock_command_needs_lock() {
+  local command="${1:-menu}"
+  local arg=""
+
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  case "${command}" in
+    menu|status|diagnose|list-clients|help|--help|-h|version|--version|-v)
+      # 菜单本身不写任何东西；菜单里选中的动作会各自再进一次 run_cli_command 并单独加锁。
+      return 1
+      ;;
+    show-links)
+      # 只读地 cat 输出文件；只有 --client 会重写输出与订阅文件。
+      for arg in "$@"; do
+        case "${arg}" in
+          --client|--client-name|--client=*|--client-name=*)
+            return 0
+            ;;
+        esac
+      done
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
 run_cli_command() {
+  local command="${1:-menu}"
+  local lock_taken=0
+  local status=0
+
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
+
+  if script_lock_command_needs_lock "${command}" "$@"; then
+    if [[ "${SCRIPT_LOCK_HELD}" -eq 0 ]]; then
+      acquire_script_lock
+      lock_taken=1
+    fi
+  fi
+
+  dispatch_cli_command "${command}" "$@" || status=$?
+
+  if [[ "${lock_taken}" -eq 1 ]]; then
+    release_script_lock
+  fi
+
+  return "${status}"
+}
+
+dispatch_cli_command() {
   local command="${1:-menu}"
 
   if [[ $# -gt 0 ]]; then
@@ -674,7 +743,7 @@ run_menu_choice() {
     15) run_cli_command renew-cert ;;
     16) run_cli_command repair-perms ;;
     17) run_cli_command uninstall ;;
-    18) run_cli_command purge --yes ;;
+    18) run_cli_command purge ;;
     19) run_cli_command status --raw ;;
     20) run_cli_command help ;;
     21) run_cli_command add-client ;;
@@ -694,7 +763,7 @@ main_menu() {
     if [[ -t 1 ]]; then
       clear >/dev/null 2>&1 || true
     fi
-    show_dashboard
+    show_dashboard_brief
     show_main_menu
     read -r -p "请选择: " choice
     if [[ "${choice}" == "0" ]]; then

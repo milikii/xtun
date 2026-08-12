@@ -16,7 +16,7 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
-SCRIPT_VERSION="0.6.0"
+SCRIPT_VERSION="0.7.0"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xtun"
 SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xtun"
 BOOTSTRAP_SELF_INSTALL_DIR="${XTUN_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
@@ -235,6 +235,8 @@ ACME_SH_BIN="${ACME_HOME}/acme.sh"
 ACME_RELOAD_HELPER="/usr/local/sbin/xtun-cert-reload.sh"
 INSTALL_DRAFT_FILE="/root/.xtun-install-draft.env"
 SCRIPT_LOCK_FILE="${XTUN_LOCK_FILE:-/run/xtun.lock}"
+SCRIPT_LOCK_HELD=0
+SCRIPT_LOCK_DIR=""
 SESSION_LOG_FILE=""
 
 NON_INTERACTIVE=0
@@ -323,7 +325,6 @@ fi
 . "${SCRIPT_ROOT}/lib/commands.sh"
 
 main() {
-  acquire_script_lock
   run_cli_command "$@"
 }
 

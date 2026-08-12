@@ -122,6 +122,12 @@ run_single_value_change_cmd() {
         overridden=1
         shift
         ;;
+      "${option_name}="*)
+        # 其余命令都收 --opt=value，这里也收，避免同一个脚本里两套写法
+        new_value="${1#*=}"
+        enforce_indirect_option_value "${option_name}" "${new_value}"
+        overridden=1
+        ;;
       *)
         die "${unknown_arg_prefix}${1}"
         ;;
