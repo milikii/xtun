@@ -153,6 +153,13 @@ run_dispatch_case() {
 
   run_menu_choice 23
   [[ "${dispatched}" == "apply-net-opt" ]]
+  local version_output=""
+  version_output="$(run_cli_command version)"
+  [[ "${version_output}" == "xtun.sh v${SCRIPT_VERSION}" ]]
+  version_output="$(run_cli_command --version)"
+  [[ "${version_output}" == "xtun.sh v${SCRIPT_VERSION}" ]]
+  version_output="$(run_cli_command -v)"
+  [[ "${version_output}" == "xtun.sh v${SCRIPT_VERSION}" ]]
 }
 
 run_client_cli_case() {

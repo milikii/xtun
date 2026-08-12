@@ -300,6 +300,7 @@ xtun repair-perms
 xtun upgrade
 xtun update-script
 xtun apply-net-opt
+xtun version
 ```
 
 命令说明：
@@ -311,6 +312,7 @@ xtun apply-net-opt
 | `upgrade` | 升级 Xray core，并校验 `.dgst` SHA256 |
 | `update-script` | 更新 `/usr/local/lib/xtun` bundle 和 `/usr/local/sbin/xtun` wrapper |
 | `apply-net-opt` | 重新应用 Joey BBRv3 网络优化和 qdisc/sysctl 配置 |
+| `version` | 打印脚本版本（也支持 `--version` / `-v`） |
 
 ### 卸载
 
@@ -631,6 +633,8 @@ xtun diagnose
 ```bash
 bash tests/smoke.sh
 ```
+
+用例会把所有托管路径改写到临时沙箱（`tests/common.sh` 的 `sandbox_managed_paths`），所以即使在已部署的机器上以 root 跑测试，也不会碰到真实的 `/usr/local/etc/xray`、`/etc/haproxy` 等文件。`tests/smoke.sh` 结尾还有一层守卫，真实托管文件一旦消失就直接让测试失败。
 
 仓库入口：
 

@@ -35,6 +35,7 @@ usage() {
   ${command_name} restart
   ${command_name} repair-perms
   ${command_name} apply-net-opt
+  ${command_name} version
   ${command_name} help
 
 安装参数:
