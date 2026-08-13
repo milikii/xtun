@@ -912,6 +912,71 @@ run_install_network_joey_reboot_case() {
   load_functions
 }
 
+run_net_sysctl_content_case() {
+  local workdir=""
+  local tcp_mem=""
+  local low=0
+  local mid=0
+  local high=0
+
+  workdir="$(mktemp -d)"
+  NET_SYSCTL_CONF="${workdir}/net.conf"
+  NET_HELPER_PATH="${workdir}/xtun-net-optimize.sh"
+  NET_BBRV3_REBOOT_REQUIRED="no"
+
+  backup_path() { :; }
+  supports_default_qdisc() { return 0; }
+  bbr_v3_active() { return 1; }
+  modprobe() { :; }
+
+  # 内核只暴露 bbr 时写 bbr。
+  available_cc() { printf '%s' "reno cubic bbr"; }
+  [[ "$(preferred_congestion_control)" == "bbr" ]]
+  cc_has_bbr "$(available_cc)"
+
+  # 暴露 bbr1 时优先 bbr1。
+  available_cc() { printf '%s' "reno cubic bbr bbr1"; }
+  [[ "$(preferred_congestion_control)" == "bbr1" ]]
+
+  # 只有 bbr1 没有 bbr 的内核同样算支持，不能被安装流程判成不支持。
+  available_cc() { printf '%s' "reno cubic bbr1"; }
+  cc_has_bbr "$(available_cc)"
+  ! cc_has_bbr "reno cubic"
+  ! cc_has_bbr "reno cubic bbrplus"
+
+  tcp_mem="$(net_tcp_mem_values)"
+  read -r low mid high <<< "${tcp_mem}"
+  [[ "${low}" -gt 0 && "${mid}" -gt "${low}" && "${high}" -gt "${mid}" ]]
+
+  write_net_sysctl_conf
+
+  assert_contains 'net.core.default_qdisc = fq' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.ipv4.tcp_congestion_control = bbr1' "${NET_SYSCTL_CONF}"
+  assert_contains "net.ipv4.tcp_mem = ${tcp_mem}" "${NET_SYSCTL_CONF}"
+  assert_contains 'net.ipv4.tcp_no_metrics_save = 1' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.core.netdev_max_backlog = 32768' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.core.netdev_budget = 1200' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.core.netdev_budget_usecs = 8000' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.core.rmem_max = 67108864' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.core.wmem_max = 67108864' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.ipv4.udp_rmem_min = 262144' "${NET_SYSCTL_CONF}"
+
+  # 读不到内存信息时整段跳过，而不是写一行空值把 sysctl --system 弄失败。
+  net_tcp_mem_values() { return 1; }
+  write_net_sysctl_conf
+  ! grep -q 'tcp_mem' "${NET_SYSCTL_CONF}"
+
+  # fq 的 limit / flow_limit 默认值在高 BDP 链路上会丢包，helper 必须带上放宽后的参数，
+  # 同时保留老内核不认参数时的退路。
+  write_net_helper_script
+  assert_contains 'root fq limit 100000 flow_limit 1000' "${NET_HELPER_PATH}"
+  assert_contains 'root fq >/dev/null 2>&1' "${NET_HELPER_PATH}"
+  sh -n "${NET_HELPER_PATH}"
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_apply_net_opt_command_case() {
   local calls=""
   local logged=""

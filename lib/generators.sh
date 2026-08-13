@@ -489,6 +489,9 @@ defaults
     # 纯 TCP 转发场景下让内核直接 splice，数据不再进出用户态。
     option splice-request
     option splice-response
+    # 省掉 accept/connect 之后那一个空 ACK，握手少一个 RTT。
+    option tcp-smart-accept
+    option tcp-smart-connect
 $(render_user_block haproxy-defaults "${HAPROXY_CONFIG}" "    ")
 EOF
 }

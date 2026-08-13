@@ -130,6 +130,7 @@ main() {
     run_joey_bbr_release_parse_case
     run_joey_bbr_pending_reboot_case
     run_install_network_joey_reboot_case
+    run_net_sysctl_content_case
     run_apply_net_opt_command_case
     run_apply_config_command_case
     run_warp_credential_helper_case

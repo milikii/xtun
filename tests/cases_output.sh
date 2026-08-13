@@ -345,6 +345,8 @@ run_service_config_helper_case() {
   assert_contains 'timeout tunnel 1h' "${HAPROXY_CONFIG}"
   assert_contains 'option splice-request' "${HAPROXY_CONFIG}"
   assert_contains 'option splice-response' "${HAPROXY_CONFIG}"
+  assert_contains 'option tcp-smart-accept' "${HAPROXY_CONFIG}"
+  assert_contains 'option tcp-smart-connect' "${HAPROXY_CONFIG}"
   # nbthread 由 HAProxy 自己按 CPU 数决定，写死只会把线程数改少
   ! grep -q '^ *nbthread' "${HAPROXY_CONFIG}"
   assert_contains 'server nginx_cdn 127.0.0.1:8443 check' "${HAPROXY_CONFIG}"

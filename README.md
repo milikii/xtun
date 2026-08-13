@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.9.0`
+当前版本：`0.10.0`
 
 ## 能安装什么
 
@@ -136,16 +136,16 @@ bash xtun.sh install --non-interactive \
   --disable-warp
 ```
 
-启用网络优化并选择队列算法：
+启用网络优化：
 
 ```bash
 bash xtun.sh install --non-interactive \
   ... \
-  --enable-net-opt \
-  --net-qdisc fq
+  --enable-net-opt
 ```
 
-`--net-qdisc` 支持：`fq`、`fq_codel`、`fq_pie`、`cake`。
+队列算法固定为 `fq`（BBR 系列拥塞控制的配套要求），无需也无法指定；
+拥塞控制算法由脚本按内核实际暴露的模块自动选（优先 `bbr1`，没有就 `bbr`）。
 
 ## 敏感参数输入规则
 
@@ -361,6 +361,7 @@ xtun apply-config
 
 - `timeout tunnel 1h`：握手完成后走的是 tunnel 超时，默认继承 `timeout server 2m` 会把空闲但没断的代理连接掐掉
 - `option splice-request` / `option splice-response`：纯 TCP 转发让内核直接 splice
+- `option tcp-smart-accept` / `option tcp-smart-connect`：省掉 accept/connect 之后的空 ACK，握手少一个 RTT
 - `grpc_read_timeout 1h` / `grpc_send_timeout 1h` / `grpc_buffer_size 64k`：XHTTP 下行是长连接，nginx 默认 60s 读超时会周期性断流
 
 不写 `nbthread`：HAProxy 2.5 起默认按可用 CPU 数开线程，手工钉一个小值只会把线程数改少。
@@ -605,11 +606,13 @@ xtun apply-net-opt
 
 随后脚本会写入并应用：
 
-- `tcp_congestion_control = bbr`
-- `default_qdisc = fq`，或通过 `--net-qdisc fq|fq_codel|fq_pie|cake` 指定
-- `rmem / wmem / somaxconn / tcp_fastopen / tcp_mtu_probing`
-- systemd oneshot 开机后重新应用 qdisc、`RPS`、`XPS`
-- 对 `fq_pie` / `cake` 这类非默认队列算法写入 `/etc/modules-load.d/xtun-net-qdisc.conf`
+- `tcp_congestion_control`：内核暴露 `bbr1` 就用 `bbr1`，否则用 `bbr`
+- `default_qdisc = fq`
+- `tcp_mem` 按 `MemTotal` 的 1/8、1/6、1/4 三档给（内存小于 256MB 时跳过，交给内核自己估）
+- 加大的 `rmem / wmem / optmem / somaxconn / tcp_rmem / tcp_wmem / udp_rmem_min / udp_wmem_min`
+- `netdev_max_backlog / netdev_budget / netdev_budget_usecs`、`tcp_no_metrics_save = 1`
+- `tcp_fastopen / tcp_mtu_probing / tcp_slow_start_after_idle / tcp_keepalive_*`
+- systemd oneshot 开机后重新应用 qdisc（`fq limit 100000 flow_limit 1000`）、`RPS`、`XPS`
 
 如果当前内核还不是 Joey BBRv3，但对应内核包已经安装，脚本会保留配置并提示重启；重启后再运行 `xtun status` 或 `modinfo tcp_bbr` 可确认生效。
 
@@ -618,7 +621,6 @@ xtun apply-net-opt
 - `/etc/sysctl.d/98-xtun-net.conf`
 - `/usr/local/sbin/xtun-net-optimize.sh`
 - `xtun-net-optimize.service`
-- `/etc/modules-load.d/xtun-net-qdisc.conf`
 
 第三方来源：
 
