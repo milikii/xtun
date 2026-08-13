@@ -56,13 +56,15 @@ run_change_warp_action() {
         return 1
       fi
       warp_teardown_legacy
-      finish_managed_change "WARP 分流已启用。"
+      finish_managed_change "WARP 分流已启用。" "no"
+      log "出站: $(warp_outbound_text)"
+      log "规则数: $(warp_rule_count_text)"
       ;;
     disable)
       ENABLE_WARP="no"
       apply_managed_runtime_update
       warp_teardown_legacy
-      finish_managed_change "WARP 分流已禁用。"
+      finish_managed_change "WARP 分流已禁用。" "no"
       ;;
     *)
       die "WARP 操作只能是 enable 或 disable。"
@@ -90,8 +92,13 @@ begin_managed_output_change() {
 
 finish_managed_change() {
   local message="${1}"
+  local show_links_after="${2:-yes}"
+
   log_success "${message}"
   log "备份目录：${BACKUP_DIR}"
+  # 只有真的改了客户端链接才值得再喷一整份部署文档；
+  # WARP 出站与分流规则都在服务端侧，链接一个字都不会变。
+  [[ "${show_links_after}" == "yes" ]] || return 0
   show_links
 }
 

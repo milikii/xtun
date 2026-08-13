@@ -233,6 +233,154 @@ current_warp_rules_text() {
   default_warp_rules_text
 }
 
+# 规则清单打到 stderr，因为编辑器的最终结果要从 stdout 取。
+show_warp_rules_list() {
+  local index=1
+  local rule=""
+
+  if [[ "$#" -eq 0 ]]; then
+    printf '%s\n' "  （当前没有任何规则）" >&2
+    return
+  fi
+
+  for rule in "$@"; do
+    printf '  %2s. %s\n' "${index}" "${rule}" >&2
+    index=$((index + 1))
+  done
+}
+
+# 交互输入的规则不能直接丢给 normalize_warp_rule_value：
+# 那个函数校验失败就 die，会把整个菜单进程带走。这里先自己挡一道。
+warp_rules_editor_normalize() {
+  local raw_value="${1:-}"
+
+  [[ -n "${raw_value}" ]] || {
+    warn "规则不能为空。"
+    return 1
+  }
+  if [[ "${raw_value}" == *[[:space:]]* ]]; then
+    warn "规则不能包含空白字符：${raw_value}"
+    return 1
+  fi
+  case "${raw_value}" in
+    geosite:*)
+      [[ "${raw_value#geosite:}" =~ ^[A-Za-z0-9._-]+$ ]] || {
+        warn "geosite 规则不合法：${raw_value}"
+        return 1
+      }
+      ;;
+    *)
+      if ! is_valid_hostname "${raw_value#domain:}"; then
+        warn "域名规则不合法：${raw_value}"
+        return 1
+      fi
+      ;;
+  esac
+
+  normalize_warp_rule_value "${raw_value}"
+}
+
+warp_rules_editor_delete() {
+  local target="${1}"
+  local -n rules_ref="${2}"
+  local -a kept=()
+  local index=0
+  local removed=0
+  local rule=""
+
+  if [[ "${target}" =~ ^[0-9]+$ ]]; then
+    index=$((target - 1))
+    if [[ "${index}" -lt 0 || "${index}" -ge "${#rules_ref[@]}" ]]; then
+      warn "序号超出范围：${target}"
+      return 1
+    fi
+    unset "rules_ref[${index}]"
+    rules_ref=("${rules_ref[@]+"${rules_ref[@]}"}")
+    return 0
+  fi
+
+  for rule in "${rules_ref[@]+"${rules_ref[@]}"}"; do
+    if [[ "${rule}" == "${target}" || "${rule}" == "domain:${target}" ]]; then
+      removed=1
+      continue
+    fi
+    kept+=("${rule}")
+  done
+
+  if [[ "${removed}" -eq 0 ]]; then
+    warn "找不到规则：${target}"
+    return 1
+  fi
+  rules_ref=("${kept[@]+"${kept[@]}"}")
+}
+
+# 菜单 13 的交互界面。放弃退出返回 1，保存时把最终规则打到 stdout。
+prompt_warp_rules_editor() {
+  local -a rules=()
+  local line=""
+  local answer=""
+  local value=""
+  local normalized=""
+  local exists=0
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    rules+=("${line}")
+  done < <(current_warp_rules_text)
+
+  while true; do
+    printf '\n%s\n' "当前 WARP 分流规则（命中的域名走 WARP，其它流量直连）:" >&2
+    show_warp_rules_list "${rules[@]+"${rules[@]}"}"
+    printf '%s\n' "操作: a=添加  d=删除  r=恢复默认  s=保存并应用  q=放弃退出" >&2
+    read -r -p "请选择 [s]: " answer
+    answer="$(printf '%s' "${answer:-s}" | tr 'A-Z' 'a-z')"
+
+    case "${answer}" in
+      a|add)
+        read -r -p "要添加的规则（domain:example.com / geosite:openai / example.com）: " value
+        normalized="$(warp_rules_editor_normalize "${value}")" || continue
+        exists=0
+        for line in "${rules[@]+"${rules[@]}"}"; do
+          [[ "${line}" == "${normalized}" ]] || continue
+          exists=1
+          break
+        done
+        if [[ "${exists}" -eq 1 ]]; then
+          warn "规则已存在：${normalized}"
+          continue
+        fi
+        rules+=("${normalized}")
+        ;;
+      d|del|delete)
+        read -r -p "要删除的序号或规则: " value
+        warp_rules_editor_delete "${value}" rules || continue
+        ;;
+      r|reset)
+        rules=()
+        while IFS= read -r line; do
+          [[ -n "${line}" ]] || continue
+          rules+=("${line}")
+        done < <(default_warp_rules_text)
+        ;;
+      s|save|'')
+        if [[ "${#rules[@]}" -eq 0 ]]; then
+          warn "规则不能为空；要彻底关掉分流请用菜单 12 禁用 WARP。"
+          continue
+        fi
+        break
+        ;;
+      q|quit)
+        return 1
+        ;;
+      *)
+        warn "无法识别的操作：${answer}"
+        ;;
+    esac
+  done
+
+  printf '%s\n' "${rules[@]}"
+}
+
 write_warp_rules_file() {
   local tmp_file=""
   local rules_text=""

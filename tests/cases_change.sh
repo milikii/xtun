@@ -116,9 +116,16 @@ run_change_command_case() {
   local written_prefix=""
   local shown_links=0
   local rules_written=""
+  local backup_sessions=0
+  local stdout_file=""
+
+  stdout_file="$(mktemp)"
 
   need_root() { :; }
-  start_backup_session() { BACKUP_DIR="/tmp/change-backup"; }
+  start_backup_session() {
+    backup_sessions=$((backup_sessions + 1))
+    BACKUP_DIR="/tmp/change-backup"
+  }
   load_current_install_context() {
     REALITY_SNI="old.example.com"
     REALITY_TARGET="www.harvard.edu:443"
@@ -212,21 +219,51 @@ run_change_command_case() {
   }
 
   NON_INTERACTIVE=0
-  change_warp_rules_cmd --non-interactive --add-domain chat.openai.com --del-domain github.com
+  backup_sessions=0
+  # 不能用 $(...) 收 stdout：那会把命令放进子 shell，计数器全传不回来
+  change_warp_rules_cmd --non-interactive --add-domain chat.openai.com --del-domain github.com > "${stdout_file}"
+  output="$(cat "${stdout_file}")"
   [[ "${runtime_updated}" -eq 1 ]]
+  [[ "${backup_sessions}" -eq 1 ]]
   [[ "${rules_written}" == *$'domain:chat.openai.com'* ]]
   [[ "${rules_written}" != *$'domain:github.com'* ]]
-  [[ "${shown_links}" -eq 5 ]]
+  # 分流规则改的是服务端出站，客户端链接一个字都不会变，不该再喷一份部署文档
+  [[ "${shown_links}" -eq 4 ]]
+  [[ "${output}" == *"domain:chat.openai.com"* ]]
+
+  # 规则没有实际变化时不能重启服务，也不该开备份会话挤掉真正的变更备份
+  load_current_install_context() {
+    REALITY_SNI="old.example.com"
+    REALITY_TARGET="www.harvard.edu:443"
+    XHTTP_PATH="/old"
+    NODE_LABEL_PREFIX="HKG"
+    CERT_MODE="existing"
+    XHTTP_DOMAIN="cdn.old.example.com"
+    ENABLE_WARP="no"
+    WARP_RULES_TEXT=$'geosite:google\ndomain:chat.openai.com'
+  }
+  runtime_updated=0
+  backup_sessions=0
+  NON_INTERACTIVE=0
+  change_warp_rules_cmd --non-interactive --add-domain chat.openai.com > "${stdout_file}"
+  output="$(cat "${stdout_file}")"
+  [[ "${runtime_updated}" -eq 0 ]]
+  [[ "${backup_sessions}" -eq 0 ]]
+  [[ "${shown_links}" -eq 4 ]]
+  [[ "${output}" == *"domain:chat.openai.com"* ]]
 
   load_existing_state() {
     WARP_RULES_TEXT=$'geosite:google\ndomain:chat.openai.com'
   }
   runtime_updated=0
   shown_links=0
-  output="$(change_warp_rules_cmd --list)"
+  change_warp_rules_cmd --list > "${stdout_file}"
+  output="$(cat "${stdout_file}")"
   [[ "${runtime_updated}" -eq 0 ]]
   [[ "${shown_links}" -eq 0 ]]
   [[ "${output}" == *"domain:chat.openai.com"* ]]
+
+  rm -f "${stdout_file}"
 }
 
 run_change_warp_enable_rollback_case() {

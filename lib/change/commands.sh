@@ -188,6 +188,8 @@ change_warp_rules_cmd() {
   local reset_defaults=0
   local rule=""
   local skip_rule=0
+  local original_text=""
+  local updated_text=""
 
   while [[ $# -gt 0 ]]; do
     if handle_change_common_arg "${1}"; then
@@ -228,15 +230,29 @@ change_warp_rules_cmd() {
     return
   fi
 
-  begin_managed_change
-  if [[ "${reset_defaults}" -eq 1 ]]; then
-    WARP_RULES_TEXT="$(default_warp_rules_text)"
-  else
-    while IFS= read -r line; do
-      [[ -n "${line}" ]] || continue
-      current_rules+=("${line}")
-    done < <(current_warp_rules_text)
+  # 备份会话要等到确认真的有变更再开：菜单里点进来看一眼就退出的情况很常见，
+  # 每看一次就挤掉一份真正的变更备份（默认只留 5 份）划不来。
+  need_root
+  log_step "读取当前托管安装状态。"
+  load_current_install_context
 
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    current_rules+=("${line}")
+  done < <(current_warp_rules_text)
+  original_text="$(printf '%s\n' "${current_rules[@]}")"
+
+  if [[ "${reset_defaults}" -eq 1 ]]; then
+    updated_text="$(default_warp_rules_text)"
+  elif [[ "${#add_rules[@]}" -eq 0 && "${#del_rules[@]}" -eq 0 ]] \
+    && [[ "${NON_INTERACTIVE}" -eq 0 && -t 0 && -t 1 ]]; then
+    # 不带任何修改参数又是交互终端，说明是从菜单点进来的：
+    # 给一个能看能改的界面，而不是闷头重启一遍服务再吐一整份部署文档。
+    updated_text="$(prompt_warp_rules_editor)" || {
+      log "已放弃修改，WARP 分流规则保持不变。"
+      return 0
+    }
+  else
     for line in "${current_rules[@]}"; do
       skip_rule=0
       for rule in "${del_rules[@]}"; do
@@ -264,10 +280,22 @@ change_warp_rules_cmd() {
     done
 
     [[ "${#new_rules[@]}" -gt 0 ]] || die "WARP 分流规则不能为空。"
-    WARP_RULES_TEXT="$(printf '%s\n' "${new_rules[@]}")"
+    updated_text="$(printf '%s\n' "${new_rules[@]}")"
   fi
 
+  if [[ "${updated_text}" == "${original_text}" ]]; then
+    # 规则没动就别重启：xray/haproxy/nginx 一起重启会掐断所有在跑的连接。
+    log "WARP 分流规则没有变化，未做任何修改。"
+    printf '%s\n' "${original_text}"
+    return 0
+  fi
+
+  start_backup_session
+  ensure_xray_user
+  WARP_RULES_TEXT="${updated_text}"
   log_step "更新 WARP 分流规则。"
   apply_managed_runtime_update
-  finish_managed_change "WARP 分流规则已更新。"
+  # 分流规则不影响任何客户端链接，没必要再把整份部署文档喷一遍
+  finish_managed_change "WARP 分流规则已更新。" "no"
+  printf '%s\n' "${updated_text}"
 }
