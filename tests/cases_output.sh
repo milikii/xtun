@@ -338,7 +338,15 @@ run_service_config_helper_case() {
   assert_contains 'root /var/www/xtun-fallback;' "${NGINX_CONFIG_FILE}"
   assert_contains 'try_files $uri $uri/ /index.html;' "${NGINX_CONFIG_FILE}"
   assert_contains 'grpc_pass 127.0.0.1:8001;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'grpc_read_timeout 1h;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'grpc_send_timeout 1h;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'grpc_buffer_size 64k;' "${NGINX_CONFIG_FILE}"
   assert_contains 'use_backend be_xhttp_cdn if { req.ssl_sni -i cdn.example.com }' "${HAPROXY_CONFIG}"
+  assert_contains 'timeout tunnel 1h' "${HAPROXY_CONFIG}"
+  assert_contains 'option splice-request' "${HAPROXY_CONFIG}"
+  assert_contains 'option splice-response' "${HAPROXY_CONFIG}"
+  # nbthread 由 HAProxy 自己按 CPU 数决定，写死只会把线程数改少
+  ! grep -q '^ *nbthread' "${HAPROXY_CONFIG}"
   assert_contains 'server nginx_cdn 127.0.0.1:8443 check' "${HAPROXY_CONFIG}"
   assert_contains 'check_port 443' "${CORE_HEALTH_HELPER}"
   assert_contains 'check_port 2443' "${CORE_HEALTH_HELPER}"
@@ -354,6 +362,51 @@ run_service_config_helper_case() {
   write_xray_logrotate_config
   assert_contains '/var/log/xray/access.log /var/log/xray/error.log /var/log/xtun/operations.log {' "${XRAY_LOGROTATE_FILE}"
   assert_contains 'rotate 7' "${XRAY_LOGROTATE_FILE}"
+}
+
+# 托管文件每次变更都是整份重写。用户块必须能原样活过下一次重写，
+# 否则 renew-cert 这种自动跑的命令会无声抹掉手工调优。
+run_user_block_preserve_case() {
+  local workdir=""
+  local first_render=""
+
+  workdir="$(mktemp -d)"
+  NGINX_CONF_DIR="${workdir}/nginx"
+  reset_feature_defaults
+  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+  HAPROXY_CONFIG="${workdir}/haproxy.cfg"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_LOCAL_PORT="8001"
+  NGINX_TLS_PORT="8443"
+  TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
+  TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
+
+  write_haproxy_config
+  write_nginx_config
+
+  # 模拟手工在标记之间加参数
+  sed -i '/>>> xtun-user:haproxy-defaults >>>/a\    timeout client 5m' "${HAPROXY_CONFIG}"
+  sed -i '/>>> xtun-user:haproxy-extra >>>/a\listen stats\n    bind 127.0.0.1:9000' "${HAPROXY_CONFIG}"
+  sed -i '/>>> xtun-user:nginx-server >>>/a\    client_max_body_size 64m;' "${NGINX_CONFIG_FILE}"
+
+  # 换个域名再整份重写，等价于跑一次 change-cert-mode / renew-cert
+  XHTTP_DOMAIN="cdn2.example.com"
+  write_haproxy_config
+  write_nginx_config
+
+  assert_contains 'timeout client 5m' "${HAPROXY_CONFIG}"
+  assert_contains 'bind 127.0.0.1:9000' "${HAPROXY_CONFIG}"
+  assert_contains 'client_max_body_size 64m;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'server_name cdn2.example.com;' "${NGINX_CONFIG_FILE}"
+
+  # 再写一次不能把用户块或提示行复制成两份
+  first_render="$(grep -c 'timeout client 5m' "${HAPROXY_CONFIG}")"
+  [[ "${first_render}" -eq 1 ]]
+  write_haproxy_config
+  [[ "$(grep -c 'timeout client 5m' "${HAPROXY_CONFIG}")" -eq 1 ]]
+  [[ "$(grep -c 'xtun-user:haproxy-defaults' "${HAPROXY_CONFIG}")" -eq 2 ]]
+  [[ "$(grep -c '不会被 xtun 覆盖' "${HAPROXY_CONFIG}")" -eq 2 ]]
 }
 
 run_fallback_site_deploy_case() {

@@ -86,6 +86,10 @@ run_dispatch_case() {
     dispatched="apply-net-opt"
     dispatched_args="$*"
   }
+  apply_config_cmd() {
+    dispatched="apply-config"
+    dispatched_args="$*"
+  }
   main_menu() {
     dispatched="menu"
     dispatched_args="$*"
@@ -118,6 +122,9 @@ run_dispatch_case() {
 
   run_cli_command apply-net-opt
   [[ "${dispatched}" == "apply-net-opt" ]]
+
+  run_cli_command apply-config
+  [[ "${dispatched}" == "apply-config" ]]
 
   run_cli_command
   [[ "${dispatched}" == "menu" ]]
@@ -153,6 +160,9 @@ run_dispatch_case() {
 
   run_menu_choice 23
   [[ "${dispatched}" == "apply-net-opt" ]]
+
+  run_menu_choice 24
+  [[ "${dispatched}" == "apply-config" ]]
   local version_output=""
   version_output="$(run_cli_command version)"
   [[ "${version_output}" == "xtun.sh v${SCRIPT_VERSION}" ]]

@@ -35,6 +35,7 @@ usage() {
   ${command_name} restart
   ${command_name} repair-perms
   ${command_name} apply-net-opt
+  ${command_name} apply-config
   ${command_name} version
   ${command_name} help
 
@@ -172,6 +173,7 @@ usage() {
 脚本维护命令:
   update-script               下载并更新脚本自身的持久化 bundle 与管理命令。
   apply-net-opt               在已安装节点上重新应用 Joey BBRv3 网络优化。
+  apply-config                按当前状态重新生成托管配置，让新版模板参数生效。
 
 链接参数:
   --client NAME               选择要输出的客户端；不传时默认保持原有输出，多客户端交互终端会提示选择。
@@ -183,6 +185,7 @@ usage() {
   ${command_name} upgrade
   ${command_name} repair-perms
   ${command_name} apply-net-opt
+  ${command_name} apply-config
   ${command_name} diagnose
   ${command_name} change-uuid
   ${command_name} change-sni --reality-sni www.stanford.edu

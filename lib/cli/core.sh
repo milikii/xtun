@@ -408,6 +408,33 @@ repair_perms_cmd() {
   log "已修复脚本托管文件权限，并尝试重启 xray、haproxy 与 nginx。"
 }
 
+# 脚本升级后，托管的 haproxy.cfg / nginx.conf / config.json 仍是旧模板渲染出来的，
+# 除非正好跑一次 change-* 或重装，新版模板里的调优参数不会自己生效。
+# 这条命令就是那个「按当前状态重渲染一遍」的入口。
+apply_config_cmd() {
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "未知的 apply-config 参数：${1}"
+        ;;
+    esac
+  done
+
+  need_root
+  start_backup_session
+  log_step "读取当前托管安装状态。"
+  load_current_install_context
+  ensure_xray_user
+
+  log_step "按当前状态重新生成托管配置。"
+  apply_managed_runtime_update
+  finish_managed_change "托管配置已按当前状态重新生成。" "no"
+}
+
 apply_net_opt_cmd() {
   while [[ $# -gt 0 ]]; do
     case "${1}" in
@@ -575,6 +602,7 @@ show_main_menu() {
   21. 添加客户端
   22. 查看客户端列表
   23. 重新应用网络优化
+  24. 重新生成托管配置
   0. 退出
 EOF
 }
@@ -709,6 +737,9 @@ dispatch_cli_command() {
     repair-perms)
       repair_perms_cmd
       ;;
+    apply-config)
+      apply_config_cmd "$@"
+      ;;
     apply-net-opt)
       apply_net_opt_cmd "$@"
       ;;
@@ -749,6 +780,7 @@ run_menu_choice() {
     21) run_cli_command add-client ;;
     22) run_cli_command list-clients ;;
     23) run_cli_command apply-net-opt ;;
+    24) run_cli_command apply-config ;;
     *)
       warn "未知的菜单项：${1}"
       return 1

@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.8.0`
+当前版本：`0.9.0`
 
 ## 能安装什么
 
@@ -310,6 +310,7 @@ xtun repair-perms
 xtun upgrade
 xtun update-script
 xtun apply-net-opt
+xtun apply-config
 xtun version
 ```
 
@@ -322,7 +323,47 @@ xtun version
 | `upgrade` | 升级 Xray core，并校验 `.dgst` SHA256 |
 | `update-script` | 更新 `/usr/local/lib/xtun` bundle 和 `/usr/local/sbin/xtun` wrapper |
 | `apply-net-opt` | 重新应用 Joey BBRv3 网络优化和 qdisc/sysctl 配置 |
+| `apply-config` | 按当前状态重新生成 xray / haproxy / nginx 托管配置 |
 | `version` | 打印脚本版本（也支持 `--version` / `-v`） |
+
+`update-script` 只换脚本 bundle，不会碰已经落盘的托管配置。所以升级脚本后想让新版模板里的参数生效，还要再跑一次：
+
+```bash
+xtun update-script
+xtun apply-config
+```
+
+`apply-config` 走和 `change-*` 一样的备份、校验、重启、回滚流程，但不改任何客户端参数，所以不会重刷部署文档。
+
+### 托管配置里的自定义片段
+
+`haproxy.cfg` 和 `/etc/nginx/conf.d/xtun.conf` 是整份重写的：每次 `change-*`、`apply-config`，以及自动跑的 `renew-cert`，都会按当前状态重新生成一遍。直接手工加的参数会被无声抹掉。
+
+要让手工调优活下来，把它写进生成器留出的标记之间：
+
+```text
+    # >>> xtun-user:haproxy-defaults >>>
+    timeout client 5m
+    # <<< xtun-user:haproxy-defaults <<<
+```
+
+三个可用的块：
+
+| 块名 | 位置 | 适合放什么 |
+| --- | --- | --- |
+| `haproxy-defaults` | `haproxy.cfg` 的 `defaults` 段内 | 超时、`option` 之类的默认值 |
+| `haproxy-extra` | `haproxy.cfg` 末尾 | 额外的 frontend / backend / listen |
+| `nginx-server` | `xtun.conf` 的 `server` 段内 | 额外的 `location`、`client_max_body_size` 等 |
+
+重写时标记之间的内容会被原样搬到新文件里。标记之外的手工改动仍然会丢。
+
+内置的调优参数（不需要自己加）：
+
+- `timeout tunnel 1h`：握手完成后走的是 tunnel 超时，默认继承 `timeout server 2m` 会把空闲但没断的代理连接掐掉
+- `option splice-request` / `option splice-response`：纯 TCP 转发让内核直接 splice
+- `grpc_read_timeout 1h` / `grpc_send_timeout 1h` / `grpc_buffer_size 64k`：XHTTP 下行是长连接，nginx 默认 60s 读超时会周期性断流
+
+不写 `nbthread`：HAProxy 2.5 起默认按可用 CPU 数开线程，手工钉一个小值只会把线程数改少。
 
 ### 卸载
 

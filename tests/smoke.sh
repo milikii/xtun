@@ -111,6 +111,7 @@ main() {
     run_install_draft_case
     run_service_config_helper_case
     run_fallback_site_deploy_case
+    run_user_block_preserve_case
     run_managed_apply_case
     run_managed_rollback_case
     run_optional_component_rollback_case
@@ -124,11 +125,13 @@ main() {
     run_preflight_token_verify_case
     run_preflight_domain_resolution_warning_case
     run_warp_rule_normalize_case
+    run_warp_rules_editor_case
     run_optional_component_skip_case
     run_joey_bbr_release_parse_case
     run_joey_bbr_pending_reboot_case
     run_install_network_joey_reboot_case
     run_apply_net_opt_command_case
+    run_apply_config_command_case
     run_warp_credential_helper_case
     run_warp_credential_ensure_failure_case
     run_warp_legacy_teardown_case

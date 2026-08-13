@@ -15,6 +15,7 @@ run_usage_case() {
   [[ "${output}" == *$'\n  xtun list-clients'* ]]
   [[ "${output}" == *$'\n  xtun diagnose'* ]]
   [[ "${output}" == *$'\n  xtun apply-net-opt'* ]]
+  [[ "${output}" == *$'\n  xtun apply-config'* ]]
 }
 
 run_show_links_without_state_case() {
@@ -703,6 +704,79 @@ EOF
   printf '%s' "${output}" | grep -q 'WARP 分流规则不能包含空白字符'
 }
 
+# 菜单 13 的交互编辑器。read 的提示走 stderr，最终规则走 stdout，
+# 所以喂一份脚本化的按键就能整条路径跑一遍。
+run_warp_rules_editor_case() {
+  local output=""
+  local status=0
+
+  WARP_RULES_TEXT=$'geosite:openai\ndomain:github.com'
+
+  # a 添加裸域名（自动补 domain:）、d 按序号删、d 按规则名删、s 保存
+  output="$(prompt_warp_rules_editor <<'EOF' 2>/dev/null
+a
+claude.ai
+d
+1
+d
+github.com
+s
+EOF
+)"
+  [[ "${output}" == 'domain:claude.ai' ]]
+
+  # 非法输入只警告不退出：坏规则、坏操作、重复规则都要能继续，最后仍能保存
+  output="$(prompt_warp_rules_editor <<'EOF' 2>/dev/null
+a
+bad rule
+z
+a
+geosite:openai
+s
+EOF
+)"
+  [[ "${output}" == $'geosite:openai\ndomain:github.com' ]]
+
+  # r 恢复默认
+  output="$(prompt_warp_rules_editor <<'EOF' 2>/dev/null
+r
+s
+EOF
+)"
+  [[ "${output}" == "$(default_warp_rules_text)" ]]
+
+  # 直接回车等价于保存
+  output="$(prompt_warp_rules_editor <<'EOF' 2>/dev/null
+
+EOF
+)"
+  [[ "${output}" == $'geosite:openai\ndomain:github.com' ]]
+
+  # q 放弃退出：返回非 0，且不能吐出任何规则
+  output="$(prompt_warp_rules_editor <<'EOF' 2>/dev/null
+q
+EOF
+)" || status=$?
+  [[ "${status}" -ne 0 ]]
+  [[ -z "${output}" ]]
+
+  # 删空之后不许保存，否则等于无声关掉分流
+  status=0
+  output="$(prompt_warp_rules_editor <<'EOF' 2>/dev/null
+d
+1
+d
+1
+s
+q
+EOF
+)" || status=$?
+  [[ "${status}" -ne 0 ]]
+  [[ -z "${output}" ]]
+
+  WARP_RULES_TEXT=""
+}
+
 run_optional_component_skip_case() {
   ENABLE_NET_OPT="no"
   ENABLE_WARP="no"
@@ -903,6 +977,59 @@ run_apply_net_opt_command_case() {
   apply_net_opt_cmd
 
   grep -q '请重启 VPS 后加载 Joey BBRv3 内核。' <<< "${logged}"
+  load_functions
+}
+
+# 脚本升级后没有任何东西会重渲染 haproxy.cfg / nginx.conf，
+# apply-config 就是补这个缺口的；它不该顺手改客户端链接，所以不重刷部署文档。
+run_apply_config_command_case() {
+  local calls=""
+  local logged=""
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+
+  need_root() {
+    calls+="root"$'\n'
+  }
+  start_backup_session() {
+    calls+="backup"$'\n'
+    BACKUP_DIR="${workdir}/backup"
+  }
+  load_current_install_context() {
+    calls+="load"$'\n'
+  }
+  ensure_xray_user() {
+    calls+="xray-user"$'\n'
+  }
+  apply_managed_files() {
+    calls+="apply:${1}"$'\n'
+  }
+  show_links() {
+    calls+="links"$'\n'
+  }
+  log_step() {
+    logged+="STEP:${1}"$'\n'
+  }
+  log_success() {
+    logged+="DONE:${1}"$'\n'
+  }
+  log() {
+    logged+="${1}"$'\n'
+  }
+
+  apply_config_cmd
+
+  # apply:no = 不重签 TLS 资产，只重渲染托管配置
+  [[ "${calls}" == $'root\nbackup\nload\nxray-user\napply:no\n' ]]
+  grep -q 'STEP:按当前状态重新生成托管配置。' <<< "${logged}"
+  grep -q 'DONE:托管配置已按当前状态重新生成。' <<< "${logged}"
+  grep -q "备份目录：${workdir}/backup" <<< "${logged}"
+
+  if (apply_config_cmd --bogus) 2>/dev/null; then
+    return 1
+  fi
+
   load_functions
 }
 

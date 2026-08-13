@@ -25,6 +25,49 @@ write_generated_file_atomically() {
   mv -f "${tmp_file}" "${target_path}"
 }
 
+# ------------------------------
+# 自定义片段保留
+# 托管文件每次变更都是整份重写，手工加的参数会被无声抹掉。
+# 生成器在固定位置留一对标记，重写时把上一份文件里标记之间的内容原样搬过来，
+# 手工调优就能活过 change-* 和自动跑的 renew-cert。
+# ------------------------------
+
+user_block_begin_marker() {
+  printf '# >>> xtun-user:%s >>>' "${1}"
+}
+
+user_block_end_marker() {
+  printf '# <<< xtun-user:%s <<<' "${1}"
+}
+
+extract_user_block() {
+  local block_name="${1}"
+  local file_path="${2}"
+
+  [[ -f "${file_path}" ]] || return 0
+  awk -v begin_marker="$(user_block_begin_marker "${block_name}")" \
+      -v end_marker="$(user_block_end_marker "${block_name}")" '
+    { marker = $0; sub(/^[[:space:]]+/, "", marker) }
+    marker == begin_marker { inside = 1; next }
+    marker == end_marker { inside = 0; next }
+    inside { print }
+  ' "${file_path}"
+}
+
+# 提示行写在标记之外，否则它自己会被当成用户内容一轮轮复制下去。
+render_user_block() {
+  local block_name="${1}"
+  local file_path="${2}"
+  local indent="${3:-}"
+  local body=""
+
+  body="$(extract_user_block "${block_name}" "${file_path}")"
+  printf '%s# 下面这对标记之间的内容不会被 xtun 覆盖，自定义参数写在里面。\n' "${indent}"
+  printf '%s%s\n' "${indent}" "$(user_block_begin_marker "${block_name}")"
+  [[ -z "${body}" ]] || printf '%s\n' "${body}"
+  printf '%s%s\n' "${indent}" "$(user_block_end_marker "${block_name}")"
+}
+
 xray_log_json() {
   jq -cn '{
     loglevel: "warning",
@@ -378,6 +421,11 @@ nginx_xhttp_location_config() {
         grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         grpc_set_header X-Forwarded-Proto \$scheme;
         grpc_set_header X-Forwarded-Host \$host;
+        # XHTTP 的下行是一条长连接，默认 60s 读超时会把空闲会话掐断，
+        # 客户端表现为隔一会儿就要重连。
+        grpc_read_timeout 1h;
+        grpc_send_timeout 1h;
+        grpc_buffer_size 64k;
     }
 EOF
 }
@@ -402,6 +450,8 @@ server {
 ${fallback_location}
 
 ${xhttp_location}
+
+$(render_user_block nginx-server "${NGINX_CONFIG_FILE}" "    ")
 }
 EOF
 }
@@ -419,11 +469,13 @@ global
     user haproxy
     group haproxy
     maxconn 20000
+    # 不写 nbthread：HAProxy 2.5 起默认就按可用 CPU 数开线程，
+    # 手工钉一个小值只会把线程数改少。
 EOF
 }
 
 haproxy_defaults_config() {
-  cat <<'EOF'
+  cat <<EOF
 defaults
     log global
     mode tcp
@@ -431,6 +483,13 @@ defaults
     timeout connect 5s
     timeout client 2m
     timeout server 2m
+    # 握手完成后走的是 tunnel 超时。留 2m 会把空闲但没断的代理连接掐掉，
+    # 客户端表现为「过一会儿就要重连一次」。
+    timeout tunnel 1h
+    # 纯 TCP 转发场景下让内核直接 splice，数据不再进出用户态。
+    option splice-request
+    option splice-response
+$(render_user_block haproxy-defaults "${HAPROXY_CONFIG}" "    ")
 EOF
 }
 
@@ -474,6 +533,8 @@ $(haproxy_frontend_config)
 $(haproxy_xhttp_backend_config)
 
 $(haproxy_reality_backend_config)
+
+$(render_user_block haproxy-extra "${HAPROXY_CONFIG}")
 EOF
 }
 
