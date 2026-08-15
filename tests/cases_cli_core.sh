@@ -964,7 +964,7 @@ run_net_sysctl_content_case() {
   # 读不到内存信息时整段跳过，而不是写一行空值把 sysctl --system 弄失败。
   net_tcp_mem_values() { return 1; }
   write_net_sysctl_conf
-  ! grep -q 'tcp_mem' "${NET_SYSCTL_CONF}"
+  assert_absent 'tcp_mem' "${NET_SYSCTL_CONF}"
 
   # fq 的 limit / flow_limit 默认值在高 BDP 链路上会丢包，helper 必须带上放宽后的参数，
   # 同时保留老内核不认参数时的退路。

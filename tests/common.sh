@@ -173,3 +173,15 @@ assert_contains() {
 
   grep -q -- "${pattern}" "${path}"
 }
+
+# 写成 `! grep -q ...` 的反向断言不会触发 errexit（shellcheck SC2251），
+# 断言失败时用例会若无其事地跑下去。这里显式返回失败。
+assert_absent() {
+  local pattern="${1}"
+  local path="${2}"
+
+  if grep -q -- "${pattern}" "${path}"; then
+    printf '[fail] %s 里不该出现 %s\n' "${path}" "${pattern}" >&2
+    return 1
+  fi
+}

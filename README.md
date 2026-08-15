@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.10.0`
+当前版本：`0.10.1`
 
 ## 能安装什么
 
@@ -363,6 +363,7 @@ xtun apply-config
 - `option splice-request` / `option splice-response`：纯 TCP 转发让内核直接 splice
 - `option tcp-smart-accept` / `option tcp-smart-connect`：省掉 accept/connect 之后的空 ACK，握手少一个 RTT
 - `grpc_read_timeout 1h` / `grpc_send_timeout 1h` / `grpc_buffer_size 64k`：XHTTP 下行是长连接，nginx 默认 60s 读超时会周期性断流
+- `upstream xtun_xhttp` + `keepalive 64`：nginx 对上游默认一请求一连接，XHTTP 上行那串短 POST 会让 nginx→xray 这一跳持续新建并关闭连接、堆积 TIME-WAIT；放进 upstream 块复用连接后，同样 40 次请求只新建 1 条
 
 不写 `nbthread`：HAProxy 2.5 起默认按可用 CPU 数开线程，手工钉一个小值只会把线程数改少。
 

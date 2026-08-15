@@ -412,10 +412,24 @@ nginx_fallback_location_config() {
 EOF
 }
 
+# nginx 对上游默认是一请求一连接：转发完就关，下一个请求重新握手。
+# XHTTP 的上行是一串短 POST，这一跳因此持续烧连接——实测这台机上
+# 40 秒堆出 70 多个 TIME-WAIT，而同期 haproxy->nginx 那一跳是 0。
+# 放进 upstream 块开 keepalive 之后，同样 40 次请求只新建 1 条连接。
+# 数量是每个 worker 进程各自缓存的空闲连接上限，不是总量。
+nginx_xhttp_upstream_config() {
+  cat <<EOF
+upstream xtun_xhttp {
+    server 127.0.0.1:${XHTTP_LOCAL_PORT};
+    keepalive 64;
+}
+EOF
+}
+
 nginx_xhttp_location_config() {
   cat <<EOF
     location ${XHTTP_PATH} {
-        grpc_pass 127.0.0.1:${XHTTP_LOCAL_PORT};
+        grpc_pass grpc://xtun_xhttp;
         grpc_set_header Host \$host;
         grpc_set_header X-Real-IP \$remote_addr;
         grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -456,8 +470,16 @@ $(render_user_block nginx-server "${NGINX_CONFIG_FILE}" "    ")
 EOF
 }
 
+nginx_config_text() {
+  cat <<EOF
+$(nginx_xhttp_upstream_config)
+
+$(nginx_server_config)
+EOF
+}
+
 write_nginx_config() {
-  write_generated_file_atomically "${NGINX_CONFIG_FILE}" nginx_server_config
+  write_generated_file_atomically "${NGINX_CONFIG_FILE}" nginx_config_text
 }
 
 haproxy_global_config() {

@@ -337,7 +337,17 @@ run_service_config_helper_case() {
   assert_contains 'server_name cdn.example.com;' "${NGINX_CONFIG_FILE}"
   assert_contains 'root /var/www/xtun-fallback;' "${NGINX_CONFIG_FILE}"
   assert_contains 'try_files $uri $uri/ /index.html;' "${NGINX_CONFIG_FILE}"
-  assert_contains 'grpc_pass 127.0.0.1:8001;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'grpc_pass grpc://xtun_xhttp;' "${NGINX_CONFIG_FILE}"
+  # upstream 块必须在 server 块外面，否则 nginx 直接起不来
+  assert_contains 'upstream xtun_xhttp {' "${NGINX_CONFIG_FILE}"
+  assert_contains 'server 127.0.0.1:8001;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'keepalive 64;' "${NGINX_CONFIG_FILE}"
+  [[ "$(awk '/^upstream xtun_xhttp \{/ { print NR; exit }' "${NGINX_CONFIG_FILE}")" -lt \
+     "$(awk '/^server \{/ { print NR; exit }' "${NGINX_CONFIG_FILE}")" ]]
+  # 直连上游会退回一请求一连接，把 TIME-WAIT 重新堆起来
+  assert_absent 'grpc_pass 127.0.0.1' "${NGINX_CONFIG_FILE}"
+  # upstream 里那行 server 不能把状态回填的 server 块解析器带偏
+  [[ "$(nginx_server_name "${XHTTP_PATH}")" == "cdn.example.com" ]]
   assert_contains 'grpc_read_timeout 1h;' "${NGINX_CONFIG_FILE}"
   assert_contains 'grpc_send_timeout 1h;' "${NGINX_CONFIG_FILE}"
   assert_contains 'grpc_buffer_size 64k;' "${NGINX_CONFIG_FILE}"
@@ -348,7 +358,7 @@ run_service_config_helper_case() {
   assert_contains 'option tcp-smart-accept' "${HAPROXY_CONFIG}"
   assert_contains 'option tcp-smart-connect' "${HAPROXY_CONFIG}"
   # nbthread 由 HAProxy 自己按 CPU 数决定，写死只会把线程数改少
-  ! grep -q '^ *nbthread' "${HAPROXY_CONFIG}"
+  assert_absent '^ *nbthread' "${HAPROXY_CONFIG}"
   assert_contains 'server nginx_cdn 127.0.0.1:8443 check' "${HAPROXY_CONFIG}"
   assert_contains 'check_port 443' "${CORE_HEALTH_HELPER}"
   assert_contains 'check_port 2443' "${CORE_HEALTH_HELPER}"
