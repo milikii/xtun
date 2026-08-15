@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.10.1`
+当前版本：`0.10.2`
 
 ## 能安装什么
 
@@ -613,6 +613,9 @@ xtun apply-net-opt
 - 加大的 `rmem / wmem / optmem / somaxconn / tcp_rmem / tcp_wmem / udp_rmem_min / udp_wmem_min`
 - `netdev_max_backlog / netdev_budget / netdev_budget_usecs`、`tcp_no_metrics_save = 1`
 - `tcp_fastopen / tcp_mtu_probing / tcp_slow_start_after_idle / tcp_keepalive_*`
+- `tcp_tw_reuse = 1`（内核默认的 `2` 只对 loopback 生效，而代理机烧本地端口的是出网那一侧）
+- `tcp_fin_timeout = 15`（默认 60s 的 FIN-WAIT-2 对建了就拆的代理连接太长）
+- `fs.file-max` 按 `MemTotal` 的 1/4 给、封顶 200 万，兜住 `xray.service` 里的 `LimitNOFILE=1048576`；内存撑不到就不写，交给内核自己估
 - systemd oneshot 开机后重新应用 qdisc（`fq limit 100000 flow_limit 1000`）、`RPS`、`XPS`
 
 如果当前内核还不是 Joey BBRv3，但对应内核包已经安装，脚本会保留配置并提示重启；重启后再运行 `xtun status` 或 `modinfo tcp_bbr` 可确认生效。
@@ -622,6 +625,8 @@ xtun apply-net-opt
 - `/etc/sysctl.d/98-xtun-net.conf`
 - `/usr/local/sbin/xtun-net-optimize.sh`
 - `xtun-net-optimize.service`
+
+`/etc/sysctl.d/` 按文件名排序加载，后加载的盖掉先加载的。手写一个 `99-*.conf` 会压住 `98-xtun-net.conf` 里的同名键：改了 xtun 模板却不见效，多半就是这个原因。最终值以 `sysctl -n <键>` 为准，别只看文件。
 
 第三方来源：
 

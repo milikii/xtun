@@ -948,6 +948,17 @@ run_net_sysctl_content_case() {
   read -r low mid high <<< "${tcp_mem}"
   [[ "${low}" -gt 0 && "${mid}" -gt "${low}" && "${high}" -gt "${mid}" ]]
 
+  # fs.file-max 的三个分支：撑不到 LimitNOFILE 就不写，够了按 MemTotal/4 给，再大封顶。
+  # 传 2GB：512k 个 struct file，低于 xray.service 要的 1048576，跳过。
+  [[ -z "$(net_file_max_value 2097152 || true)" ]]
+  [[ "$(net_file_max_value 4194304)" == "1048576" ]]
+  [[ "$(net_file_max_value 24576680)" == "${NET_FILE_MAX_CEILING}" ]]
+  # 读不到 MemTotal 时不能把非数字当 0 算下去。
+  [[ -z "$(net_file_max_value 'unknown' || true)" ]]
+
+  # 写文件这段跟跑测试的机器内存脱钩，否则小内存 CI 上断言会自己翻。
+  net_file_max_value() { printf '%s' "1048576"; }
+
   write_net_sysctl_conf
 
   assert_contains 'net.core.default_qdisc = fq' "${NET_SYSCTL_CONF}"
@@ -960,11 +971,17 @@ run_net_sysctl_content_case() {
   assert_contains 'net.core.rmem_max = 67108864' "${NET_SYSCTL_CONF}"
   assert_contains 'net.core.wmem_max = 67108864' "${NET_SYSCTL_CONF}"
   assert_contains 'net.ipv4.udp_rmem_min = 262144' "${NET_SYSCTL_CONF}"
+  # 这三个键原本靠手写的 99 覆盖层补，收进模板后 99 才能删掉。
+  assert_contains 'net.ipv4.tcp_tw_reuse = 1' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.ipv4.tcp_fin_timeout = 15' "${NET_SYSCTL_CONF}"
+  assert_contains 'fs.file-max = 1048576' "${NET_SYSCTL_CONF}"
 
   # 读不到内存信息时整段跳过，而不是写一行空值把 sysctl --system 弄失败。
   net_tcp_mem_values() { return 1; }
+  net_file_max_value() { return 1; }
   write_net_sysctl_conf
   assert_absent 'tcp_mem' "${NET_SYSCTL_CONF}"
+  assert_absent 'file-max' "${NET_SYSCTL_CONF}"
 
   # fq 的 limit / flow_limit 默认值在高 BDP 链路上会丢包，helper 必须带上放宽后的参数，
   # 同时保留老内核不认参数时的退路。
