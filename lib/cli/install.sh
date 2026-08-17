@@ -139,28 +139,32 @@ prepare_install_command() {
   run_install_preflight_checks
 }
 
+# 这三个都是在 `if ! xxx; then 回滚; fi` 里调用的，而 `if !` 会把整条调用链上的
+# set -e 关掉：某一步返回非 0 之后函数会接着往下跑，最终返回最后一条命令的状态。
+# 里面的步骤有的走 die（直接退出，不受影响），有的只 return 1（就会被吞），
+# 所以每一步都得显式 `|| return 1`，不能靠 errexit。
 install_xray_runtime() {
-  install_packages
-  install_self_command
-  backup_path "${XRAY_BIN}"
-  backup_path "${XRAY_ASSET_DIR}"
-  install_xray
-  ensure_xray_bind_capability
-  ensure_xray_user
-  generate_reality_keys_if_needed
+  install_packages || return 1
+  install_self_command || return 1
+  backup_path "${XRAY_BIN}" || return 1
+  backup_path "${XRAY_ASSET_DIR}" || return 1
+  install_xray || return 1
+  ensure_xray_bind_capability || return 1
+  ensure_xray_user || return 1
+  generate_reality_keys_if_needed || return 1
 }
 
 write_install_managed_files() {
-  write_tls_assets
-  write_runtime_managed_files
-  write_xray_service
-  write_core_health_monitor
-  write_xray_logrotate_config
+  write_tls_assets || return 1
+  write_runtime_managed_files || return 1
+  write_xray_service || return 1
+  write_core_health_monitor || return 1
+  write_xray_logrotate_config || return 1
 }
 
 install_optional_components() {
-  install_network_optimization
-  warp_teardown_legacy
+  install_network_optimization || return 1
+  warp_teardown_legacy || return 1
 }
 
 install_cmd() {

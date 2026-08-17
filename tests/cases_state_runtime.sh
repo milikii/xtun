@@ -419,6 +419,77 @@ run_service_failure_propagation_case() {
   status=0
   restart_core_services || status=$?
   [[ "${status}" -ne 0 ]]
+
+  load_functions
+}
+
+# 安装路径上是同一个坑：install_* 也都是在 `if ! xxx; then 回滚; fi` 里调用的。
+# 里面每一步失败都必须冒出来，否则装到一半的机器会被当成装好了。
+run_install_step_failure_propagation_case() {
+  local status=0
+
+  log_step() { :; }
+  log_success() { :; }
+  log() { :; }
+  backup_path() { :; }
+
+  # apt-get 挂了之后不能接着去装 xray，更不能因为后面几步成功就报成功。
+  install_packages() { return 1; }
+  install_self_command() { return 1; }
+  install_xray() { return 1; }
+  ensure_xray_bind_capability() { :; }
+  ensure_xray_user() { :; }
+  generate_reality_keys_if_needed() { :; }
+  status=0
+  install_xray_runtime || status=$?
+  [[ "${status}" -ne 0 ]]
+
+  # 只有中间一步挂：后面几步的成功不能把它盖掉。
+  install_packages() { :; }
+  install_self_command() { :; }
+  install_xray() { return 1; }
+  status=0
+  install_xray_runtime || status=$?
+  [[ "${status}" -ne 0 ]]
+
+  # 写托管文件同理：证书写挂了就不该继续写后面的 unit。
+  # 这里不去桩 write_runtime_managed_files：它自己那六步的传递性下面还要接着验。
+  write_tls_assets() { return 1; }
+  deploy_fallback_site() { :; }
+  write_warp_rules_file() { :; }
+  write_xray_config() { :; }
+  write_haproxy_config() { :; }
+  write_nginx_config() { :; }
+  write_nginx_limits_dropin() { :; }
+  write_xray_service() { :; }
+  write_core_health_monitor() { :; }
+  write_xray_logrotate_config() { :; }
+  status=0
+  write_install_managed_files || status=$?
+  [[ "${status}" -ne 0 ]]
+
+  # 网络优化是这组里最容易被吞的一个：它后面没有任何校验会兜住。
+  install_network_optimization() { return 1; }
+  warp_teardown_legacy() { :; }
+  status=0
+  install_optional_components || status=$?
+  [[ "${status}" -ne 0 ]]
+
+  # 托管文件是分别落盘的，写到一半失败要回滚，不能留半新半旧。
+  local rollback_calls=0
+  write_tls_assets() { :; }
+  write_xray_config() { return 1; }
+  validate_configs() { :; }
+  restart_core_services() { :; }
+  write_state_file() { :; }
+  write_output_file() { :; }
+  rollback_managed_runtime_state() { rollback_calls=$((rollback_calls + 1)); }
+  status=0
+  apply_managed_files "no" || status=$?
+  [[ "${status}" -ne 0 ]]
+  [[ "${rollback_calls}" -eq 1 ]]
+
+  load_functions
 }
 
 # nginx/haproxy 有热重载就别 restart：改 SNI、改路径、换证书都不该掐断在跑的连接。

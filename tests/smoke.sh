@@ -114,6 +114,7 @@ main() {
     run_user_block_preserve_case
     run_managed_apply_case
     run_service_failure_propagation_case
+    run_install_step_failure_propagation_case
     run_service_reload_preference_case
     run_managed_rollback_case
     run_optional_component_rollback_case

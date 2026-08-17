@@ -448,22 +448,31 @@ restart_xray_service() {
 }
 
 write_runtime_managed_files() {
-  deploy_fallback_site
-  write_warp_rules_file
-  write_xray_config
-  write_haproxy_config
-  write_nginx_config
-  write_nginx_limits_dropin
+  deploy_fallback_site || return 1
+  write_warp_rules_file || return 1
+  write_xray_config || return 1
+  write_haproxy_config || return 1
+  write_nginx_config || return 1
+  write_nginx_limits_dropin || return 1
 }
 
 apply_managed_files() {
   local include_tls_assets="${1:-no}"
 
   if [[ "${include_tls_assets}" == "yes" ]]; then
-    write_tls_assets
+    if ! write_tls_assets; then
+      rollback_managed_runtime_state "${include_tls_assets}" "no"
+      return 1
+    fi
   fi
 
-  write_runtime_managed_files
+  # 写到一半失败也要回滚：几个托管文件是分别落盘的，
+  # 半份新配置 + 半份旧配置比整份旧配置更难查。
+  if ! write_runtime_managed_files; then
+    rollback_managed_runtime_state "${include_tls_assets}" "no"
+    return 1
+  fi
+
   if ! validate_configs; then
     rollback_managed_runtime_state "${include_tls_assets}" "no"
     return 1
