@@ -401,6 +401,34 @@ else
     mask="$(printf '%x' "$(( (1 << cpus) - 1 ))")"
 fi
 
+# 只认十进制整数，别的一律当 0——链路信息读不到时不能让 `[ -gt ]` 报错把脚本带崩。
+mtu_over_1500() {
+    case "${1:-}" in
+        '' | *[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -gt 1500 ]
+}
+
+# 云厂商的 DHCP 有时下发巨帧 MTU（Oracle VCN 给的是 9000）。对一台流量全走公网的
+# 代理机来说这只有坏处：每条新连接从 advmss 8960 起步，先白吃一轮 PMTU 探测才退回
+# 1500 附近。只往下夹，不往上抬——PPPoE / 隧道那种 1492、1450 的链路抬上去会黑洞。
+link_mtu="$(cat "/sys/class/net/$iface/mtu" 2>/dev/null || echo 0)"
+if mtu_over_1500 "$link_mtu"; then
+    ip link set dev "$iface" mtu 1500 >/dev/null 2>&1 || true
+fi
+
+# 路由上没写 mtu 时会继承链路值，上面夹完就够了；写了就得单独改一次。
+route_mtu="$(ip -o -4 route show to default | grep -oE 'mtu [0-9]+' | awk '{print $2; exit}')"
+if mtu_over_1500 "${route_mtu:-}"; then
+    gw="$(ip -o -4 route show to default | awk '{print $3; exit}')"
+    src="$(ip -o -4 route show to default | grep -oE 'src [0-9.]+' | awk '{print $2; exit}')"
+    metric="$(ip -o -4 route show to default | grep -oE 'metric [0-9]+' | awk '{print $2; exit}')"
+    if [ -n "${gw:-}" ]; then
+        ip route change default via "$gw" dev "$iface" \
+            ${src:+src "$src"} ${metric:+metric "$metric"} mtu 1500 >/dev/null 2>&1 || true
+    fi
+fi
+
 rx_queues="$(find "/sys/class/net/$iface/queues" -maxdepth 1 -type d -name 'rx-*' | wc -l)"
 [ "$rx_queues" -ge 1 ] || rx_queues=1
 

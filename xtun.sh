@@ -16,7 +16,7 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
-SCRIPT_VERSION="0.10.2"
+SCRIPT_VERSION="0.11.0"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xtun"
 SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xtun"
 BOOTSTRAP_SELF_INSTALL_DIR="${XTUN_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
@@ -193,8 +193,10 @@ XRAY_SERVICE_FILE="/etc/systemd/system/xray.service"
 SELF_COMMAND_PATH="/usr/local/sbin/xtun"
 SELF_INSTALL_DIR="${BOOTSTRAP_SELF_INSTALL_DIR}"
 HAPROXY_CONFIG="/etc/haproxy/haproxy.cfg"
+NGINX_MAIN_CONFIG="/etc/nginx/nginx.conf"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
 NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+NGINX_LIMITS_DROPIN_FILE="/etc/systemd/system/nginx.service.d/xtun-limits.conf"
 NGINX_TLS_PORT="8443"
 XHTTP_LOCAL_PORT="8001"
 FALLBACK_SITE_DIR="/var/www/xtun-fallback"
@@ -240,6 +242,7 @@ SCRIPT_LOCK_DIR=""
 SESSION_LOG_FILE=""
 
 NON_INTERACTIVE=0
+NGINX_RESTART_REQUIRED="no"
 ENABLE_WARP=""
 ENABLE_NET_OPT=""
 NET_BBRV3_REBOOT_REQUIRED="no"

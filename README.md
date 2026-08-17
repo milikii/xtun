@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.10.2`
+当前版本：`0.11.0`
 
 ## 能安装什么
 
@@ -205,6 +205,7 @@ Reality、XHTTP CDN、XHTTP split 共享同一个 `443`。split 节点不增加�
 | `/usr/local/lib/xtun` | 脚本 bundle |
 | `/usr/local/etc/xray/config.json` | Xray 配置 |
 | `/etc/nginx/conf.d/xtun.conf` | nginx 托管配置 |
+| `/etc/systemd/system/nginx.service.d/xtun-limits.conf` | nginx 的 fd 限额 drop-in |
 | `/etc/haproxy/haproxy.cfg` | haproxy 托管配置 |
 | `/etc/systemd/system/xray.service` | Xray systemd unit |
 | `/usr/local/etc/xray/node-meta.env` | xtun 状态文件 |
@@ -246,6 +247,7 @@ xtun diagnose
 - `xray / haproxy / nginx` 状态
 - `443 / 2443 / 8001 / 8443` 监听
 - Xray/nginx/haproxy 配置自检
+- nginx 的 `worker_connections`（低于 4096 会给出提示，但不算失败）
 - 本地 TLS 握手
 - WARP 出站配置与 Endpoint 解析
 - 最近核心自恢复记录
@@ -366,6 +368,38 @@ xtun apply-config
 - `upstream xtun_xhttp` + `keepalive 64`：nginx 对上游默认一请求一连接，XHTTP 上行那串短 POST 会让 nginx→xray 这一跳持续新建并关闭连接、堆积 TIME-WAIT；放进 upstream 块复用连接后，同样 40 次请求只新建 1 条
 
 不写 `nbthread`：HAProxy 2.5 起默认按可用 CPU 数开线程，手工钉一个小值只会把线程数改少。
+
+### 变更时的重启与重载
+
+`change-*`、`apply-config`、`renew-cert` 应用完新配置后：
+
+| 服务 | 动作 | 原因 |
+| --- | --- | --- |
+| `xray` | 重启 | 没有配置热重载，只能重启；会掐断在跑的连接 |
+| `haproxy` | 重载 | 先自检配置再给 master 发 `USR2`，老进程继续伺候已建立的连接 |
+| `nginx` | 重载 | 收到 `SIGHUP` 会重读配置和证书，老 worker 把在飞的请求做完再退 |
+
+服务当前没在跑时才退回 `restart`。唯一例外是 fd 限额 drop-in 有变化时：`LimitNOFILE` 是进程 rlimit，reload 套不上，这一次会走 `daemon-reload` + `restart nginx`。
+
+`renew-cert` 装给 acme.sh 的续期钩子只 `reload nginx`，不碰 xray——这张证书只有 nginx 在用（Reality 有自己的密钥对，XHTTP 入站是挂在 nginx 后面的明文 h2c），重启 xray 只会把所有在跑的 Reality 会话白白掐断一次。钩子里的失败也不吞：acme.sh 会把 `reloadcmd` 的非 0 退出记成续期失败，「证书换了但没生效」正是该被看见的那一类失败。
+
+### nginx 的连接与 fd 限额
+
+发行版打包的 `nginx.service` 一个 `LimitNOFILE` 都没写，worker 拿到的就是 systemd 的默认软限额 1024。而 nginx 在这套架构里是纯反代：一条客户端连接要占两个 fd（下游一个、到 xray 的上游一个）。所以 xtun 会写一个 drop-in 把它对齐到 `xray.service`：
+
+```text
+/etc/systemd/system/nginx.service.d/xtun-limits.conf
+[Service]
+LimitNOFILE=1048576
+```
+
+`worker_connections` 只能写在 `/etc/nginx/nginx.conf` 的 `events` 块里，而 xtun 只接管 `conf.d/` 下的一个 server 段，够不着它。发行版默认值 768 在反代场景下要打对折——每个 worker 实际只够 384 个客户端。`xtun diagnose` 会把当前值报出来，低于 4096 时提示手工调整：
+
+```text
+events {
+    worker_connections 8192;
+}
+```
 
 ### 卸载
 
@@ -616,9 +650,11 @@ xtun apply-net-opt
 - `tcp_tw_reuse = 1`（内核默认的 `2` 只对 loopback 生效，而代理机烧本地端口的是出网那一侧）
 - `tcp_fin_timeout = 15`（默认 60s 的 FIN-WAIT-2 对建了就拆的代理连接太长）
 - `fs.file-max` 按 `MemTotal` 的 1/4 给、封顶 200 万，兜住 `xray.service` 里的 `LimitNOFILE=1048576`；内存撑不到就不写，交给内核自己估
-- systemd oneshot 开机后重新应用 qdisc（`fq limit 100000 flow_limit 1000`）、`RPS`、`XPS`
+- systemd oneshot 开机后重新应用 qdisc（`fq limit 100000 flow_limit 1000`）、`RPS`、`XPS`，并把出网网卡和默认路由的 MTU 夹到 1500
 
 如果当前内核还不是 Joey BBRv3，但对应内核包已经安装，脚本会保留配置并提示重启；重启后再运行 `xtun status` 或 `modinfo tcp_bbr` 可确认生效。
+
+关于 MTU：部分云厂商的 DHCP 会下发巨帧 MTU（例如 Oracle VCN 给 9000）。对一台流量全走公网的代理机来说这只有坏处——每条新连接从 `advmss 8960` 起步，先白吃一轮 PMTU 探测才退回 1500 附近。helper 只往下夹、不往上抬：链路或默认路由的 MTU 大于 1500 才改，PPPoE / 隧道那种 1492、1450 的链路原样保留。
 
 相关文件：
 

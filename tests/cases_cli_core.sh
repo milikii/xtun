@@ -941,8 +941,8 @@ run_net_sysctl_content_case() {
   # 只有 bbr1 没有 bbr 的内核同样算支持，不能被安装流程判成不支持。
   available_cc() { printf '%s' "reno cubic bbr1"; }
   cc_has_bbr "$(available_cc)"
-  ! cc_has_bbr "reno cubic"
-  ! cc_has_bbr "reno cubic bbrplus"
+  assert_false cc_has_bbr "reno cubic"
+  assert_false cc_has_bbr "reno cubic bbrplus"
 
   tcp_mem="$(net_tcp_mem_values)"
   read -r low mid high <<< "${tcp_mem}"
@@ -989,6 +989,20 @@ run_net_sysctl_content_case() {
   assert_contains 'root fq limit 100000 flow_limit 1000' "${NET_HELPER_PATH}"
   assert_contains 'root fq >/dev/null 2>&1' "${NET_HELPER_PATH}"
   sh -n "${NET_HELPER_PATH}"
+
+  # 云厂商 DHCP 下发的巨帧 MTU（Oracle VCN 给 9000）要夹回 1500，但只能往下夹：
+  # PPPoE / 隧道那种 1492、1450 的链路被抬上去会直接黑洞。
+  assert_contains 'ip link set dev "\$iface" mtu 1500' "${NET_HELPER_PATH}"
+  assert_contains 'mtu 1500' "${NET_HELPER_PATH}"
+  # 判定逻辑单独跑一遍，别只看文本里有没有这几行。
+  eval "$(sed -n '/^mtu_over_1500()/,/^}/p' "${NET_HELPER_PATH}")"
+  mtu_over_1500 9000
+  mtu_over_1500 1501
+  assert_false mtu_over_1500 1500
+  assert_false mtu_over_1500 1492
+  assert_false_silently mtu_over_1500 ''
+  assert_false_silently mtu_over_1500 'unknown'
+  unset -f mtu_over_1500
 
   rm -rf "${workdir}"
   load_functions
@@ -1148,6 +1162,91 @@ run_install_draft_case() {
 
   clear_install_draft_file
   [[ ! -f "${INSTALL_DRAFT_FILE}" ]]
+}
+
+# acme.sh 的 reloadcmd 是无人值守跑的，大约每 60 天一次。生成的钩子里有两条硬要求：
+# 一是不许重启 xray（这张证书 xray 一次都没引用，重启只是白掐 Reality 会话），
+# 二是不许把失败吞掉（吞了就等于「证书换了但没生效」永远没人知道）。
+run_acme_reload_helper_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  ACME_RELOAD_HELPER="${workdir}/xtun-cert-reload.sh"
+  XRAY_GID="456"
+  backup_path() { :; }
+
+  write_acme_reload_helper "${workdir}/stage-cert.pem" "${workdir}/stage-key.pem"
+
+  bash -n "${ACME_RELOAD_HELPER}"
+  [[ -x "${ACME_RELOAD_HELPER}" ]]
+  assert_absent 'restart xray' "${ACME_RELOAD_HELPER}"
+  assert_contains 'systemctl reload nginx' "${ACME_RELOAD_HELPER}"
+  # `|| true` 会把 reload 失败洗成成功，acme.sh 就再也看不到这次续期没落地。
+  assert_absent 'systemctl reload nginx.*|| true' "${ACME_RELOAD_HELPER}"
+  # 没在跑的时候 reload 不了，得能起来。
+  assert_contains 'systemctl start nginx' "${ACME_RELOAD_HELPER}"
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# nginx 打包的 unit 没写 LimitNOFILE，fresh install 的 worker 只有 systemd 默认的
+# 1024 个 fd。这个 drop-in 是唯一能在不接管 nginx.conf 的前提下抬起它的地方。
+run_nginx_limits_dropin_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  NGINX_LIMITS_DROPIN_FILE="${workdir}/systemd/nginx.service.d/xtun-limits.conf"
+  backup_path() { :; }
+
+  NGINX_RESTART_REQUIRED="no"
+  write_nginx_limits_dropin
+  assert_contains '\[Service\]' "${NGINX_LIMITS_DROPIN_FILE}"
+  assert_contains 'LimitNOFILE=1048576' "${NGINX_LIMITS_DROPIN_FILE}"
+  [[ "$(stat -c '%a' "${NGINX_LIMITS_DROPIN_FILE}")" == "644" ]]
+  # 新写进去就得让调用方知道要重启一次，reload 套不上 rlimit。
+  [[ "${NGINX_RESTART_REQUIRED}" == "yes" ]]
+
+  # 内容没变就别再要求重启：apply-config 会反复跑，不能每次都掐一遍 nginx。
+  NGINX_RESTART_REQUIRED="no"
+  write_nginx_limits_dropin
+  [[ "${NGINX_RESTART_REQUIRED}" == "no" ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+run_nginx_worker_connections_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  NGINX_MAIN_CONFIG="${workdir}/nginx.conf"
+
+  # 读不到主配置时只报未知，不能因此把 diagnose 带崩，也别让 awk 往 stderr 吐一行。
+  assert_false_silently nginx_worker_connections_value
+  [[ "$(nginx_worker_connections_state)" == "unknown" ]]
+  [[ "$(nginx_worker_connections_text)" == "未知" ]]
+
+  # 发行版默认 768：反代要占两个 fd，实际只够 384 个客户端，得报出来。
+  printf 'events {\n    worker_connections 768;\n}\n' > "${NGINX_MAIN_CONFIG}"
+  [[ "$(nginx_worker_connections_value)" == "768" ]]
+  [[ "$(nginx_worker_connections_state)" == "low" ]]
+  case "$(nginx_worker_connections_text)" in
+    768*384*"${NGINX_MAIN_CONFIG}"*) ;;
+    *) return 1 ;;
+  esac
+
+  printf 'events {\n    worker_connections 8192;\n}\n' > "${NGINX_MAIN_CONFIG}"
+  [[ "$(nginx_worker_connections_state)" == "ok" ]]
+  [[ "$(nginx_worker_connections_text)" == "8192" ]]
+
+  # 值不是数字就当读不到，别把脏值算进 -ge 比较里。
+  printf 'events {\n    worker_connections auto;\n}\n' > "${NGINX_MAIN_CONFIG}"
+  [[ "$(nginx_worker_connections_state)" == "unknown" ]]
+  assert_false_silently nginx_worker_connections_value
+
+  rm -rf "${workdir}"
+  load_functions
 }
 
 run_cert_mode_input_case() {

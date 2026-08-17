@@ -418,6 +418,7 @@ run_diagnose_command_case() {
   local_tls_probe_state() { printf 'ok'; }
   xray_config_check_text() { printf '通过'; }
   nginx_config_check_text() { printf '通过'; }
+  nginx_worker_connections_text() { printf '768（偏低）'; }
   haproxy_config_check_text() { printf '通过'; }
   local_tls_probe_text() { printf '通过'; }
   cert_expiry_text() { printf 'Jun  1 00:00:00 2026 GMT'; }
@@ -440,6 +441,9 @@ run_diagnose_command_case() {
   output="$(diagnose_cmd)"
   printf '%s' "${output}" | grep -q 'Xray 诊断'
   printf '%s' "${output}" | grep -q '监听 443: 运行中'
+  printf '%s' "${output}" | grep -q 'Nginx worker_connections: 768（偏低）'
+  # 只是提示，不该把 diagnose 判成失败。
+  printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
   printf '%s' "${output}" | grep -q 'WARP 出站: wireguard · 172.16.0.2'
   printf '%s' "${output}" | grep -q 'WARP 规则数: 4'
   printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'

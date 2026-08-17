@@ -427,6 +427,54 @@ nginx_config_check_text() {
   check_badge "$(nginx_config_check_state)"
 }
 
+# worker_connections 只能写在 events 块里，而 xtun 只接管 conf.d/ 下的一个 server 段，
+# 够不着它——xtun-limits.conf 抬上去的 LimitNOFILE 到这里会被这个更小的上限截住。
+# 更要命的是它在反代场景下要打对折：一条客户端连接占两个 fd（下游一个、到 xray 的
+# 上游一个），发行版默认的 768 实际只够 384 个客户端。改不了就至少报出来。
+NGINX_WORKER_CONNECTIONS_ADVISED="4096"
+
+nginx_worker_connections_value() {
+  local value=""
+
+  [[ -r "${NGINX_MAIN_CONFIG}" ]] || return 1
+  value="$(awk '$1 == "worker_connections" { sub(/;.*$/, "", $2); print $2; exit }' "${NGINX_MAIN_CONFIG}")"
+  [[ "${value}" =~ ^[0-9]+$ ]] || return 1
+
+  printf '%s' "${value}"
+}
+
+nginx_worker_connections_state() {
+  local value=""
+
+  if ! value="$(nginx_worker_connections_value)"; then
+    printf 'unknown'
+    return
+  fi
+
+  if [[ "${value}" -ge "${NGINX_WORKER_CONNECTIONS_ADVISED}" ]]; then
+    printf 'ok'
+  else
+    printf 'low'
+  fi
+}
+
+nginx_worker_connections_text() {
+  local value=""
+
+  if ! value="$(nginx_worker_connections_value)"; then
+    printf '未知'
+    return
+  fi
+
+  if [[ "$(nginx_worker_connections_state)" == "low" ]]; then
+    printf '%s（每 worker 只够 %s 条被代理的连接；建议在 %s 的 events 块里调到 %s 以上）' \
+      "${value}" "$((value / 2))" "${NGINX_MAIN_CONFIG}" "${NGINX_WORKER_CONNECTIONS_ADVISED}"
+    return
+  fi
+
+  printf '%s' "${value}"
+}
+
 haproxy_config_check_state() {
   if ! command -v haproxy >/dev/null 2>&1 || [[ ! -f "${HAPROXY_CONFIG}" ]]; then
     printf 'unknown'

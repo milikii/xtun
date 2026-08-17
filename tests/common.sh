@@ -49,7 +49,9 @@ sandbox_managed_paths() {
   WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
   HAPROXY_CONFIG="${root}/etc/haproxy/haproxy.cfg"
   NGINX_CONF_DIR="${root}/etc/nginx/conf.d"
+  NGINX_MAIN_CONFIG="${root}/etc/nginx/nginx.conf"
   NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+  NGINX_LIMITS_DROPIN_FILE="${root}/etc/systemd/system/nginx.service.d/xtun-limits.conf"
   NGINX_SERVICE_FILE="${root}/lib/systemd/system/nginx.service"
   FALLBACK_SITE_DIR="${root}/var/www/xtun-fallback"
   SSL_DIR="${root}/etc/ssl/xtun"
@@ -182,6 +184,31 @@ assert_absent() {
 
   if grep -q -- "${pattern}" "${path}"; then
     printf '[fail] %s 里不该出现 %s\n' "${path}" "${pattern}" >&2
+    return 1
+  fi
+}
+
+# 同一个坑的另一半：写成 `! some_fn arg` 的反向断言也不触发 errexit
+# （`!` 的操作数被 set -e 豁免），断言失败时用例照样往下跑到结尾并返回 0。
+assert_false() {
+  if "$@"; then
+    printf '[fail] 期望失败但返回了成功：%s\n' "$*" >&2
+    return 1
+  fi
+}
+
+# 有些「返回假」是被调用的命令自己报错报出来的：退出码一样非 0，
+# 但会往 stderr 吐一行（`[ -gt ]` 收到非数字就是这样）。
+# 只看退出码的断言分辨不出「判为假」和「炸了」，这里连 stderr 一起看。
+assert_false_silently() {
+  local stderr=""
+
+  if stderr="$("$@" 2>&1 >/dev/null)"; then
+    printf '[fail] 期望失败但返回了成功：%s\n' "$*" >&2
+    return 1
+  fi
+  if [[ -n "${stderr}" ]]; then
+    printf '[fail] %s 期望静默返回假，却输出了：%s\n' "$*" "${stderr}" >&2
     return 1
   fi
 }

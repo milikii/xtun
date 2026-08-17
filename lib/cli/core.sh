@@ -324,6 +324,7 @@ diagnose_cmd() {
   printf '%s\n' "监听 8443: $(listening_port_text 8443)"
   printf '%s\n' "Xray 配置: $(xray_config_check_text)"
   printf '%s\n' "Nginx 配置: $(nginx_config_check_text)"
+  printf '%s\n' "Nginx worker_connections: $(nginx_worker_connections_text)"
   printf '%s\n' "HAProxy 配置: $(haproxy_config_check_text)"
   printf '%s\n' "本地 TLS 探测: $(local_tls_probe_text)"
   printf '%s\n' "证书到期: $(cert_expiry_text)"
@@ -544,6 +545,7 @@ uninstall_cmd() {
     "${XRAY_LOGROTATE_FILE}" \
     "${HAPROXY_CONFIG}" \
     "${NGINX_CONFIG_FILE}" \
+    "${NGINX_LIMITS_DROPIN_FILE}" \
     "${FALLBACK_SITE_DIR}" \
     "${SSL_DIR}" \
     "${NET_SYSCTL_CONF}" \

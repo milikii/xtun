@@ -358,6 +358,128 @@ run_begin_managed_change_resolves_xray_user_case() {
   [[ "${XRAY_GID}" == "456" ]]
 }
 
+# 这几个函数都在 `if ! xxx; then 回滚; fi` 里被调用，而 `if !` 会关掉整条调用链上的
+# set -e。少一个显式 `|| return 1`，前一步失败后函数会继续跑到 log_success 并返回 0，
+# 于是「校验没过 / 服务没起来」被当成成功，回滚永远不触发。这里正是钉住那条路径。
+run_service_failure_propagation_case() {
+  local status=0
+
+  log_step() { :; }
+  log_success() { :; }
+  ensure_xray_user() { :; }
+  ensure_managed_permissions() { :; }
+
+  # xray 配置校验失败，后面两个校验通过：整体必须仍是失败。
+  validate_xray_config() { return 1; }
+  nginx() { return 0; }
+  haproxy() { return 0; }
+  status=0
+  validate_configs || status=$?
+  [[ "${status}" -ne 0 ]]
+
+  # 反过来：xray 过了、nginx -t 挂了，也不能被后面的 haproxy 覆盖成成功。
+  validate_xray_config() { return 0; }
+  nginx() { return 1; }
+  status=0
+  validate_configs || status=$?
+  [[ "${status}" -ne 0 ]]
+
+  # 重启路径同理：xray 起不来时不能被后面 haproxy/nginx 的成功盖掉。
+  systemctl() {
+    case "${1:-}" in
+      restart)
+        [[ "${2:-}" == "xray" ]] && return 1
+        return 0
+        ;;
+      is-active)
+        return 0
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  status=0
+  restart_core_services || status=$?
+  [[ "${status}" -ne 0 ]]
+
+  # nginx reload 失败同样要冒出来。
+  systemctl() {
+    case "${1:-}" in
+      reload)
+        [[ "${2:-}" == "nginx" ]] && return 1
+        return 0
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+  NGINX_RESTART_REQUIRED="no"
+  status=0
+  restart_core_services || status=$?
+  [[ "${status}" -ne 0 ]]
+}
+
+# nginx/haproxy 有热重载就别 restart：改 SNI、改路径、换证书都不该掐断在跑的连接。
+run_service_reload_preference_case() {
+  local calls=""
+
+  log_step() { :; }
+  log_success() { :; }
+  ensure_xray_user() { :; }
+  ensure_managed_permissions() { :; }
+  systemctl() {
+    calls="${calls}${*}\n"
+    case "${1:-}" in
+      is-active)
+        [[ "${3:-}" == "nginx" || "${3:-}" == "haproxy" ]]
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+
+  NGINX_RESTART_REQUIRED="no"
+  restart_core_services
+
+  # xray 没有热重载，只能重启；另外两个必须走 reload。
+  [[ "${calls}" == *"restart xray"* ]]
+  [[ "${calls}" == *"reload haproxy"* ]]
+  [[ "${calls}" == *"reload nginx"* ]]
+  [[ "${calls}" != *"restart haproxy"* ]]
+  [[ "${calls}" != *"restart nginx"* ]]
+
+  # 没在跑的服务 reload 不了，退回 restart。
+  calls=""
+  systemctl() {
+    calls="${calls}${*}\n"
+    case "${1:-}" in
+      is-active) return 1 ;;
+      *) return 0 ;;
+    esac
+  }
+  restart_core_services
+  [[ "${calls}" == *"restart nginx"* ]]
+  [[ "${calls}" != *"reload nginx"* ]]
+
+  # drop-in 刚改过时这一次必须重启，否则新的 rlimit 套不上。
+  calls=""
+  systemctl() {
+    calls="${calls}${*}\n"
+    case "${1:-}" in
+      is-active) return 0 ;;
+      *) return 0 ;;
+    esac
+  }
+  NGINX_RESTART_REQUIRED="yes"
+  restart_core_services
+  [[ "${calls}" == *"daemon-reload"* ]]
+  [[ "${calls}" == *"restart nginx"* ]]
+  [[ "${NGINX_RESTART_REQUIRED}" == "no" ]]
+}
+
 run_managed_apply_case() {
   local tls_calls=0
   local runtime_calls=0

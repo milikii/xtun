@@ -171,8 +171,17 @@ if [[ -f "\${cert_stage}" && -f "\${key_stage}" ]]; then
   mv -f "\${key_stage}" "\${key_target}"
 fi
 
-systemctl restart xray >/dev/null 2>&1 || true
-systemctl restart nginx >/dev/null 2>&1 || true
+# 这张证书只有 nginx 在用：Reality 有自己的密钥对，XHTTP 入站是挂在 nginx
+# 后面的明文 h2c，xray 配置里一次都没引用 ${SSL_DIR}。重启 xray 只会把所有
+# 在跑的 Reality 会话白白掐断一次，换不来任何东西，所以这里不碰 xray。
+# nginx 用 reload：它收到 SIGHUP 会重读证书，老 worker 把在飞的请求做完再退。
+# 失败不吞：acme.sh 会把 reloadcmd 的非 0 退出记成续期失败，
+# 而「证书换了但没生效」正是该被看见的那一类失败。
+if systemctl is-active --quiet nginx; then
+  systemctl reload nginx
+else
+  systemctl start nginx
+fi
 EOF
 
   backup_path "${ACME_RELOAD_HELPER}"

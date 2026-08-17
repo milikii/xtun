@@ -113,6 +113,8 @@ main() {
     run_fallback_site_deploy_case
     run_user_block_preserve_case
     run_managed_apply_case
+    run_service_failure_propagation_case
+    run_service_reload_preference_case
     run_managed_rollback_case
     run_optional_component_rollback_case
     run_install_rollback_helper_case
@@ -137,6 +139,9 @@ main() {
     run_warp_credential_ensure_failure_case
     run_warp_legacy_teardown_case
     run_cert_mode_input_case
+    run_acme_reload_helper_case
+    run_nginx_limits_dropin_case
+    run_nginx_worker_connections_case
     run_change_command_case
     run_change_warp_enable_rollback_case
     run_renew_cert_command_case

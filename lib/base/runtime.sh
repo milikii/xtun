@@ -223,20 +223,25 @@ remove_managed_paths() {
   done
 }
 
+# 下面这几个「校验 / 重启」函数都是在 `if ! xxx; then 回滚; fi` 里被调用的，
+# 而 `if !` 会把整条调用链上的 set -e 关掉。所以每一步都得显式 `|| return 1`：
+# 少写一个，前一步失败后函数会接着往下跑，最终返回最后一条命令（多半是
+# log_success）的 0，调用方看到成功，回滚一次都不会触发。
 validate_xray_config() {
   log_step "校验 Xray 配置。"
-  "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}"
+  "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}" || return 1
   log_success "Xray 配置校验通过。"
 }
 
 validate_configs() {
-  validate_xray_config
+  validate_xray_config || return 1
+
   log_step "校验 Nginx 配置。"
-  nginx -t
+  nginx -t || return 1
   log_success "Nginx 配置校验通过。"
 
   log_step "校验 HAProxy 配置。"
-  haproxy -c -f "${HAPROXY_CONFIG}"
+  haproxy -c -f "${HAPROXY_CONFIG}" || return 1
   log_success "HAProxy 配置校验通过。"
 }
 
@@ -275,6 +280,7 @@ rollback_managed_runtime_state() {
     "${XRAY_CONFIG_FILE}"
     "${HAPROXY_CONFIG}"
     "${NGINX_CONFIG_FILE}"
+    "${NGINX_LIMITS_DROPIN_FILE}"
     "${WARP_RULES_FILE}"
     "${CORE_HEALTH_HELPER}"
     "${CORE_HEALTH_SERVICE_FILE}"
@@ -359,21 +365,49 @@ rollback_optional_component_state() {
   fi
 }
 
+# nginx 和 haproxy 都能热重载，而且这三类改动（改 SNI / 改路径 / 换证书）没有一个
+# 需要断连接：nginx 收到 SIGHUP 会重读配置和证书，老 worker 把在飞的请求做完再退；
+# haproxy 先自检配置再给 master 发 USR2，老进程继续伺候已建立的连接。
+# restart 则是把这台机上所有在跑的代理连接一次性掐断。没在跑时才退回 restart。
+reload_or_restart_service() {
+  local unit="${1}"
+
+  if systemctl is-active --quiet "${unit}"; then
+    systemctl reload "${unit}" || return 1
+    log_success "${unit} 已重载。"
+    return 0
+  fi
+
+  systemctl restart "${unit}" || return 1
+  log_success "${unit} 已启动。"
+}
+
+# 刚写下的 systemd drop-in 改的是进程 rlimit，reload 套不上，这一次得走重启。
+apply_nginx_service_change() {
+  if [[ "${NGINX_RESTART_REQUIRED:-no}" != "yes" ]]; then
+    reload_or_restart_service nginx || return 1
+    return 0
+  fi
+
+  systemctl daemon-reload || return 1
+  systemctl restart nginx || return 1
+  log_success "nginx 已重启（套用新的 fd 限额）。"
+  NGINX_RESTART_REQUIRED="no"
+}
+
 restart_services() {
   log_step "重载 systemd 并重启核心服务。"
   ensure_xray_user
   ensure_managed_permissions
-  systemctl daemon-reload
-  systemctl enable --now xray
+  systemctl daemon-reload || return 1
+  # enable 只负责开机自启。原来写的是 `enable --now` 之后紧跟一次 restart，
+  # 等于把三个服务各起两遍；启动统一交给下面一段。
+  systemctl enable xray haproxy nginx || return 1
+  systemctl restart xray || return 1
   log_success "xray 已启动。"
-  systemctl enable --now haproxy
-  log_success "haproxy 已启动。"
-  systemctl enable --now nginx
-  log_success "nginx 已启动。"
-  systemctl restart xray
-  systemctl restart haproxy
-  systemctl restart nginx
-  systemctl enable --now "${CORE_HEALTH_TIMER_NAME}"
+  reload_or_restart_service haproxy || return 1
+  apply_nginx_service_change || return 1
+  systemctl enable --now "${CORE_HEALTH_TIMER_NAME}" || return 1
   log_success "${CORE_HEALTH_TIMER_NAME} 已启动。"
 }
 
@@ -395,22 +429,21 @@ finalize_installation() {
 }
 
 restart_core_services() {
-  log_step "重启托管服务。"
+  log_step "应用托管服务变更。"
   ensure_xray_user
   ensure_managed_permissions
-  systemctl restart xray
+  # xray 没有配置热重载，只能重启。
+  systemctl restart xray || return 1
   log_success "xray 已重启。"
-  systemctl restart haproxy
-  log_success "haproxy 已重启。"
-  systemctl restart nginx
-  log_success "nginx 已重启。"
+  reload_or_restart_service haproxy || return 1
+  apply_nginx_service_change || return 1
 }
 
 restart_xray_service() {
   log_step "重启 Xray 服务。"
   ensure_xray_user
   ensure_managed_permissions
-  systemctl restart xray
+  systemctl restart xray || return 1
   log_success "xray 已重启。"
 }
 
@@ -420,6 +453,7 @@ write_runtime_managed_files() {
   write_xray_config
   write_haproxy_config
   write_nginx_config
+  write_nginx_limits_dropin
 }
 
 apply_managed_files() {
