@@ -636,6 +636,6 @@ state_file_text() {
 }
 
 write_state_file() {
-  write_generated_file_atomically "${STATE_FILE}" state_file_text
+  write_generated_file_atomically "${STATE_FILE}" state_file_text || return 1
   chmod 0600 "${STATE_FILE}"
 }

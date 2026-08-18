@@ -458,8 +458,8 @@ apply_net_opt_cmd() {
   ENABLE_NET_OPT="yes"
   NET_BBRV3_REBOOT_REQUIRED="no"
   log_step "应用 Joey BBRv3 网络优化。"
-  install_network_optimization
-  write_state_file
+  install_network_optimization || return 1
+  write_state_file || return 1
 
   log_success "网络优化已应用。"
   log "备份目录：${BACKUP_DIR}"
@@ -659,6 +659,18 @@ run_cli_command() {
     fi
   fi
 
+  # 这个 `||` 把 xtun.sh 开头那句 set -Eeuo pipefail 关掉了，而且不只关一层：
+  # bash 的 errexit 豁免会顺着整条动态调用链一路传到最底层的函数里。
+  # 也就是说 dispatch 底下所有代码都跑在「失败不中止」的状态里，
+  # 每一步是否把失败传出来，全靠显式的 `|| return 1`（tests 里有 lint 钉着）。
+  #
+  # 别试图在这里「修好」它：
+  #   - 换成裸调用能救回 CLI 这条路，但救不了菜单——main_menu 里的
+  #     `run_menu_choice ... || true` 是必须的（一次操作失败不能把菜单打死），
+  #     那个豁免同样会穿透下去。两条入口只有显式守卫这一个共同机制。
+  #   - 子 shell 也救不回来：`( set -e; ... )` 实测照样被豁免（bash 5.2）。
+  #   - 这里的 status 也不是为了释放锁：flock 挂在 fd 9 上，进程无论怎么死内核都会
+  #     放掉；退化到目录锁时 acquire_script_lock_dir 有 PID 陈旧检测。
   dispatch_cli_command "${command}" "$@" || status=$?
 
   if [[ "${lock_taken}" -eq 1 ]]; then
@@ -804,6 +816,9 @@ main_menu() {
       exit 0
     fi
     IN_MAIN_MENU=1
+    # 这个 `|| true` 是菜单必须的：单次操作失败不能把菜单进程带走。
+    # 代价是它同样会把整条调用链的 errexit 豁免掉（见 run_cli_command 里的说明），
+    # 所以菜单这条路上的失败也只能靠底下的 `|| return 1` 传回来。
     run_menu_choice "${choice}" || true
     IN_MAIN_MENU=0
     pause_after_menu_action

@@ -36,8 +36,8 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-  backup_path "${XRAY_SERVICE_FILE}"
-  install -m 0644 "${tmp_file}" "${XRAY_SERVICE_FILE}"
+  backup_path "${XRAY_SERVICE_FILE}" || return 1
+  install -m 0644 "${tmp_file}" "${XRAY_SERVICE_FILE}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -58,8 +58,8 @@ write_xray_logrotate_config() {
 }
 EOF
 
-  backup_path "${XRAY_LOGROTATE_FILE}"
-  install -m 0644 "${tmp_file}" "${XRAY_LOGROTATE_FILE}"
+  backup_path "${XRAY_LOGROTATE_FILE}" || return 1
+  install -m 0644 "${tmp_file}" "${XRAY_LOGROTATE_FILE}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -138,8 +138,8 @@ write_health_state "ok" "services and listening ports healthy"
 append_health_history "ok" "services and listening ports healthy"
 EOF
 
-  backup_path "${CORE_HEALTH_HELPER}"
-  install -m 0755 "${tmp_file}" "${CORE_HEALTH_HELPER}"
+  backup_path "${CORE_HEALTH_HELPER}" || return 1
+  install -m 0755 "${tmp_file}" "${CORE_HEALTH_HELPER}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -158,8 +158,8 @@ Type=oneshot
 ExecStart=${CORE_HEALTH_HELPER}
 EOF
 
-  backup_path "${CORE_HEALTH_SERVICE_FILE}"
-  install -m 0644 "${tmp_file}" "${CORE_HEALTH_SERVICE_FILE}"
+  backup_path "${CORE_HEALTH_SERVICE_FILE}" || return 1
+  install -m 0644 "${tmp_file}" "${CORE_HEALTH_SERVICE_FILE}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -180,15 +180,15 @@ Unit=${CORE_HEALTH_SERVICE_NAME}
 WantedBy=timers.target
 EOF
 
-  backup_path "${CORE_HEALTH_TIMER_FILE}"
-  install -m 0644 "${tmp_file}" "${CORE_HEALTH_TIMER_FILE}"
+  backup_path "${CORE_HEALTH_TIMER_FILE}" || return 1
+  install -m 0644 "${tmp_file}" "${CORE_HEALTH_TIMER_FILE}" || return 1
   rm -f "${tmp_file}"
 }
 
 write_core_health_monitor() {
-  write_core_health_helper
-  write_core_health_service
-  write_core_health_timer
+  write_core_health_helper || return 1
+  write_core_health_service || return 1
+  write_core_health_timer || return 1
 }
 
 service_exists() {
@@ -217,8 +217,8 @@ remove_managed_paths() {
 
   for path in "$@"; do
     if [[ -e "${path}" || -L "${path}" ]]; then
-      backup_path "${path}"
-      rm -rf "${path}"
+      backup_path "${path}" || return 1
+      rm -rf "${path}" || return 1
     fi
   done
 }
@@ -259,8 +259,9 @@ rollback_managed_paths() {
 }
 
 attempt_runtime_service_recovery() {
-  ensure_xray_user
-  ensure_managed_permissions
+  # 这条是回滚之后的抢救路径，尽力而为：任何一步失败都不该拦住后面的重启。
+  ensure_xray_user || true
+  ensure_managed_permissions || true
   systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl restart xray >/dev/null 2>&1 || true
   systemctl restart haproxy >/dev/null 2>&1 || true
@@ -268,8 +269,8 @@ attempt_runtime_service_recovery() {
 }
 
 attempt_xray_service_recovery() {
-  ensure_xray_user
-  ensure_managed_permissions
+  ensure_xray_user || true
+  ensure_managed_permissions || true
   systemctl restart xray >/dev/null 2>&1 || true
 }
 
@@ -397,8 +398,8 @@ apply_nginx_service_change() {
 
 restart_services() {
   log_step "重载 systemd 并重启核心服务。"
-  ensure_xray_user
-  ensure_managed_permissions
+  ensure_xray_user || return 1
+  ensure_managed_permissions || return 1
   systemctl daemon-reload || return 1
   # enable 只负责开机自启。原来写的是 `enable --now` 之后紧跟一次 restart，
   # 等于把三个服务各起两遍；启动统一交给下面一段。
@@ -430,8 +431,8 @@ finalize_installation() {
 
 restart_core_services() {
   log_step "应用托管服务变更。"
-  ensure_xray_user
-  ensure_managed_permissions
+  ensure_xray_user || return 1
+  ensure_managed_permissions || return 1
   # xray 没有配置热重载，只能重启。
   systemctl restart xray || return 1
   log_success "xray 已重启。"
@@ -441,8 +442,8 @@ restart_core_services() {
 
 restart_xray_service() {
   log_step "重启 Xray 服务。"
-  ensure_xray_user
-  ensure_managed_permissions
+  ensure_xray_user || return 1
+  ensure_managed_permissions || return 1
   systemctl restart xray || return 1
   log_success "xray 已重启。"
 }
@@ -488,7 +489,11 @@ apply_managed_files() {
 }
 
 apply_xray_only_managed_update() {
-  write_xray_config
+  if ! write_xray_config; then
+    rollback_xray_config_state
+    return 1
+  fi
+
   if ! validate_xray_config; then
     rollback_xray_config_state
     return 1

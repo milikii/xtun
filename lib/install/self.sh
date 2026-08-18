@@ -32,7 +32,10 @@ install_self_command() {
     source_bundle_root="${staging_dir}"
   fi
 
-  install_bundle_root_to_self "${source_bundle_root}"
+  install_bundle_root_to_self "${source_bundle_root}" || {
+    [[ -n "${staging_dir}" ]] && rm -rf "${staging_dir}"
+    return 1
+  }
   if [[ -n "${staging_dir}" ]]; then
     rm -rf "${staging_dir}"
   fi
@@ -90,16 +93,16 @@ install_bundle_root_to_self() {
   local wrapper_tmp=""
   bundle_root_ready "${source_bundle_root}" || die "脚本 bundle 缺少必需文件，无法安装。"
 
-  backup_path "${SELF_INSTALL_DIR}"
-  backup_path "${SELF_COMMAND_PATH}"
+  backup_path "${SELF_INSTALL_DIR}" || return 1
+  backup_path "${SELF_COMMAND_PATH}" || return 1
 
-  rm -rf "${SELF_INSTALL_DIR}"
-  install -d -m 0755 "${SELF_INSTALL_DIR}"
-  install -d -m 0755 "$(dirname "${SELF_COMMAND_PATH}")"
-  install -m 0755 "${source_bundle_root}/xtun.sh" "${target_entry}"
-  cp -a "${source_bundle_root}/lib" "${SELF_INSTALL_DIR}/lib"
+  rm -rf "${SELF_INSTALL_DIR}" || return 1
+  install -d -m 0755 "${SELF_INSTALL_DIR}" || return 1
+  install -d -m 0755 "$(dirname "${SELF_COMMAND_PATH}")" || return 1
+  install -m 0755 "${source_bundle_root}/xtun.sh" "${target_entry}" || return 1
+  cp -a "${source_bundle_root}/lib" "${SELF_INSTALL_DIR}/lib" || return 1
   if [[ -d "${source_bundle_root}/static" ]]; then
-    cp -a "${source_bundle_root}/static" "${SELF_INSTALL_DIR}/static"
+    cp -a "${source_bundle_root}/static" "${SELF_INSTALL_DIR}/static" || return 1
   fi
 
   wrapper_tmp="$(mktemp)"
@@ -108,7 +111,7 @@ install_bundle_root_to_self() {
 export XTUN_COMMAND_NAME="\$(basename "\$0")"
 exec "${target_entry}" "\$@"
 EOF
-  install -m 0755 "${wrapper_tmp}" "${SELF_COMMAND_PATH}"
+  install -m 0755 "${wrapper_tmp}" "${SELF_COMMAND_PATH}" || { rm -f "${wrapper_tmp}"; return 1; }
   rm -f "${wrapper_tmp}"
 }
 

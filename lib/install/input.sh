@@ -386,11 +386,11 @@ write_warp_rules_file() {
   local rules_text=""
 
   rules_text="$(normalize_warp_rules_text "$(current_warp_rules_text)")"
-  mkdir -p "${XRAY_CONFIG_DIR}"
-  backup_path "${WARP_RULES_FILE}"
+  mkdir -p "${XRAY_CONFIG_DIR}" || return 1
+  backup_path "${WARP_RULES_FILE}" || return 1
   tmp_file="$(mktemp "${XRAY_CONFIG_DIR}/.warp-domains.list.tmp.XXXXXX")"
-  printf '%s\n' "${rules_text}" > "${tmp_file}"
-  mv -f "${tmp_file}" "${WARP_RULES_FILE}"
+  printf '%s\n' "${rules_text}" > "${tmp_file}" || { rm -f "${tmp_file}"; return 1; }
+  mv -f "${tmp_file}" "${WARP_RULES_FILE}" || { rm -f "${tmp_file}"; return 1; }
   chmod 0640 "${WARP_RULES_FILE}"
 }
 

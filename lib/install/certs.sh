@@ -184,8 +184,8 @@ else
 fi
 EOF
 
-  backup_path "${ACME_RELOAD_HELPER}"
-  install -m 0755 "${tmp_file}" "${ACME_RELOAD_HELPER}"
+  backup_path "${ACME_RELOAD_HELPER}" || return 1
+  install -m 0755 "${tmp_file}" "${ACME_RELOAD_HELPER}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -298,11 +298,11 @@ write_self_signed_tls_assets() {
   local tls_config=""
 
   tls_config="$(mktemp)"
-  self_signed_tls_config > "${tls_config}"
+  self_signed_tls_config > "${tls_config}" || { rm -f "${tls_config}"; return 1; }
   openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
     -keyout "${key_file}" \
     -out "${cert_file}" \
-    -config "${tls_config}" >/dev/null 2>&1
+    -config "${tls_config}" >/dev/null 2>&1 || { rm -f "${tls_config}"; return 1; }
   rm -f "${tls_config}"
   chmod 0640 "${cert_file}" "${key_file}"
 }
@@ -323,10 +323,10 @@ promote_tls_assets() {
   local cert_file="${1}"
   local key_file="${2}"
 
-  chown 0:"${XRAY_GID}" "${cert_file}" "${key_file}"
-  chmod 0640 "${cert_file}" "${key_file}"
-  mv -f "${cert_file}" "${TLS_CERT_FILE}"
-  mv -f "${key_file}" "${TLS_KEY_FILE}"
+  chown 0:"${XRAY_GID}" "${cert_file}" "${key_file}" || return 1
+  chmod 0640 "${cert_file}" "${key_file}" || return 1
+  mv -f "${cert_file}" "${TLS_CERT_FILE}" || return 1
+  mv -f "${key_file}" "${TLS_KEY_FILE}" || return 1
 }
 
 write_tls_assets() {
@@ -334,8 +334,8 @@ write_tls_assets() {
   local stage_key_file=""
 
   mkdir -p "${SSL_DIR}"
-  backup_path "${TLS_CERT_FILE}"
-  backup_path "${TLS_KEY_FILE}"
+  backup_path "${TLS_CERT_FILE}" || return 1
+  backup_path "${TLS_KEY_FILE}" || return 1
   stage_cert_file="$(tls_stage_cert_file)"
   stage_key_file="$(tls_stage_key_file)"
   cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"
@@ -347,25 +347,26 @@ write_tls_assets() {
 
   case "${CERT_MODE}" in
     existing)
-      write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}"
+      write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
     cf-origin-ca)
-      write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}"
+      write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
     acme-dns-cf)
-      issue_acme_cf_cert "${stage_cert_file}" "${stage_key_file}"
+      issue_acme_cf_cert "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
     *)
-      write_self_signed_tls_assets "${stage_cert_file}" "${stage_key_file}"
+      write_self_signed_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
   esac
 
-  if [[ -f "${stage_cert_file}" && -f "${stage_key_file}" ]]; then
-    validate_tls_assets_with_paths "${stage_cert_file}" "${stage_key_file}"
-    promote_tls_assets "${stage_cert_file}" "${stage_key_file}"
-  fi
+  # 签发/导入这一步没产出暂存文件就必须失败退出：再往下走 validate_tls_assets 校验的
+  # 是磁盘上那份旧证书，它当然是好的，于是「换证书失败」会被报成换证书成功。
+  [[ -f "${stage_cert_file}" && -f "${stage_key_file}" ]] || return 1
+  validate_tls_assets_with_paths "${stage_cert_file}" "${stage_key_file}" || return 1
+  promote_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
 
-  ensure_managed_permissions
+  ensure_managed_permissions || return 1
   validate_tls_assets
 }
 

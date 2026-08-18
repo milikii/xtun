@@ -21,7 +21,7 @@ write_generated_file_atomically() {
     return 1
   fi
 
-  backup_path "${target_path}"
+  backup_path "${target_path}" || { rm -f "${tmp_file}"; return 1; }
   mv -f "${tmp_file}" "${target_path}"
 }
 
@@ -355,9 +355,9 @@ xray_outbounds_json() {
 }
 
 write_xray_config() {
-  generate_xhttp_vless_encryption_if_needed
-  ensure_warp_credentials
-  write_generated_file_atomically "${XRAY_CONFIG_FILE}" xray_config_text
+  generate_xhttp_vless_encryption_if_needed || return 1
+  ensure_warp_credentials || return 1
+  write_generated_file_atomically "${XRAY_CONFIG_FILE}" xray_config_text || return 1
 
   ensure_managed_permissions
 }
@@ -396,12 +396,12 @@ deploy_fallback_site() {
   [[ -n "${target_dir}" && "${target_dir}" == /* && "${target_dir}" != "/" && "${target_dir}" != "/var" && "${target_dir}" != "/var/www" ]] \
     || die "静态伪装站目标目录不安全：${target_dir}"
 
-  backup_path "${target_dir}"
-  rm -rf "${target_dir}"
-  install -d -m 0755 "${target_dir}"
-  cp -a "${source_dir}/." "${target_dir}/"
-  find "${target_dir}" -type d -exec chmod 0755 {} +
-  find "${target_dir}" -type f -exec chmod 0644 {} +
+  backup_path "${target_dir}" || return 1
+  rm -rf "${target_dir}" || return 1
+  install -d -m 0755 "${target_dir}" || return 1
+  cp -a "${source_dir}/." "${target_dir}/" || return 1
+  find "${target_dir}" -type d -exec chmod 0755 {} + || return 1
+  find "${target_dir}" -type f -exec chmod 0644 {} + || return 1
 }
 
 nginx_fallback_location_config() {
@@ -500,16 +500,16 @@ write_nginx_limits_dropin() {
   local tmp_file=""
 
   tmp_file="$(mktemp)"
-  nginx_limits_dropin_text > "${tmp_file}"
+  nginx_limits_dropin_text > "${tmp_file}" || { rm -f "${tmp_file}"; return 1; }
 
   if [[ -f "${NGINX_LIMITS_DROPIN_FILE}" ]] && cmp -s "${tmp_file}" "${NGINX_LIMITS_DROPIN_FILE}"; then
     rm -f "${tmp_file}"
     return 0
   fi
 
-  backup_path "${NGINX_LIMITS_DROPIN_FILE}"
-  install -d -m 0755 "$(dirname "${NGINX_LIMITS_DROPIN_FILE}")"
-  install -m 0644 "${tmp_file}" "${NGINX_LIMITS_DROPIN_FILE}"
+  backup_path "${NGINX_LIMITS_DROPIN_FILE}" || return 1
+  install -d -m 0755 "$(dirname "${NGINX_LIMITS_DROPIN_FILE}")" || return 1
+  install -m 0644 "${tmp_file}" "${NGINX_LIMITS_DROPIN_FILE}" || return 1
   rm -f "${tmp_file}"
   # rlimit 是进程属性，reload 套不上，只有重启 nginx 才吃得到新值。
   NGINX_RESTART_REQUIRED="yes"

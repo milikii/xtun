@@ -483,11 +483,11 @@ write_subscription_qr_png() {
 }
 
 write_subscription_files() {
-  mkdir -p "${SUBSCRIPTION_DIR}" "${SUBSCRIPTION_QR_DIR}"
-  write_generated_file_atomically "${SUBSCRIPTION_RAW_FILE}" subscription_raw_text
-  chmod 0644 "${SUBSCRIPTION_RAW_FILE}"
-  write_generated_file_atomically "${SUBSCRIPTION_BASE64_FILE}" subscription_base64_text
-  chmod 0644 "${SUBSCRIPTION_BASE64_FILE}"
+  mkdir -p "${SUBSCRIPTION_DIR}" "${SUBSCRIPTION_QR_DIR}" || return 1
+  write_generated_file_atomically "${SUBSCRIPTION_RAW_FILE}" subscription_raw_text || return 1
+  chmod 0644 "${SUBSCRIPTION_RAW_FILE}" || return 1
+  write_generated_file_atomically "${SUBSCRIPTION_BASE64_FILE}" subscription_base64_text || return 1
+  chmod 0644 "${SUBSCRIPTION_BASE64_FILE}" || return 1
 
   if command -v qrencode >/dev/null 2>&1; then
     write_subscription_qr_png "${SUBSCRIPTION_RAW_FILE}" "${SUBSCRIPTION_RAW_QR_FILE}" || warn "生成 Raw VLESS 订阅二维码失败，已跳过。"
@@ -497,7 +497,7 @@ write_subscription_files() {
     warn "系统中未找到 qrencode，已跳过订阅二维码 PNG。"
   fi
 
-  write_generated_file_atomically "${SUBSCRIPTION_MANIFEST_FILE}" subscription_manifest_text
+  write_generated_file_atomically "${SUBSCRIPTION_MANIFEST_FILE}" subscription_manifest_text || return 1
   chmod 0644 "${SUBSCRIPTION_MANIFEST_FILE}"
 }
 
@@ -772,6 +772,6 @@ EOF
 write_output_file() {
   OUTPUT_CLIENT_NAME="${1:-$(selected_output_client_name)}"
   write_subscription_files
-  write_generated_file_atomically "${OUTPUT_FILE}" output_file_text
+  write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
   chmod 0644 "${OUTPUT_FILE}"
 }

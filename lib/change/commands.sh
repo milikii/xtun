@@ -14,14 +14,16 @@ upgrade_cmd() {
   [[ -x "${XRAY_BIN}" ]] || die "找不到当前 Xray 可执行文件：${XRAY_BIN}"
 
   start_backup_session
-  backup_path "${XRAY_BIN}"
-  backup_path "${XRAY_ASSET_DIR}"
+  backup_path "${XRAY_BIN}" || return 1
+  backup_path "${XRAY_ASSET_DIR}" || return 1
   previous_version="$("${XRAY_BIN}" version 2>/dev/null | head -n 1 || true)"
   [[ -n "${previous_version}" ]] && log "升级前版本：${previous_version}"
 
   log_step "升级 Xray 核心。"
-  install_xray
-  ensure_xray_bind_capability
+  # 下载/校验/解包任何一步挂了都要在这里停住：再往下 validate_configs 校验的是磁盘上
+  # 那份没被换掉的旧核心，它当然过得了，于是「升级失败」会被报成升级完成。
+  install_xray || return 1
+  ensure_xray_bind_capability || return 1
   if ! validate_configs; then
     warn "升级后的配置校验失败，正在回滚 Xray 核心文件。"
     restore_backup_path "${XRAY_BIN}" || true
@@ -64,12 +66,12 @@ change_uuid_cmd() {
   fi
 
   log_step "写入新的 UUID 配置。"
-  write_xray_config
+  write_xray_config || return 1
   log_step "校验并重启 xray。"
-  validate_configs
-  systemctl restart xray
-  write_state_file
-  write_output_file
+  validate_configs || return 1
+  systemctl restart xray || return 1
+  write_state_file || return 1
+  write_output_file || return 1
 
   finish_managed_change "UUID 轮换完成。"
 }

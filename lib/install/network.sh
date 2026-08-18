@@ -377,8 +377,8 @@ EOF
     fi
   } > "${tmp_file}"
 
-  backup_path "${NET_SYSCTL_CONF}"
-  install -m 0644 "${tmp_file}" "${NET_SYSCTL_CONF}"
+  backup_path "${NET_SYSCTL_CONF}" || return 1
+  install -m 0644 "${tmp_file}" "${NET_SYSCTL_CONF}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -464,8 +464,8 @@ for f in /sys/class/net/"$iface"/queues/tx-*/xps_rxqs; do
 done
 EOF
 
-  backup_path "${NET_HELPER_PATH}"
-  install -m 0755 "${tmp_file}" "${NET_HELPER_PATH}"
+  backup_path "${NET_HELPER_PATH}" || return 1
+  install -m 0755 "${tmp_file}" "${NET_HELPER_PATH}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -488,8 +488,8 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-  backup_path "${NET_SERVICE_FILE}"
-  install -m 0644 "${tmp_file}" "${NET_SERVICE_FILE}"
+  backup_path "${NET_SERVICE_FILE}" || return 1
+  install -m 0644 "${tmp_file}" "${NET_SERVICE_FILE}" || return 1
   rm -f "${tmp_file}"
 }
 
@@ -517,9 +517,9 @@ install_network_optimization() {
     fi
   fi
 
-  write_net_sysctl_conf
-  write_net_helper_script
-  write_net_service
+  write_net_sysctl_conf || return 1
+  write_net_helper_script || return 1
+  write_net_service || return 1
   if ! sysctl --system >/dev/null; then
     if [[ "${NET_BBRV3_REBOOT_REQUIRED:-no}" == "yes" ]]; then
       warn "当前内核暂不能完整应用网络 sysctl；重启进入 Joey BBRv3 内核后会自动生效。"
@@ -527,8 +527,8 @@ install_network_optimization() {
       return 1
     fi
   fi
-  systemctl daemon-reload
-  systemctl enable --now "${NET_SERVICE_NAME}" >/dev/null
+  systemctl daemon-reload || return 1
+  systemctl enable --now "${NET_SERVICE_NAME}" >/dev/null || return 1
 
   if [[ "${NET_BBRV3_REBOOT_REQUIRED:-no}" == "yes" ]]; then
     log_success "网络优化配置已写入；重启后加载 Joey BBRv3 内核。"

@@ -150,31 +150,31 @@ install_xray() {
   log "资源文件：${archive_name}"
   log "校验文件：${digest_name}"
   [[ -n "${archive_url}" ]] || archive_url="${base_url}/${archive_name}"
-  curl -fsSL "${archive_url}" -o "${archive_path}"
+  curl -fsSL "${archive_url}" -o "${archive_path}" || return 1
 
   if [[ -n "${expected_sha256}" ]]; then
     checksum_source="GitHub Release API digest"
   else
     [[ -n "${digest_url}" ]] || digest_url="${base_url}/${digest_name}"
-    curl -fsSL "${digest_url}" -o "${digest_path}"
+    curl -fsSL "${digest_url}" -o "${digest_path}" || return 1
     expected_sha256="$(parse_xray_dgst_sha256 "${digest_path}" "${archive_name}")"
     checksum_source="${digest_name}"
   fi
 
   log "校验来源：${checksum_source}"
-  verify_file_sha256 "${archive_path}" "${expected_sha256}" "Xray-core 安装包"
+  verify_file_sha256 "${archive_path}" "${expected_sha256}" "Xray-core 安装包" || return 1
   log_success "Xray-core 安装包校验通过。"
-  unzip -qo "${archive_path}" -d "${tmp_dir}/xray"
+  unzip -qo "${archive_path}" -d "${tmp_dir}/xray" || return 1
 
-  mkdir -p /usr/local/bin "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" /var/log/xray
-  install -m 0755 "${tmp_dir}/xray/xray" "${XRAY_BIN}"
+  mkdir -p /usr/local/bin "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" /var/log/xray || return 1
+  install -m 0755 "${tmp_dir}/xray/xray" "${XRAY_BIN}" || return 1
 
   if [[ -f "${tmp_dir}/xray/geoip.dat" ]]; then
-    install -m 0644 "${tmp_dir}/xray/geoip.dat" "${XRAY_ASSET_DIR}/geoip.dat"
+    install -m 0644 "${tmp_dir}/xray/geoip.dat" "${XRAY_ASSET_DIR}/geoip.dat" || return 1
   fi
 
   if [[ -f "${tmp_dir}/xray/geosite.dat" ]]; then
-    install -m 0644 "${tmp_dir}/xray/geosite.dat" "${XRAY_ASSET_DIR}/geosite.dat"
+    install -m 0644 "${tmp_dir}/xray/geosite.dat" "${XRAY_ASSET_DIR}/geosite.dat" || return 1
   fi
 
   rm -rf "${tmp_dir}"
@@ -366,7 +366,7 @@ load_install_draft_file() {
 }
 
 write_install_draft_file() {
-  write_generated_file_atomically "${INSTALL_DRAFT_FILE}" install_draft_file_text
+  write_generated_file_atomically "${INSTALL_DRAFT_FILE}" install_draft_file_text || return 1
   chmod 0600 "${INSTALL_DRAFT_FILE}"
 }
 

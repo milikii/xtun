@@ -492,7 +492,66 @@ run_install_step_failure_propagation_case() {
   load_functions
 }
 
-# nginx/haproxy 有热重载就别 restart：改 SNI、改路径、换证书都不该掐断在跑的连接。
+# errexit 在这个脚本里是不生效的，而且不是疏忽：
+#   lib/cli/core.sh 的 `dispatch_cli_command ... || status=$?`（CLI 入口）
+#   lib/cli/core.sh 的 `run_menu_choice ... || true`（菜单入口，必须保留）
+# 这两个 `||` 各自把整条动态调用链上的 set -e 豁免掉，一路穿透到最底层。
+# 子 shell 和重新 set -e 都救不回来（bash 5.2 实测），所以「每一步是否把失败传出来」
+# 只能靠显式的 `|| return 1`——它不是 errexit 的替代品，它就是这里唯一的机制。
+# 这条用例把「必须传出失败」的步骤列出来，钉住它们在源码里的每个调用点都带守卫。
+# 新加一行没写 `|| return 1` 的调用，这里就会红。
+errexit_guarded_step_names() {
+  printf '%s\n' \
+    install_packages install_self_command install_xray ensure_xray_bind_capability \
+    generate_reality_keys_if_needed write_tls_assets write_runtime_managed_files \
+    write_xray_service write_core_health_monitor write_core_health_helper \
+    write_core_health_service write_core_health_timer write_xray_logrotate_config \
+    install_network_optimization deploy_fallback_site write_warp_rules_file \
+    write_xray_config write_haproxy_config write_nginx_config write_nginx_limits_dropin \
+    write_generated_file_atomically ensure_warp_credentials \
+    generate_xhttp_vless_encryption_if_needed backup_path install_bundle_root_to_self \
+    validate_tls_assets_with_paths promote_tls_assets \
+    write_net_sysctl_conf write_net_helper_script write_net_service
+}
+
+# 少数几处允许光着：它们是所在函数的最后一条语句，退出码本来就会原样返回。
+errexit_guard_allowed_bare_lines() {
+  printf '%s\n' \
+    'lib/install/certs.sh:validate_tls_assets_with_paths "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"' \
+    'lib/generators.sh:write_generated_file_atomically "${NGINX_CONFIG_FILE}" nginx_config_text' \
+    'lib/generators.sh:write_generated_file_atomically "${HAPROXY_CONFIG}" haproxy_config_text'
+}
+
+run_errexit_guard_lint_case() {
+  local pattern=""
+  local hit=""
+  local allowed=""
+  local violations=0
+
+  pattern="$(errexit_guarded_step_names | paste -sd '|' -)"
+  allowed="$(errexit_guard_allowed_bare_lines)"
+
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    # hit 形如 lib/xxx.sh:12:  write_xray_config，归一成 文件:语句 再比对白名单
+    local file="${hit%%:*}"
+    local stmt="${hit#*:}"
+    stmt="${stmt#*:}"
+    stmt="${stmt#"${stmt%%[![:space:]]*}"}"
+    if printf '%s\n' "${allowed}" | grep -Fxq "${file}:${stmt}"; then
+      continue
+    fi
+    printf '[fail] %s 少了 `|| return 1`：这一步失败会被 set -e 豁免吞掉\n' "${hit}" >&2
+    violations=$((violations + 1))
+  done < <(
+    cd "${ROOT_DIR}" \
+      && grep -rnE "^[[:space:]]*(${pattern})([[:space:]]|\$)" xtun.sh lib/ --include='*.sh' \
+        | grep -vE '\|\||&&|; then|; do' \
+        || true
+  )
+
+  [[ "${violations}" -eq 0 ]]
+}
 run_service_reload_preference_case() {
   local calls=""
 
@@ -644,6 +703,78 @@ run_tls_stage_failure_case() {
   [[ "$(cat "${TLS_KEY_FILE}")" == "old-key" ]]
   [[ ! -e "${SSL_DIR}/.cert.pem.stage" ]]
   [[ ! -e "${SSL_DIR}/.key.pem.stage" ]]
+}
+
+# 签发这一步失败但没走 die 时，最容易出的错是「报成功」：函数会接着往下跑到
+# validate_tls_assets，而它校验的是磁盘上那份没被换掉的旧证书——旧证书当然是好的。
+# 于是 change-cert-mode / renew-cert 会告诉用户换好了，实际上一个字节都没换。
+run_tls_issue_failure_not_reported_ok_case() {
+  local workdir=""
+  local status=0
+
+  workdir="$(mktemp -d)"
+  SSL_DIR="${workdir}/ssl"
+  TLS_CERT_FILE="${SSL_DIR}/cert.pem"
+  TLS_KEY_FILE="${SSL_DIR}/key.pem"
+  CERT_MODE="acme-dns-cf"
+  XHTTP_DOMAIN="cdn.example.com"
+  XRAY_GID="0"
+  mkdir -p "${SSL_DIR}"
+
+  # 磁盘上留一份「校验得过」的旧证书，正是它会把失败盖成成功。
+  printf 'old-cert\n' > "${TLS_CERT_FILE}"
+  printf 'old-key\n' > "${TLS_KEY_FILE}"
+  backup_path() { :; }
+  ensure_managed_permissions() { :; }
+  validate_tls_assets() { :; }
+  issue_acme_cf_cert() { return 1; }
+
+  set +e
+  ( write_tls_assets ) >/dev/null 2>&1
+  status=$?
+  set -e
+
+  [[ "${status}" -ne 0 ]]
+  [[ "$(cat "${TLS_CERT_FILE}")" == "old-cert" ]]
+
+  # 签发「成功」了却没落下暂存文件，同样不能算换成功。
+  issue_acme_cf_cert() { :; }
+  set +e
+  ( write_tls_assets ) >/dev/null 2>&1
+  status=$?
+  set -e
+  [[ "${status}" -ne 0 ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# add-client 走的是这条：写配置失败后如果不停下来，validate_xray_config 校验的是
+# 磁盘上那份旧 config.json，一样会过，于是「客户端已添加」是假的。
+run_xray_only_update_write_failure_case() {
+  local status=0
+  local rollback_calls=0
+  local validated=0
+
+  log() { :; }
+  log_step() { :; }
+  log_success() { :; }
+  write_xray_config() { return 1; }
+  validate_xray_config() { validated=$((validated + 1)); }
+  write_state_file() { :; }
+  write_output_file() { :; }
+  restart_xray_service() { :; }
+  rollback_xray_config_state() { rollback_calls=$((rollback_calls + 1)); }
+
+  status=0
+  apply_xray_only_managed_update || status=$?
+
+  [[ "${status}" -ne 0 ]]
+  [[ "${rollback_calls}" -eq 1 ]]
+  # 写都没写成，就不该再拿旧配置去「校验通过」。
+  [[ "${validated}" -eq 0 ]]
+
+  load_functions
 }
 
 run_managed_rollback_case() {

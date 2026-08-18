@@ -115,11 +115,14 @@ main() {
     run_managed_apply_case
     run_service_failure_propagation_case
     run_install_step_failure_propagation_case
+    run_errexit_guard_lint_case
     run_service_reload_preference_case
     run_managed_rollback_case
     run_optional_component_rollback_case
     run_install_rollback_helper_case
     run_tls_stage_failure_case
+    run_tls_issue_failure_not_reported_ok_case
+    run_xray_only_update_write_failure_case
     run_restart_optional_service_case
     run_change_helper_case
     run_install_parse_case
