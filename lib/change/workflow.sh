@@ -62,7 +62,7 @@ run_change_warp_action() {
       ;;
     disable)
       ENABLE_WARP="no"
-      apply_managed_runtime_update
+      apply_managed_runtime_update || return 1
       warp_teardown_legacy
       finish_managed_change "WARP 分流已禁用。" "no"
       ;;
@@ -77,7 +77,7 @@ begin_managed_change() {
   start_backup_session
   log_step "读取当前托管安装状态。"
   load_current_install_context
-  ensure_xray_user
+  ensure_xray_user || return 1
 }
 
 begin_managed_output_change() {
@@ -163,15 +163,17 @@ run_single_value_change_cmd() {
     "${post_update_fn}"
   fi
 
+  # apply_* 失败时里面已经回滚过了，这里必须跟着失败：
+  # 再往下就是 finish_managed_change 的 log_success，会把回滚过的变更报成改好了。
   case "${apply_mode}" in
     runtime)
       log_step "应用运行时配置变更。"
-      apply_managed_runtime_update
+      apply_managed_runtime_update || return 1
       ;;
     output)
       log_step "刷新状态与输出文件。"
-      write_state_file
-      write_output_file
+      write_state_file || return 1
+      write_output_file || return 1
       ;;
   esac
 

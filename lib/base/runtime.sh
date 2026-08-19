@@ -425,7 +425,7 @@ finalize_installation() {
     return 1
   fi
 
-  write_state_file
+  write_state_file || return 1
   write_output_file
 }
 
@@ -484,7 +484,7 @@ apply_managed_files() {
     return 1
   fi
 
-  write_state_file
+  write_state_file || return 1
   write_output_file
 }
 
@@ -499,8 +499,8 @@ apply_xray_only_managed_update() {
     return 1
   fi
 
-  write_state_file
-  write_output_file
+  write_state_file || return 1
+  write_output_file || return 1
 
   log "客户端配置、状态文件和输出文件已写入；接下来只重启 Xray。"
   if ! restart_xray_service; then

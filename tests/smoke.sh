@@ -149,6 +149,8 @@ main() {
     run_change_command_case
     run_change_warp_enable_rollback_case
     run_renew_cert_command_case
+    run_renew_cert_failure_case
+    run_change_cert_mode_failure_case
     run_upgrade_command_case
     run_diagnose_command_case
     run_missing_option_value_case

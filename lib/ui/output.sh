@@ -771,7 +771,7 @@ EOF
 
 write_output_file() {
   OUTPUT_CLIENT_NAME="${1:-$(selected_output_client_name)}"
-  write_subscription_files
+  write_subscription_files || return 1
   write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
   chmod 0644 "${OUTPUT_FILE}"
 }

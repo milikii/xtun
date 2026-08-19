@@ -141,7 +141,9 @@ change_cert_mode_cmd() {
   apply_cert_mode_change_request request "${old_cert_mode}" "${old_xhttp_domain}"
   prompt_cert_mode_inputs
   validate_install_inputs
-  apply_managed_update
+  # 换证书失败时不能往下走：cleanup_previous_acme_cert 会把旧域名从 acme.sh 里摘掉，
+  # 于是回滚回来的那张还在服务的证书从此不再自动续期，而用户看到的是「已更新」。
+  apply_managed_update || return 1
   cleanup_previous_acme_cert "${old_cert_mode}" "${old_xhttp_domain}"
 
   finish_managed_change "证书模式已更新。"
@@ -175,7 +177,9 @@ renew_cert_cmd() {
   prompt_cert_mode_inputs
   validate_install_inputs
   log_step "刷新 TLS 证书资产。"
-  apply_managed_update
+  # renew-cert 是 acme.sh 定时自动跑的，这里报成功没人会去核对，
+  # 所以「续期失败被报成已续期」是这条命令上最贵的一种错。
+  apply_managed_update || return 1
 
   finish_managed_change "证书已续期。"
 }
@@ -293,10 +297,10 @@ change_warp_rules_cmd() {
   fi
 
   start_backup_session
-  ensure_xray_user
+  ensure_xray_user || return 1
   WARP_RULES_TEXT="${updated_text}"
   log_step "更新 WARP 分流规则。"
-  apply_managed_runtime_update
+  apply_managed_runtime_update || return 1
   # 分流规则不影响任何客户端链接，没必要再把整份部署文档喷一遍
   finish_managed_change "WARP 分流规则已更新。" "no"
   printf '%s\n' "${updated_text}"

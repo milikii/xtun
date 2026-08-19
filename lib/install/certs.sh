@@ -212,7 +212,9 @@ issue_acme_cf_cert() {
   [[ -n "${CF_DNS_TOKEN}" ]] || die "acme-dns-cf 模式必须提供 CF_DNS_TOKEN。"
 
   install_acme_sh
-  write_acme_reload_helper "${cert_file}" "${key_file}"
+  # 这个钩子写不进去，后面 acme.sh 自动续期时就不会 reload nginx——
+  # 证书换了但没生效，而且是无声的。
+  write_acme_reload_helper "${cert_file}" "${key_file}" || return 1
 
   unset CF_Account_ID CF_Zone_ID
   export CF_Token="${CF_DNS_TOKEN}"

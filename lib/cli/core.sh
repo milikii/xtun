@@ -88,7 +88,7 @@ select_output_client_if_requested() {
   if [[ -n "${client_name}" ]]; then
     load_current_install_context
     node_client_exists "${client_name}" || die "找不到客户端：${client_name}"
-    write_output_file "${client_name}"
+    write_output_file "${client_name}" || return 1
     return
   fi
 
@@ -96,7 +96,7 @@ select_output_client_if_requested() {
     load_current_install_context
     if [[ "$(node_client_count)" -gt 1 ]]; then
       client_name="$(prompt_node_client_selection "请选择要输出链接的客户端")"
-      write_output_file "${client_name}"
+      write_output_file "${client_name}" || return 1
     fi
   fi
 }
@@ -200,7 +200,9 @@ add_client_cmd() {
 
   log_step "写入客户端配置。"
   OUTPUT_CLIENT_NAME="${client_name}"
-  apply_xray_only_managed_update
+  # 失败时里面已经回滚了，这里不停下来就会接着报「已添加」并把链接打出来——
+  # 那是一个跑着的配置里根本不存在的客户端。
+  apply_xray_only_managed_update || return 1
   log_success "客户端 ${client_name} 已添加。"
   log "备份目录：${BACKUP_DIR}"
   if [[ "${show_qr}" -eq 1 ]]; then
@@ -402,9 +404,10 @@ restart_cmd() {
 
 repair_perms_cmd() {
   need_root
-  ensure_xray_user
-  ensure_managed_permissions
-  systemctl daemon-reload
+  # 这条命令存在的意义就是「权限坏了来抢修」，抢修没成还报成功是最坏的结果。
+  ensure_xray_user || return 1
+  ensure_managed_permissions || return 1
+  systemctl daemon-reload || return 1
   systemctl restart xray haproxy nginx >/dev/null 2>&1 || true
   log "已修复脚本托管文件权限，并尝试重启 xray、haproxy 与 nginx。"
 }
@@ -429,10 +432,10 @@ apply_config_cmd() {
   start_backup_session
   log_step "读取当前托管安装状态。"
   load_current_install_context
-  ensure_xray_user
+  ensure_xray_user || return 1
 
   log_step "按当前状态重新生成托管配置。"
-  apply_managed_runtime_update
+  apply_managed_runtime_update || return 1
   finish_managed_change "托管配置已按当前状态重新生成。" "no"
 }
 

@@ -511,34 +511,55 @@ errexit_guarded_step_names() {
     write_generated_file_atomically ensure_warp_credentials \
     generate_xhttp_vless_encryption_if_needed backup_path install_bundle_root_to_self \
     validate_tls_assets_with_paths promote_tls_assets \
-    write_net_sysctl_conf write_net_helper_script write_net_service
+    write_net_sysctl_conf write_net_helper_script write_net_service \
+    apply_managed_files apply_managed_update apply_managed_runtime_update \
+    apply_xray_only_managed_update write_state_file write_output_file \
+    write_subscription_files write_acme_reload_helper \
+    write_existing_tls_assets write_self_signed_tls_assets \
+    ensure_xray_user ensure_managed_permissions
 }
 
-# 少数几处允许光着：它们是所在函数的最后一条语句，退出码本来就会原样返回。
-errexit_guard_allowed_bare_lines() {
-  printf '%s\n' \
-    'lib/install/certs.sh:validate_tls_assets_with_paths "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"' \
-    'lib/generators.sh:write_generated_file_atomically "${NGINX_CONFIG_FILE}" nginx_config_text' \
-    'lib/generators.sh:write_generated_file_atomically "${HAPROXY_CONFIG}" haproxy_config_text'
+
+# 一个调用点是不是「函数的最后一条语句」——是的话退出码本来就会原样返回，
+# 不需要守卫。手工维护白名单会随着代码漂移，所以这里直接看下一条非空行是不是 `}`。
+errexit_guard_line_is_function_final() {
+  local file_path="${1}"
+  local line_no="${2}"
+
+  # awk 的坑：主规则里的 exit 会先跳到 END，END 里再 exit 会把状态覆盖掉。
+  # 所以这里只在主规则里记结果，退出码统一由 END 决定。
+  cd "${ROOT_DIR}" && awk -v target="${line_no}" '
+    NR <= target + 0 { next }
+    /^[[:space:]]*$/ { next }
+    {
+      is_final = ($0 == "}")
+      exit
+    }
+    END {
+      if (is_final) {
+        exit 0
+      }
+      exit 1
+    }
+  ' "${file_path}"
 }
 
 run_errexit_guard_lint_case() {
   local pattern=""
   local hit=""
-  local allowed=""
   local violations=0
+  local file=""
+  local line_no=""
 
   pattern="$(errexit_guarded_step_names | paste -sd '|' -)"
-  allowed="$(errexit_guard_allowed_bare_lines)"
 
   while IFS= read -r hit; do
     [[ -n "${hit}" ]] || continue
-    # hit 形如 lib/xxx.sh:12:  write_xray_config，归一成 文件:语句 再比对白名单
-    local file="${hit%%:*}"
-    local stmt="${hit#*:}"
-    stmt="${stmt#*:}"
-    stmt="${stmt#"${stmt%%[![:space:]]*}"}"
-    if printf '%s\n' "${allowed}" | grep -Fxq "${file}:${stmt}"; then
+    # hit 形如 lib/xxx.sh:12:  write_xray_config
+    file="${hit%%:*}"
+    line_no="${hit#*:}"
+    line_no="${line_no%%:*}"
+    if errexit_guard_line_is_function_final "${file}" "${line_no}"; then
       continue
     fi
     printf '[fail] %s 少了 `|| return 1`：这一步失败会被 set -e 豁免吞掉\n' "${hit}" >&2

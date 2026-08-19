@@ -340,6 +340,87 @@ run_renew_cert_command_case() {
   printf '%s' "${logged}" | grep -q 'OK:证书已续期。'
 }
 
+# renew-cert 是 acme.sh 的 cron 自动跑的：这里报「已续期」没人会去核对，
+# 于是一张过期证书能一路服务到用户连不上为止，才有人发现续期其实早就失败了。
+run_renew_cert_failure_case() {
+  local status=0
+  local logged=""
+  local shown_links=0
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  printf 'dns-token\n' > "${workdir}/cf-dns-token.txt"
+
+  need_root() { :; }
+  start_backup_session() { BACKUP_DIR="/tmp/renew-backup"; }
+  load_current_install_context() {
+    CERT_MODE="acme-dns-cf"
+    XHTTP_DOMAIN="cdn.old.example.com"
+  }
+  ensure_xray_user() { :; }
+  resolve_install_input_sources() { :; }
+  prompt_cert_mode_inputs() { :; }
+  validate_install_inputs() { :; }
+  apply_managed_update() { return 1; }
+  show_links() { shown_links=$((shown_links + 1)); }
+  log() { logged+="${1}"$'\n'; }
+  log_step() { logged+="STEP:${1}"$'\n'; }
+  log_success() { logged+="OK:${1}"$'\n'; }
+
+  set +e
+  renew_cert_cmd --non-interactive --acme-email ops@example.com --cf-dns-token "@${workdir}/cf-dns-token.txt"
+  status=$?
+  set -e
+
+  [[ "${status}" -ne 0 ]]
+  [[ "${shown_links}" -eq 0 ]]
+  ! printf '%s' "${logged}" | grep -q 'OK:证书已续期。'
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# 换证书失败后如果不停下来，cleanup_previous_acme_cert 会把旧域名从 acme.sh 里摘掉：
+# 回滚回来、还在服务的那张证书从此不再自动续期——一颗带到期日的定时炸弹。
+run_change_cert_mode_failure_case() {
+  local status=0
+  local cleanup_calls=0
+  local logged=""
+  local shown_links=0
+
+  need_root() { :; }
+  start_backup_session() { BACKUP_DIR="/tmp/cert-backup"; }
+  load_current_install_context() {
+    CERT_MODE="acme-dns-cf"
+    XHTTP_DOMAIN="cdn.old.example.com"
+  }
+  ensure_xray_user() { :; }
+  prompt_cert_mode_inputs() { :; }
+  validate_install_inputs() { :; }
+  apply_managed_update() { return 1; }
+  cleanup_previous_acme_cert() { cleanup_calls=$((cleanup_calls + 1)); }
+  show_links() { shown_links=$((shown_links + 1)); }
+  log() { logged+="${1}"$'\n'; }
+  log_step() { logged+="STEP:${1}"$'\n'; }
+  log_success() { logged+="OK:${1}"$'\n'; }
+
+  set +e
+  # 明确切成 self-signed：这正是成功路径上 cleanup_previous_acme_cert 一定会开火的场景。
+  change_cert_mode_cmd --non-interactive \
+    --cert-mode self-signed \
+    --xhttp-domain cdn.old.example.com </dev/null
+  status=$?
+  set -e
+
+  [[ "${status}" -ne 0 ]]
+  # 这条是这批里最贵的断言：还在服务的那张证书，注册绝不能被摘。
+  [[ "${cleanup_calls}" -eq 0 ]]
+  [[ "${shown_links}" -eq 0 ]]
+  ! printf '%s' "${logged}" | grep -q 'OK:证书模式已更新。'
+
+  load_functions
+}
+
 run_upgrade_command_case() {
   local logged=""
   local restored=()
