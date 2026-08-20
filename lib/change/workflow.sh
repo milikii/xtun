@@ -144,7 +144,7 @@ run_single_value_change_cmd() {
 
   case "${apply_mode}" in
     runtime)
-      begin_managed_change
+      begin_managed_change || return 1
       ;;
     output)
       begin_managed_output_change

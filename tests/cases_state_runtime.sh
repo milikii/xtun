@@ -516,7 +516,8 @@ errexit_guarded_step_names() {
     apply_xray_only_managed_update write_state_file write_output_file \
     write_subscription_files write_acme_reload_helper \
     write_existing_tls_assets write_self_signed_tls_assets \
-    ensure_xray_user ensure_managed_permissions
+    ensure_xray_user ensure_managed_permissions \
+    begin_managed_change select_output_client_if_requested
 }
 
 

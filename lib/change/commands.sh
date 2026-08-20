@@ -55,7 +55,7 @@ change_uuid_cmd() {
     die "没有需要修改的内容。请使用默认行为，或传入 --reality-only / --xhttp-only。"
   fi
 
-  begin_managed_change
+  begin_managed_change || return 1
 
   if [[ "${request[rotate_reality]}" -eq 1 ]]; then
     REALITY_UUID="${request[reality_uuid]:-$(random_uuid)}"
@@ -121,7 +121,7 @@ change_warp_cmd() {
   init_change_warp_request request
   parse_change_warp_args request "$@"
   ensure_debian_family
-  begin_managed_change
+  begin_managed_change || return 1
 
   apply_warp_change_request request
   run_change_warp_action "$(resolve_change_warp_target_mode "${request[target_mode]}")"
@@ -134,7 +134,7 @@ change_cert_mode_cmd() {
 
   init_change_cert_mode_request request
   parse_change_cert_mode_args request "$@"
-  begin_managed_change
+  begin_managed_change || return 1
   old_cert_mode="${CERT_MODE}"
   old_xhttp_domain="${XHTTP_DOMAIN}"
 
@@ -159,7 +159,7 @@ renew_cert_cmd() {
     die "renew-cert 不支持修改证书模式或 XHTTP 域名；如需切换请使用 change-cert-mode。"
   fi
 
-  begin_managed_change
+  begin_managed_change || return 1
   apply_request_overrides request \
     "cert_source_file:CERT_SOURCE_FILE" \
     "key_source_file:KEY_SOURCE_FILE" \

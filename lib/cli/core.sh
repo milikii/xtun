@@ -191,7 +191,7 @@ add_client_cmd() {
     esac
   done
 
-  begin_managed_change
+  begin_managed_change || return 1
   if [[ -z "${client_name}" ]]; then
     prompt_with_default client_name "新客户端名称" ""
   fi
