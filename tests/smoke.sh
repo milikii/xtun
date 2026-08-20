@@ -158,6 +158,7 @@ main() {
     run_script_lock_scope_case
     run_script_lock_stale_dir_case
     run_client_cli_case
+    run_show_links_stale_output_case
     run_install_flow_case
   )
 

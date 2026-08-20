@@ -232,7 +232,9 @@ warp_teardown_legacy() {
 
   log_step "清理旧版 WARP Team 托管文件。"
   if [[ "${#paths[@]}" -gt 0 ]]; then
-    remove_managed_paths "${paths[@]}"
+    # 出站已经切过去了，这里删不掉旧文件不该把整条 change-warp 判成失败；
+    # 但也不能闷声跳过——下面那句 log 会说「已停用」，得让用户知道没清干净。
+    remove_managed_paths "${paths[@]}" || warn "旧版 WARP Team 托管文件未能全部清理，请手工检查。"
   fi
   systemctl daemon-reload >/dev/null 2>&1 || true
   log "已停用 warp-svc；若要彻底移除守护进程请执行：apt-get purge -y cloudflare-warp && rm -rf /var/lib/cloudflare-warp"

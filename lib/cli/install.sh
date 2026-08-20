@@ -134,7 +134,9 @@ prepare_install_command() {
   parse_install_args "$@"
   resolve_install_input_sources
   prepare_install_inputs
-  write_install_draft_file
+  # 草稿只是给中断后重跑用的便利文件，写不下不该把这次安装拦掉；
+  # 但它没写成，重跑时输入就得从头再敲一遍，值得说一声。
+  write_install_draft_file || warn "安装草稿未能写入，中断后重跑需要重新输入参数。"
   validate_install_inputs
   run_install_preflight_checks
 }

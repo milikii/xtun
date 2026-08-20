@@ -128,7 +128,9 @@ show_links() {
     shift
   done
 
-  select_output_client_if_requested "${client_name}"
+  # 重新生成失败就必须停：下面那句 cat 会把上一次留在磁盘上的输出文件原样打出来，
+  # 用户点名要 B 的链接，拿到的却是 A 的——一份看起来完全正常的错链接。
+  select_output_client_if_requested "${client_name}" || return 1
   [[ -f "${OUTPUT_FILE}" ]] || die "找不到输出文件：${OUTPUT_FILE}"
   cat "${OUTPUT_FILE}"
 
@@ -532,6 +534,8 @@ uninstall_cmd() {
     "${ACME_SH_BIN}" --remove -d "${XHTTP_DOMAIN}" --ecc >/dev/null 2>&1 || true
   fi
 
+  # 删不掉就别往下报「已卸载」：config.json 和证书里有机密，留在盘上而用户以为
+  # 已经清干净了，是这条命令上最糟的结果。重跑一次是幂等的。
   remove_managed_paths \
     "${SELF_COMMAND_PATH}" \
     "${SELF_INSTALL_DIR}" \
@@ -560,7 +564,8 @@ uninstall_cmd() {
     "/var/log/xray" \
     "/var/lib/xray" \
     "${OP_LOG_DIR}" \
-    "/var/lib/cloudflare-warp"
+    "/var/lib/cloudflare-warp" \
+    || return 1
 
   systemctl daemon-reload
   mapfile -t units < <(xray_managed_service_units)

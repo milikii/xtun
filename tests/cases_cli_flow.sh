@@ -172,6 +172,40 @@ run_dispatch_case() {
   [[ "${version_output}" == "xtun.sh v${SCRIPT_VERSION}" ]]
 }
 
+# show-links --client B 重新生成失败时，如果不停下来，下面那句 cat 会把磁盘上
+# 上一次留下的输出文件原样打出来——用户点名要 B，拿到的是 A 的 UUID 和链接，
+# 而且从输出上完全看不出哪里不对。
+run_show_links_stale_output_case() {
+  local status=0
+  local output=""
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  OUTPUT_FILE="${workdir}/node-links.txt"
+  printf 'client=laptop\nuuid=11111111-1111-1111-1111-111111111111\n' > "${OUTPUT_FILE}"
+
+  load_current_install_context() { :; }
+  node_client_exists() { :; }
+  write_output_file() { return 1; }
+  render_output_file_qr() { :; }
+  log() { :; }
+  log_step() { :; }
+  log_success() { :; }
+
+  set +e
+  output="$(show_links --client phone 2>/dev/null)"
+  status=$?
+  set -e
+
+  [[ "${status}" -ne 0 ]]
+  # 关键断言：上一个客户端的凭据一个字都不能漏出去。
+  [[ "${output}" != *"laptop"* ]]
+  [[ "${output}" != *"11111111-1111-1111-1111-111111111111"* ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_client_cli_case() {
   local applied=0
   local backup_marker=""
