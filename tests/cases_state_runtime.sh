@@ -500,6 +500,37 @@ run_install_step_failure_propagation_case() {
 # 只能靠显式的 `|| return 1`——它不是 errexit 的替代品，它就是这里唯一的机制。
 # 这条用例把「必须传出失败」的步骤列出来，钉住它们在源码里的每个调用点都带守卫。
 # 新加一行没写 `|| return 1` 的调用，这里就会红。
+#
+# 名单有两个来源，取并集：
+#   1. errexit_returning_step_names —— 自动扫源码，函数体里出现 `return <非 0>` 的
+#      都算「会把失败传出来的动作」。新写的函数不用手工登记就自动被钉住。
+#   2. errexit_guarded_step_names —— 显式清单，只能往里加不能删。有些函数不写字面
+#      return（靠最后一条命令或 die 传状态），自动扫描看不见，得手工兜住。
+# 并集只会让 lint 变严：自动那半边漏了，显式清单还在；显式清单忘了登记，自动那半边补上。
+
+# 自动检测：函数体里出现 `return 1` / `|| return 2` 这类字面非 0 返回的，
+# 就是一个会失败、且把失败传出来的动作函数，它的调用点必须带守卫。
+errexit_returning_step_names() {
+  cd "${ROOT_DIR}" && find xtun.sh lib -name '*.sh' -type f -print0 \
+    | LC_ALL=C sort -z \
+    | xargs -0 awk '
+      /^[a-zA-Z_][a-zA-Z0-9_]*\(\)[[:space:]]*\{[[:space:]]*$/ {
+        fn = $0
+        sub(/\(\).*$/, "", fn)
+        returns_failure = 0
+        next
+      }
+      /^\}[[:space:]]*$/ {
+        if (fn != "" && returns_failure) {
+          print fn
+        }
+        fn = ""
+        next
+      }
+      fn != "" && /(^|[^a-zA-Z0-9_])return[[:space:]]+[1-9]/ { returns_failure = 1 }
+    '
+}
+
 errexit_guarded_step_names() {
   printf '%s\n' \
     install_packages install_self_command install_xray ensure_xray_bind_capability \
@@ -522,58 +553,110 @@ errexit_guarded_step_names() {
 
 
 # 一个调用点是不是「函数的最后一条语句」——是的话退出码本来就会原样返回，
-# 不需要守卫。手工维护白名单会随着代码漂移，所以这里直接看下一条非空行是不是 `}`。
-errexit_guard_line_is_function_final() {
-  local file_path="${1}"
-  local line_no="${2}"
+# 不需要守卫。手工维护白名单会随着代码漂移，所以这里直接看后面那一条语句。
+#
+# 整段用 awk 而不是 grep，因为有两件事 grep 做不到：
+#   - 续行：`foo \` + 参数行 + `|| return 1` 是一条逻辑语句，守卫写在最后一行上，
+#     按物理行看会把它误判成裸调用；
+#   - 传播式结尾：调用点后面紧跟 `}` / `;;` / 裸 `return` 时，退出码原样往外传。
+errexit_unguarded_call_sites() {
+  local names="${1}"
 
-  # awk 的坑：主规则里的 exit 会先跳到 END，END 里再 exit 会把状态覆盖掉。
-  # 所以这里只在主规则里记结果，退出码统一由 END 决定。
-  cd "${ROOT_DIR}" && awk -v target="${line_no}" '
-    NR <= target + 0 { next }
-    /^[[:space:]]*$/ { next }
-    {
-      is_final = ($0 == "}")
-      exit
-    }
-    END {
-      if (is_final) {
-        exit 0
+  cd "${ROOT_DIR}" && find xtun.sh lib -name '*.sh' -type f -print0 \
+    | LC_ALL=C sort -z \
+    | xargs -0 awk -v names="${names}" '
+      BEGIN {
+        total = split(names, list, "|")
+        for (i = 1; i <= total; i++) {
+          watched[list[i]] = 1
+        }
       }
-      exit 1
-    }
-  ' "${file_path}"
+      function trim(text) {
+        sub(/^[[:space:]]+/, "", text)
+        sub(/[[:space:]]+$/, "", text)
+        return text
+      }
+      function propagates(text) {
+        return (text == "}" || text == ";;" || text == "return" || text == "return $?")
+      }
+      function resolve(text,   shown) {
+        if (pending == "") {
+          return
+        }
+        if (!propagates(text)) {
+          shown = pending
+          # 续行拼起来的语句可以很长，报错行截断一下才看得清是哪一处
+          if (length(shown) > 72) {
+            shown = substr(shown, 1, 72) " ..."
+          }
+          printf "%s:%d: %s\n", pending_file, pending_line, shown
+        }
+        pending = ""
+      }
+      FNR == 1 {
+        resolve("")
+        continued = 0
+      }
+      {
+        if (continued) {
+          logical = logical " " trim($0)
+        } else {
+          logical = $0
+          logical_line = FNR
+        }
+        if (logical ~ /\\[[:space:]]*$/) {
+          sub(/\\[[:space:]]*$/, "", logical)
+          continued = 1
+          next
+        }
+        continued = 0
+
+        statement = trim(logical)
+        if (statement == "" || statement ~ /^#/) {
+          next
+        }
+        resolve(statement)
+
+        token = statement
+        sub(/[[:space:]].*$/, "", token)
+        if (!(token in watched)) {
+          next
+        }
+        if (statement ~ /(\|\||&&|;[[:space:]]*then|;[[:space:]]*do|;[[:space:]]*return)/) {
+          next
+        }
+        pending = statement
+        pending_file = FILENAME
+        pending_line = logical_line
+      }
+      END {
+        resolve("")
+      }
+    '
 }
 
 run_errexit_guard_lint_case() {
-  local pattern=""
+  local names=""
   local hit=""
   local violations=0
-  local file=""
-  local line_no=""
 
-  pattern="$(errexit_guarded_step_names | paste -sd '|' -)"
+  names="$( { errexit_returning_step_names; errexit_guarded_step_names; } \
+    | grep -vE '^[[:space:]]*$' | LC_ALL=C sort -u | paste -sd '|' -)"
+
+  # 自动那半边一旦被改坏（awk 认不出函数定义了），名单会悄悄退化成只剩显式清单，
+  # lint 看着还是绿的。这里钉两个一定在里面的名字，让它坏得出声。
+  errexit_returning_step_names | grep -qx 'write_xray_config'
+  errexit_returning_step_names | grep -qx 'install_cmd'
 
   while IFS= read -r hit; do
     [[ -n "${hit}" ]] || continue
-    # hit 形如 lib/xxx.sh:12:  write_xray_config
-    file="${hit%%:*}"
-    line_no="${hit#*:}"
-    line_no="${line_no%%:*}"
-    if errexit_guard_line_is_function_final "${file}" "${line_no}"; then
-      continue
-    fi
     printf '[fail] %s 少了 `|| return 1`：这一步失败会被 set -e 豁免吞掉\n' "${hit}" >&2
     violations=$((violations + 1))
-  done < <(
-    cd "${ROOT_DIR}" \
-      && grep -rnE "^[[:space:]]*(${pattern})([[:space:]]|\$)" xtun.sh lib/ --include='*.sh' \
-        | grep -vE '\|\||&&|; then|; do' \
-        || true
-  )
+  done < <(errexit_unguarded_call_sites "${names}")
 
   [[ "${violations}" -eq 0 ]]
 }
+
 run_service_reload_preference_case() {
   local calls=""
 

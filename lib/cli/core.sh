@@ -207,10 +207,12 @@ add_client_cmd() {
   apply_xray_only_managed_update || return 1
   log_success "客户端 ${client_name} 已添加。"
   log "备份目录：${BACKUP_DIR}"
+  # 这个 if 本来就是函数最后一条语句，退出码会原样传出去；写出来是给 lint 看的，
+  # 也免得以后在 fi 后面加一行就把 show_links 的失败悄悄吃掉。
   if [[ "${show_qr}" -eq 1 ]]; then
-    show_links --client "${client_name}" --qr
+    show_links --client "${client_name}" --qr || return 1
   else
-    show_links --client "${client_name}"
+    show_links --client "${client_name}" || return 1
   fi
 }
 
