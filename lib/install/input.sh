@@ -76,7 +76,7 @@ normalize_yes_no_value() {
   local raw_value="${2}"
   local value=""
 
-  value="$(printf '%s' "${raw_value}" | tr 'A-Z' 'a-z')"
+  value="$(printf '%s' "${raw_value}" | tr '[:upper:]' '[:lower:]')"
   case "${value}" in
     y|yes|enable|enabled)
       printf 'yes'
@@ -93,7 +93,7 @@ normalize_yes_no_value() {
 normalize_warp_target_mode() {
   local value=""
 
-  value="$(printf '%s' "${1}" | tr 'A-Z' 'a-z')"
+  value="$(printf '%s' "${1}" | tr '[:upper:]' '[:lower:]')"
   case "${value}" in
     yes|enable|enabled)
       printf 'enable'
@@ -333,7 +333,7 @@ prompt_warp_rules_editor() {
     show_warp_rules_list "${rules[@]+"${rules[@]}"}"
     printf '%s\n' "操作: a=添加  d=删除  r=恢复默认  s=保存并应用  q=放弃退出" >&2
     read -r -p "请选择 [s]: " answer
-    answer="$(printf '%s' "${answer:-s}" | tr 'A-Z' 'a-z')"
+    answer="$(printf '%s' "${answer:-s}" | tr '[:upper:]' '[:lower:]')"
 
     case "${answer}" in
       a|add)
@@ -545,7 +545,11 @@ ensure_xhttp_path_format() {
   [[ "${XHTTP_PATH}" == /* ]] || die "XHTTP 路径必须以 / 开头。"
   [[ "${XHTTP_PATH}" != *$'\n'* && "${XHTTP_PATH}" != *$'\r'* ]] || die "XHTTP 路径不能包含换行。"
   [[ "${XHTTP_PATH}" != *'"'* ]] || die "XHTTP 路径不能包含双引号。"
-  [[ "${XHTTP_PATH}" != *'\\'* ]] || die "XHTTP 路径不能包含反斜杠。"
+  # 单引号里的 `\\` 是两个字面反斜杠，只挡得住连着写两个的路径；
+  # 挡一个反斜杠要写 '\'。原来的写法让 /a\b 这种路径直接通过，
+  # 然后原样进 nginx 的 location 前缀。
+  # shellcheck disable=SC1003
+  [[ "${XHTTP_PATH}" != *'\'* ]] || die "XHTTP 路径不能包含反斜杠。"
   [[ "${XHTTP_PATH}" != *[[:space:]]* ]] || die "XHTTP 路径不能包含空白字符。"
 }
 

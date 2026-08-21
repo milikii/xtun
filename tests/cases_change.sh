@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 run_change_helper_case() {
   local original_prompt=""
   local workdir=""
@@ -374,7 +376,7 @@ run_renew_cert_failure_case() {
 
   [[ "${status}" -ne 0 ]]
   [[ "${shown_links}" -eq 0 ]]
-  ! printf '%s' "${logged}" | grep -q 'OK:证书已续期。'
+  [[ "${logged}" != *"OK:证书已续期。"* ]]
 
   rm -rf "${workdir}"
   load_functions
@@ -416,7 +418,7 @@ run_change_cert_mode_failure_case() {
   # 这条是这批里最贵的断言：还在服务的那张证书，注册绝不能被摘。
   [[ "${cleanup_calls}" -eq 0 ]]
   [[ "${shown_links}" -eq 0 ]]
-  ! printf '%s' "${logged}" | grep -q 'OK:证书模式已更新。'
+  [[ "${logged}" != *"OK:证书模式已更新。"* ]]
 
   load_functions
 }
@@ -483,7 +485,7 @@ run_diagnose_command_case() {
   load_dashboard_context() { :; }
   service_active_state() {
     case "${1}" in
-      xray.service|haproxy.service|nginx.service|${CORE_HEALTH_TIMER_NAME})
+      xray.service|haproxy.service|nginx.service|"${CORE_HEALTH_TIMER_NAME}")
         printf 'active'
         ;;
       *)

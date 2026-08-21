@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 run_state_context_case() {
   local workdir=""
 

@@ -708,6 +708,8 @@ EOF
 }
 
 output_xhttp_cache_rules_block() {
+  # 正文里的 “…” 是照抄 Cloudflare 界面上的中文标题，不是打错的 ASCII 引号
+  # shellcheck disable=SC1111
   cat <<EOF
 ## XHTTP 缓存绕过（重要）
 

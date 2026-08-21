@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 run_missing_option_value_case() {
   local output=""
 

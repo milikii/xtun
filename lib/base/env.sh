@@ -94,7 +94,7 @@ fetch_public_ipv4() {
 
 random_uuid() {
   if command -v uuidgen >/dev/null 2>&1; then
-    uuidgen | tr 'A-Z' 'a-z'
+    uuidgen | tr '[:upper:]' '[:lower:]'
   else
     cat /proc/sys/kernel/random/uuid
   fi

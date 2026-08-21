@@ -21,5 +21,9 @@ jobs:
       - name: Run Shellcheck
         run: shellcheck xtun.sh $(find lib tests -type f -name '*.sh' | sort)
 
+      # 一定要跑：这个 job 原来是 shellcheck 先红，Actions 直接跳过后面的步骤，
+      # 于是 smoke 从来没在 CI 里执行过——所有 lint 都只在本地手工跑时才有效。
+      # 一个 shellcheck 的 note 不该再有能力把整套用例的结果藏起来。
       - name: Run Smoke Tests
+        if: ${{ !cancelled() }}
         run: bash tests/smoke.sh

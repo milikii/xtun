@@ -66,7 +66,7 @@ normalize_xray_sha256_value() {
   local raw_value="${1:-}"
   local normalized=""
 
-  normalized="$(printf '%s' "${raw_value}" | tr 'A-Z' 'a-z' | sed -E 's/^[[:space:]]*sha256:[[:space:]]*//; s/^[[:space:]]+|[[:space:]]+$//g')"
+  normalized="$(printf '%s' "${raw_value}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]*sha256:[[:space:]]*//; s/^[[:space:]]+|[[:space:]]+$//g')"
   if [[ "${normalized}" =~ ^[0-9a-f]{64}$ ]]; then
     printf '%s' "${normalized}"
   fi

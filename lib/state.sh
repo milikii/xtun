@@ -38,6 +38,8 @@ state_file_key_allowed() {
   esac
 }
 
+# 这个函数里的 '\' 是一个字面反斜杠，正是解码要处理的东西
+# shellcheck disable=SC1003
 decode_simple_shell_word() {
   local raw="${1-}"
   local decoded=""
@@ -59,6 +61,8 @@ decode_simple_shell_word() {
   printf '%s' "${decoded}"
 }
 
+# 这个函数里的 '\' 是一个字面反斜杠，正是解码要处理的东西
+# shellcheck disable=SC1003
 decode_ansi_c_shell_word() {
   local raw="${1}"
   local content="${raw:2:${#raw}-3}"

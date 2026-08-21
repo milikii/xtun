@@ -1,0 +1,33 @@
+# shellcheck 的配置放在仓库里，为的是本地跑和 CI 跑看到同一份结果——
+# CI 的门禁在 .github/workflows/ci.yml 里，只有零发现才算过。
+#
+# 下面每一条排除都是这套「xtun.sh 动态 source lib/**.sh」结构本身造成的假阳性：
+# shellcheck 一次只看一个文件，看不到跨文件的定义和调用。
+# 排除的是「跨文件可见性」这一类，不是「代码可能有问题」那一类——
+# 加新的排除之前先确认它属于前者。
+
+# 函数在本文件里没被调用 = unreachable。lib/ 下每个模块都是给别的模块调的，
+# 487 条全是这个原因。
+disable=SC2317
+
+# 变量在本文件里赋值、在别的文件里读。xtun.sh 顶部那批全局配置全中这条。
+disable=SC2034
+
+# 同上的另一面：变量在本文件里读、在别处赋值，被当成拼错的名字。
+disable=SC2153
+
+# local -n 引用传参（lib/change/requests.sh 的 request 关联数组）
+# shellcheck 追不动 nameref，会误判成「数组被赋成了字符串」。
+disable=SC2178
+
+# source 的目标是运行期算出来的路径（xtun.sh 里按目录遍历 lib/**.sh），
+# 静态解析不到；-x 也救不了。
+disable=SC1091
+
+# 单引号里的 $ 基本都在 awk / jq 程序和 printf 格式串里，是故意不展开的。
+disable=SC2016
+
+# 可选参数：函数写了 "${1:-}" 并在没传参时自己去取默认值（读 /proc/meminfo、
+# 探测本机架构），而调用点确实不传。测试里是传参调用的。
+disable=SC2120
+disable=SC2119

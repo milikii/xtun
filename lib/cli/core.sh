@@ -520,7 +520,7 @@ uninstall_cmd() {
       fi
     else
       read -r -p "该操作会停止服务并删除脚本托管文件，但保留已安装的软件包。是否继续？ [y/N]: " answer
-      answer="$(printf '%s' "${answer}" | tr 'A-Z' 'a-z')"
+      answer="$(printf '%s' "${answer}" | tr '[:upper:]' '[:lower:]')"
       if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
         die "已取消卸载。"
       fi

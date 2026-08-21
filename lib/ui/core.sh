@@ -196,6 +196,9 @@ cert_expiry_text() {
 latest_backup_label() {
   local latest_path=""
 
+  # 备份目录名是脚本自己按时间戳生成的，不含空白或通配符；
+  # 换成 find 拿不到「按时间最新」这个排序。
+  # shellcheck disable=SC2012
   latest_path="$(ls -1dt "${BACKUP_ROOT}"/* 2>/dev/null | head -n 1 || true)"
   if [[ -n "${latest_path}" ]]; then
     basename "${latest_path}"

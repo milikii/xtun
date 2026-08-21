@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 run_warp_enabled_case() {
   local workdir=""
 

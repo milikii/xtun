@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 run_usage_case() {
   local workdir=""
   local output=""
@@ -306,6 +308,24 @@ EOF
     return 1
   fi
   printf '%s' "${output}" | grep -q 'XHTTP 路径不能包含空白字符'
+
+  # 一个反斜杠也得拦住：原来写成 *'\\'* 只挡得住连着写两个的，
+  # /a\b 会一路进 nginx 的 location 前缀。
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
+ENABLE_WARP="no"
+REALITY_SNI='reality.example.com'
+REALITY_TARGET='www.scu.edu:443'
+XHTTP_DOMAIN='cdn.example.com'
+XHTTP_PATH='/assets\v3'
+validate_install_inputs
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'XHTTP 路径不能包含反斜杠'
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
