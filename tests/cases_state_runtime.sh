@@ -659,6 +659,59 @@ run_errexit_guard_lint_case() {
   [[ "${violations}" -eq 0 ]]
 }
 
+# .shellcheckrc 里 disable=SC2034（本文件赋值、别处读）顺手也关掉了「变量名拼错」
+# 这个真信号：写 XHTTP_PATH_="/x" 不会有任何人报错，XHTTP_PATH 保持空串，
+# 然后空着进 nginx 的 location 前缀。shellcheck 一次只看一个文件，判不了跨文件的读，
+# 所以这里自己扫：xtun.sh 顶层那批全局配置，凡是全仓库没有任何读取点的都报出来。
+xtun_toplevel_global_names() {
+  cd "${ROOT_DIR}" && awk '
+    # 函数体整段跳过，只留 0 缩进的顶层赋值
+    /^[a-zA-Z_][a-zA-Z0-9_]*\(\)[[:space:]]*\{/ { in_function = 1; next }
+    in_function { if ($0 ~ /^\}/) { in_function = 0 } next }
+    /^(readonly |declare -[a-zA-Z]+ )?[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?=/ {
+      name = $0
+      sub(/^readonly /, "", name)
+      sub(/^declare -[a-zA-Z]+ /, "", name)
+      sub(/(\[[^]]*\])?=.*$/, "", name)
+      print name
+    }
+  ' xtun.sh | LC_ALL=C sort -u
+}
+
+# 读取点算三种：${NAME…}、$NAME、以及 lib/state.sh 里按名字列出的状态键白名单
+# （CORE_HEALTH_* 那批就只在那儿被「读」，写成 ${} 反而是错的）。
+xtun_unread_global_names() {
+  local name=""
+
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    grep -rqE "\\\$\{${name}[:%#/}\[-]|\\\$${name}([^A-Za-z0-9_]|\$)" xtun.sh lib \
+      || printf '%s\n' "${name}"
+  done < <(xtun_toplevel_global_names)
+}
+
+run_dead_global_lint_case() {
+  local name=""
+  local violations=0
+
+  cd "${ROOT_DIR}" || return 1
+
+  # 扫描器一旦被改坏（awk 认不出顶层赋值了），名单会悄悄变空，lint 看着还是绿的。
+  # 钉一个数量下限和两个一定在里面的名字，让它坏得出声。
+  [[ "$(xtun_toplevel_global_names | grep -c .)" -ge 100 ]]
+  xtun_toplevel_global_names | grep -qx 'XHTTP_PATH'
+  xtun_toplevel_global_names | grep -qx 'STATE_FILE'
+
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] || continue
+    printf '[fail] %s 在 xtun.sh 里赋了值，但全仓库没有任何读取点——要么是拼错了名字，要么该删\n' \
+      "${name}" >&2
+    violations=$((violations + 1))
+  done < <(xtun_unread_global_names)
+
+  [[ "${violations}" -eq 0 ]]
+}
+
 run_service_reload_preference_case() {
   local calls=""
 

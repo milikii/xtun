@@ -52,7 +52,6 @@ sandbox_managed_paths() {
   NGINX_MAIN_CONFIG="${root}/etc/nginx/nginx.conf"
   NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
   NGINX_LIMITS_DROPIN_FILE="${root}/etc/systemd/system/nginx.service.d/xtun-limits.conf"
-  NGINX_SERVICE_FILE="${root}/lib/systemd/system/nginx.service"
   FALLBACK_SITE_DIR="${root}/var/www/xtun-fallback"
   SSL_DIR="${root}/etc/ssl/xtun"
   TLS_CERT_FILE="${SSL_DIR}/cert.pem"
