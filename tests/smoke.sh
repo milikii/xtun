@@ -8,13 +8,21 @@ set -Eeuo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_change.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_cli_and_install.sh"
 
+# 当前正在跑的用例名，失败时由 EXIT trap 报出来。
+# 注意不能改成 `( "${case_name}" ) || status=$?` 去直接捕获退出码：那样子 shell 就成了
+# AND-OR 列表的非末项，errexit 在整个子 shell 里失效，用例中间所有裸 [[ ]] 断言当场
+# 变成空转——这套测试要防的正是这一类静默通过。所以退出码只能从 EXIT trap 的 $? 拿。
+CURRENT_CASE=""
+
 run_smoke_case() {
   local case_name="${1}"
 
+  CURRENT_CASE="${case_name}"
   printf '[case] %s\n' "${case_name}"
   (
     "${case_name}"
   )
+  CURRENT_CASE=""
 }
 
 # ------------------------------
@@ -70,6 +78,24 @@ cleanup_test_sandbox() {
   case "${TEST_SANDBOX_ROOT:-}" in
     */xtun-test-sandbox.*) rm -rf "${TEST_SANDBOX_ROOT}" ;;
   esac
+}
+
+# 失败时先把是哪条用例说清楚。以前一条用例挂了，脚本就直接死在那儿，
+# 只能靠「最后一行 [case] 是谁」去猜，而 CI 的日志要 admin 权限才读得到。
+on_smoke_exit() {
+  local status=$?
+
+  if [[ "${status}" -ne 0 && -n "${CURRENT_CASE}" ]]; then
+    printf '[fail] 用例 %s 失败（退出码 %s）\n' "${CURRENT_CASE}" "${status}" >&2
+    # GitHub Actions 上再发一条 workflow command：失败用例名会变成 run 页面上的
+    # annotation。annotation 匿名就能读，日志不行，所以这条是 CI 上唯一
+    # 不需要仓库管理员权限也能看到「挂在哪」的途径。
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+      printf '::error title=smoke 用例失败::%s（退出码 %s）\n' "${CURRENT_CASE}" "${status}"
+    fi
+  fi
+
+  cleanup_test_sandbox
 }
 
 main() {
@@ -166,7 +192,7 @@ main() {
   load_functions
   stub_side_effects
   canary_before="$(canary_snapshot | LC_ALL=C sort)"
-  trap cleanup_test_sandbox EXIT
+  trap on_smoke_exit EXIT
 
   for case_name in "${cases[@]}"; do
     run_smoke_case "${case_name}"
