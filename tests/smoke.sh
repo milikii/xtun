@@ -11,6 +11,10 @@ set -Eeuo pipefail
 # 失败现场：哪条命令、在哪个函数的哪一行挂的。用例跑在子 shell 里，变量传不回来，
 # 所以走一个临时文件。
 SMOKE_DIAG_FILE=""
+# 用例自己的 stderr。ERR trap 抓不到 die——die 是 exit，exit 不触发 ERR，
+# 于是栈上只剩下外层那个 `( "${case_name}" )`，等于什么都没说。
+# die 的话都在 stderr 上，所以另外接一份。
+SMOKE_ERR_FILE=""
 
 # set -E 让 ERR trap 被函数、命令替换和子 shell 继承，于是用例里最深处那条失败命令
 # 会先触发一次。栈往上抛的时候还会再触发几次，那些是同一次失败的回声，只留第一条。
@@ -44,10 +48,13 @@ run_smoke_case() {
 
   CURRENT_CASE="${case_name}"
   : > "${SMOKE_DIAG_FILE}"
+  : > "${SMOKE_ERR_FILE}"
   printf '[case] %s\n' "${case_name}"
   (
     "${case_name}"
-  )
+  ) 2> "${SMOKE_ERR_FILE}"
+  # 用例过了才回放它的 stderr；挂了的话由 EXIT trap 连着现场一起报。
+  cat "${SMOKE_ERR_FILE}" >&2
   CURRENT_CASE=""
 }
 
@@ -114,6 +121,10 @@ on_smoke_exit() {
 
   if [[ "${status}" -ne 0 && -n "${CURRENT_CASE}" ]]; then
     [[ ! -s "${SMOKE_DIAG_FILE}" ]] || diag="$(<"${SMOKE_DIAG_FILE}")"
+    # annotation 有长度上限，用例的 stderr 只取末尾几十行——die 的那句在最后。
+    if [[ -s "${SMOKE_ERR_FILE}" ]]; then
+      diag+="${diag:+$'\n'}用例 stderr（末尾 40 行）："$'\n'"$(tail -n 40 "${SMOKE_ERR_FILE}")"
+    fi
     printf '[fail] 用例 %s 失败（退出码 %s）\n' "${CURRENT_CASE}" "${status}" >&2
     [[ -z "${diag}" ]] || printf '%s\n' "${diag}" >&2
     # GitHub Actions 上再发一条 workflow command：失败用例名会变成 run 页面上的
@@ -129,7 +140,7 @@ on_smoke_exit() {
     fi
   fi
 
-  [[ -z "${SMOKE_DIAG_FILE}" ]] || rm -f "${SMOKE_DIAG_FILE}"
+  rm -f "${SMOKE_DIAG_FILE:-}" "${SMOKE_ERR_FILE:-}"
   cleanup_test_sandbox
 }
 
@@ -228,6 +239,7 @@ main() {
   stub_side_effects
   canary_before="$(canary_snapshot | LC_ALL=C sort)"
   SMOKE_DIAG_FILE="$(mktemp)"
+  SMOKE_ERR_FILE="$(mktemp)"
   trap on_smoke_exit EXIT
   trap smoke_record_err ERR
 
