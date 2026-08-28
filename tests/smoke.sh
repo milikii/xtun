@@ -8,6 +8,31 @@ set -Eeuo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_change.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_cli_and_install.sh"
 
+# 失败现场：哪条命令、在哪个函数的哪一行挂的。用例跑在子 shell 里，变量传不回来，
+# 所以走一个临时文件。
+SMOKE_DIAG_FILE=""
+
+# set -E 让 ERR trap 被函数、命令替换和子 shell 继承，于是用例里最深处那条失败命令
+# 会先触发一次。栈往上抛的时候还会再触发几次，那些是同一次失败的回声，只留第一条。
+smoke_record_err() {
+  local status=$?
+  local depth=1
+
+  [[ -n "${SMOKE_DIAG_FILE}" ]] || return 0
+  [[ ! -s "${SMOKE_DIAG_FILE}" ]] || return 0
+
+  {
+    printf '失败命令：%s（退出码 %s）\n' "${BASH_COMMAND}" "${status}"
+    while [[ "${depth}" -lt "${#FUNCNAME[@]}" ]]; do
+      printf '  在 %s（%s:%s）\n' \
+        "${FUNCNAME[depth]}" "${BASH_SOURCE[depth]}" "${BASH_LINENO[depth - 1]}"
+      depth=$((depth + 1))
+    done
+  } >> "${SMOKE_DIAG_FILE}" 2>/dev/null || true
+
+  return 0
+}
+
 # 当前正在跑的用例名，失败时由 EXIT trap 报出来。
 # 注意不能改成 `( "${case_name}" ) || status=$?` 去直接捕获退出码：那样子 shell 就成了
 # AND-OR 列表的非末项，errexit 在整个子 shell 里失效，用例中间所有裸 [[ ]] 断言当场
@@ -18,6 +43,7 @@ run_smoke_case() {
   local case_name="${1}"
 
   CURRENT_CASE="${case_name}"
+  : > "${SMOKE_DIAG_FILE}"
   printf '[case] %s\n' "${case_name}"
   (
     "${case_name}"
@@ -84,17 +110,26 @@ cleanup_test_sandbox() {
 # 只能靠「最后一行 [case] 是谁」去猜，而 CI 的日志要 admin 权限才读得到。
 on_smoke_exit() {
   local status=$?
+  local diag=""
 
   if [[ "${status}" -ne 0 && -n "${CURRENT_CASE}" ]]; then
+    [[ ! -s "${SMOKE_DIAG_FILE}" ]] || diag="$(<"${SMOKE_DIAG_FILE}")"
     printf '[fail] 用例 %s 失败（退出码 %s）\n' "${CURRENT_CASE}" "${status}" >&2
+    [[ -z "${diag}" ]] || printf '%s\n' "${diag}" >&2
     # GitHub Actions 上再发一条 workflow command：失败用例名会变成 run 页面上的
     # annotation。annotation 匿名就能读，日志不行，所以这条是 CI 上唯一
     # 不需要仓库管理员权限也能看到「挂在哪」的途径。
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-      printf '::error title=smoke 用例失败::%s（退出码 %s）\n' "${CURRENT_CASE}" "${status}"
+      # workflow command 的 message 是单行的，换行要转义成 %0A（% 本身先转）。
+      diag="${diag//\%/%25}"
+      diag="${diag//$'\r'/%0D}"
+      diag="${diag//$'\n'/%0A}"
+      printf '::error title=smoke 用例失败::%s（退出码 %s）%s\n' \
+        "${CURRENT_CASE}" "${status}" "${diag:+%0A${diag}}"
     fi
   fi
 
+  [[ -z "${SMOKE_DIAG_FILE}" ]] || rm -f "${SMOKE_DIAG_FILE}"
   cleanup_test_sandbox
 }
 
@@ -192,7 +227,9 @@ main() {
   load_functions
   stub_side_effects
   canary_before="$(canary_snapshot | LC_ALL=C sort)"
+  SMOKE_DIAG_FILE="$(mktemp)"
   trap on_smoke_exit EXIT
+  trap smoke_record_err ERR
 
   for case_name in "${cases[@]}"; do
     run_smoke_case "${case_name}"
