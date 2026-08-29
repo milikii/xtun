@@ -16,7 +16,26 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck jq openssl
+          sudo apt-get install -y shellcheck jq openssl unzip
+
+      # smoke 会把宿主机的 xray 软链进沙箱，然后真的去跑 xray vlessenc / x25519 /
+      # run -test。runner 上没有 xray，所以第 4 条用例就 die 了——CI 从 3b167b7
+      # 起一直红在这儿，而本机是装着 xray 的生产节点，85 条全绿，谁都没看出来。
+      # 版本钉死并校验 sha256：CI 红了应该是这个仓库的问题，
+      # 不该是上游哪天发了个新版本。要升级就一起改这两行。
+      - name: Install Xray-core
+        env:
+          XRAY_VERSION: v26.3.27
+          XRAY_SHA256: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+        run: |
+          set -Eeuo pipefail
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/xray.zip" \
+            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
+          printf '%s  %s\n' "${XRAY_SHA256}" "${tmp}/xray.zip" | sha256sum -c -
+          unzip -qo "${tmp}/xray.zip" -d "${tmp}/xray"
+          sudo install -m 0755 "${tmp}/xray/xray" /usr/local/bin/xray
+          /usr/local/bin/xray version | head -n 1
 
       - name: Run Shellcheck
         run: shellcheck xtun.sh $(find lib tests -type f -name '*.sh' | sort)

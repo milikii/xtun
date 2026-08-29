@@ -9,6 +9,35 @@ TEST_WARP_PEER_PUBLIC_KEY="eHR1bi10ZXN0LXdhcnAtcGVlci1wdWJsaWMta2V5LTM="
 
 TEST_SANDBOX_ROOT="${TEST_SANDBOX_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/xtun-test-sandbox.XXXXXX")}"
 
+# ------------------------------
+# 宿主机依赖
+# 沙箱里的 xray 是宿主机真实二进制的软链，用例会真的去跑
+# xray vlessenc / x25519 / run -test，所以宿主机必须先装了 xray。
+# 以前宿主机没有 xray 时，下面那个软链只是静默地不建，然后一路跑到第 4 条用例，
+# 才在 lib/install.sh 里炸出一句 "No such file or directory"——
+# CI 正是这样连红了六个提交，而本机因为是生产节点、装着 xray，85 条全绿。
+# 缺什么现在开跑前一次说清楚。
+# ------------------------------
+TEST_HOST_XRAY_BIN="${TEST_HOST_XRAY_BIN:-/usr/local/bin/xray}"
+
+require_test_host_tools() {
+  local missing=""
+  local tool=""
+
+  [[ -x "${TEST_HOST_XRAY_BIN}" ]] \
+    || missing+="  ${TEST_HOST_XRAY_BIN}（xray 可执行文件，用例要真的跑 vlessenc / x25519 / run -test）"$'\n'
+
+  for tool in jq openssl; do
+    command -v "${tool}" >/dev/null 2>&1 || missing+="  ${tool}"$'\n'
+  done
+
+  [[ -n "${missing}" ]] || return 0
+
+  printf '[fail] 这套测试对宿主机有硬依赖，下面这些没找到：\n%s' "${missing}" >&2
+  printf '[fail] 装上再跑。CI 里由 .github/workflows/ci.yml 的 Install Xray-core 步骤负责。\n' >&2
+  exit 1
+}
+
 prepare_test_sandbox_root() {
   # ------------------------------
   # 真实 xray 二进制以软链接进沙箱
@@ -16,11 +45,12 @@ prepare_test_sandbox_root() {
   # 而卸载、回滚类用例删掉的只是这条软链
   # ------------------------------
   install -d -m 0755 "${TEST_SANDBOX_ROOT}/usr/local/bin"
-  if [[ -x /usr/local/bin/xray && ! -e "${TEST_SANDBOX_ROOT}/usr/local/bin/xray" ]]; then
-    ln -s /usr/local/bin/xray "${TEST_SANDBOX_ROOT}/usr/local/bin/xray"
+  if [[ ! -e "${TEST_SANDBOX_ROOT}/usr/local/bin/xray" ]]; then
+    ln -s "${TEST_HOST_XRAY_BIN}" "${TEST_SANDBOX_ROOT}/usr/local/bin/xray"
   fi
 }
 
+require_test_host_tools
 prepare_test_sandbox_root
 
 # 下列路径变量由 source 进来的 xtun.sh 各层使用
