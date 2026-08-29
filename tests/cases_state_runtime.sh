@@ -550,7 +550,7 @@ errexit_guarded_step_names() {
     write_subscription_files write_acme_reload_helper \
     write_existing_tls_assets write_self_signed_tls_assets \
     ensure_xray_user ensure_managed_permissions \
-    begin_managed_change select_output_client_if_requested
+    begin_managed_change finish_managed_change select_output_client_if_requested
 }
 
 

@@ -56,7 +56,7 @@ run_change_warp_action() {
         return 1
       fi
       warp_teardown_legacy
-      finish_managed_change "WARP 分流已启用。" "no"
+      finish_managed_change "WARP 分流已启用。" "no" || return 1
       log "出站: $(warp_outbound_text)"
       log "规则数: $(warp_rule_count_text)"
       ;;

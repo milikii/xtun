@@ -302,6 +302,6 @@ change_warp_rules_cmd() {
   log_step "更新 WARP 分流规则。"
   apply_managed_runtime_update || return 1
   # 分流规则不影响任何客户端链接，没必要再把整份部署文档喷一遍
-  finish_managed_change "WARP 分流规则已更新。" "no"
+  finish_managed_change "WARP 分流规则已更新。" "no" || return 1
   printf '%s\n' "${updated_text}"
 }
