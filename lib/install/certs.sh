@@ -331,21 +331,11 @@ promote_tls_assets() {
   mv -f "${key_file}" "${TLS_KEY_FILE}" || return 1
 }
 
-write_tls_assets() {
-  local stage_cert_file=""
-  local stage_key_file=""
-
-  mkdir -p "${SSL_DIR}"
-  backup_path "${TLS_CERT_FILE}" || return 1
-  backup_path "${TLS_KEY_FILE}" || return 1
-  stage_cert_file="$(tls_stage_cert_file)"
-  stage_key_file="$(tls_stage_key_file)"
-  cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"
-  # 只挂 RETURN：EXIT 是单槽的，装上去会顶掉 install_draft_session_begin 的
-  # EXIT trap（草稿保存），末尾的 trap - 还会把它一并摘掉。
-  # 暂存文件名是固定的，且每次进函数都会先清一遍，
-  # 所以 die 路径上残留的暂存文件下一次证书操作就会被覆盖清理。
-  trap 'cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"' RETURN
+# 签发/导入暂存证书并把它顶上去。所有失败都靠 return 传出去，暂存文件的清理
+# 交给 write_tls_assets 统一做——这里不要再挂 RETURN trap，原因见下面那段注释。
+stage_and_promote_tls_assets() {
+  local stage_cert_file="${1}"
+  local stage_key_file="${2}"
 
   case "${CERT_MODE}" in
     existing)
@@ -367,6 +357,32 @@ write_tls_assets() {
   [[ -f "${stage_cert_file}" && -f "${stage_key_file}" ]] || return 1
   validate_tls_assets_with_paths "${stage_cert_file}" "${stage_key_file}" || return 1
   promote_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
+}
+
+write_tls_assets() {
+  local stage_cert_file=""
+  local stage_key_file=""
+  local status=0
+
+  mkdir -p "${SSL_DIR}"
+  backup_path "${TLS_CERT_FILE}" || return 1
+  backup_path "${TLS_KEY_FILE}" || return 1
+  stage_cert_file="$(tls_stage_cert_file)"
+  stage_key_file="$(tls_stage_key_file)"
+  cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"
+
+  # 这里以前挂的是 `trap '清理' RETURN`。RETURN trap 不会随本函数返回而消失：
+  # 它会跟着调用栈继续往上，调用方返回时再触发一次，而那时 stage_cert_file 已经
+  # 随本函数的局部作用域一起没了，set -u 当场把整个进程打死——
+  # "stage_cert_file: unbound variable"，install / change-cert-mode / renew-cert
+  # 在 apply_managed_files 返回的那一刻断在半路。
+  # 测试没抓到是因为三处调用都写成 `( write_tls_assets )`，泄漏被子 shell 挡住了。
+  # 改成显式接住退出码再清理，不留 trap。
+  # die 路径上仍然会残留暂存文件（die 是 exit，本来 trap 也不触发），
+  # 但文件名固定、每次进函数先清一遍，下一次证书操作就会覆盖清理。
+  stage_and_promote_tls_assets "${stage_cert_file}" "${stage_key_file}" || status=$?
+  cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"
+  [[ "${status}" -eq 0 ]] || return "${status}"
 
   ensure_managed_permissions || return 1
   validate_tls_assets

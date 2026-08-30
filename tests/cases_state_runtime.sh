@@ -690,6 +690,55 @@ run_ifs_scope_lint_case() {
   [[ "${violations}" -eq 0 ]]
 }
 
+# 同一类作用域泄漏的另一半：RETURN trap 不随设置它的函数返回而消失，
+# 它跟着调用栈继续往上，调用方返回时再触发一次。trap 体里但凡引用了局部变量，
+# 那一次触发时变量已经随作用域没了，set -u 当场把整个进程打死。
+# write_tls_assets 就是这么坏过一次的（"stage_cert_file: unbound variable"），
+# 而三条 TLS 用例都写成 `( write_tls_assets )`，子 shell 把泄漏挡住了，一直没红。
+# 想在函数返回时收尾，请显式接住退出码再收尾，别挂 trap。
+# `trap - RETURN` / `trap -p RETURN` 是摘除和查询，不算。
+trap_line_installs_return_trap() {
+  [[ "${1}" != *'trap -'* ]] || return 1
+  [[ "${1}" =~ ^[[:space:]]*trap[[:space:]].*[[:space:]]RETURN[[:space:]]*$ ]]
+}
+
+return_trap_sites() {
+  local hit=""
+  local text=""
+
+  cd "${ROOT_DIR}" || return 1
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    text="${hit#*:}"
+    text="${text#*:}"
+    trap_line_installs_return_trap "${text}" || continue
+    printf '%s\n' "${hit}"
+  done < <(grep -rn 'RETURN' xtun.sh lib || true)
+}
+
+run_return_trap_lint_case() {
+  local hit=""
+  local violations=0
+
+  cd "${ROOT_DIR}" || return 1
+
+  # 判别式先自检一遍，理由同 run_ifs_scope_lint_case：修好之后一条 finding 都没有，
+  # 光看「没报错」分不清是真干净还是正则失灵了。
+  trap_line_installs_return_trap "  trap 'cleanup_tls_stage_files \"\${a}\" \"\${b}\"' RETURN"
+  assert_false trap_line_installs_return_trap '  trap - RETURN'
+  assert_false trap_line_installs_return_trap '  trap -p RETURN'
+  assert_false trap_line_installs_return_trap "  trap 'x' EXIT"
+  assert_false trap_line_installs_return_trap '  # 这里以前挂的是 RETURN'
+
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    printf '[fail] %s：RETURN trap 会泄漏到调用方，请改成显式接住退出码再收尾\n' "${hit}" >&2
+    violations=$((violations + 1))
+  done < <(return_trap_sites)
+
+  [[ "${violations}" -eq 0 ]]
+}
+
 # is_valid_hostname 之前没有任何测试。补一条：它是给人「试探着问一句合不合法」用的，
 # 返回 1 是正常结局，所以它绝不能在返回之后留下副作用。
 run_hostname_validation_case() {
@@ -990,6 +1039,46 @@ run_tls_issue_failure_not_reported_ok_case() {
   status=$?
   set -e
   [[ "${status}" -ne 0 ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# write_tls_assets 以前用 `trap '清理暂存文件' RETURN` 收尾。RETURN trap 不随本函数
+# 返回而消失：它跟着调用栈继续往上，调用方返回时再触发一次，而那时被引用的局部变量
+# 已经没了，set -u 当场把整个进程打死（"stage_cert_file: unbound variable"）。
+# 真实调用链上第一个受害者就是 apply_managed_files —— install / change-cert-mode /
+# renew-cert 会在它返回的那一刻断在半路。
+#
+# 上面几条 TLS 用例一直是绿的，因为它们都写成 `( write_tls_assets )`，
+# 泄漏被子 shell 关在里面了。所以这条用例必须从一个真的函数里调用，且不能加子 shell。
+run_tls_stage_trap_scope_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  SSL_DIR="${workdir}/ssl"
+  TLS_CERT_FILE="${SSL_DIR}/cert.pem"
+  TLS_KEY_FILE="${SSL_DIR}/key.pem"
+  CERT_MODE="self-signed"
+  XHTTP_DOMAIN="cdn.example.com"
+  XRAY_GID="0"
+  mkdir -p "${SSL_DIR}"
+  backup_path() { :; }
+  ensure_managed_permissions() { :; }
+  validate_tls_assets() { :; }
+
+  tls_trap_probe_caller() {
+    write_tls_assets >/dev/null 2>&1 || true
+    return 0
+  }
+
+  # 泄漏的话，这个 return 就会再触发一次 trap，set -u 报未绑定变量、进程当场死掉。
+  # 能跑到下一行本身就是断言。
+  tls_trap_probe_caller
+  # 结构上再钉一道：写完证书之后不该有任何 RETURN trap 留在栈上。
+  [[ -z "$(trap -p RETURN)" ]]
+  [[ ! -e "${SSL_DIR}/.cert.pem.stage" ]]
+  [[ ! -e "${SSL_DIR}/.key.pem.stage" ]]
 
   rm -rf "${workdir}"
   load_functions

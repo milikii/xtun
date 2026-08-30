@@ -190,6 +190,7 @@ main() {
     run_errexit_guard_lint_case
     run_dead_global_lint_case
     run_ifs_scope_lint_case
+    run_return_trap_lint_case
     run_hostname_validation_case
     run_service_reload_preference_case
     run_managed_rollback_case
@@ -197,6 +198,7 @@ main() {
     run_install_rollback_helper_case
     run_tls_stage_failure_case
     run_tls_issue_failure_not_reported_ok_case
+    run_tls_stage_trap_scope_case
     run_xray_only_update_write_failure_case
     run_restart_optional_service_case
     run_change_helper_case
