@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.11.9`
+当前版本：`0.11.10`
 
 ## 能安装什么
 

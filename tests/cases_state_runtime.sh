@@ -637,6 +637,92 @@ errexit_unguarded_call_sites() {
     '
 }
 
+# IFS 是全局的，而且它决定了所有不加引号的展开、$*/${arr[*]} 的拼接、以及 read 怎么分词。
+# 函数里写裸的 `IFS=...`（不带 local），只要中间任何一条 return / die 从还原语句上面跳走，
+# 调用方的 IFS 就被永久改成了别的东西，后面整个进程都在按新分隔符分词。
+# is_valid_hostname 就是这么坏的：域名标签以连字符开头时它 return 1，
+# 把调用方的 IFS 留成 "."。手工存一份再在末尾还原挡不住这个，只有 local 能——
+# bash 在函数返回时自己还原，无论从哪条路径返回。
+#
+# 只报「独立赋值」。`IFS= read -r line` 这种前缀赋值只对那一条命令生效，是安全的，
+# 仓库里有 7 处，不能误伤。
+ifs_line_is_bare_assignment() {
+  [[ "${1}" =~ ^[[:space:]]*IFS=[^[:space:]]*[[:space:]]*$ ]]
+}
+
+ifs_bare_assignment_sites() {
+  local hit=""
+  local text=""
+
+  cd "${ROOT_DIR}" || return 1
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    text="${hit#*:}"
+    text="${text#*:}"
+    ifs_line_is_bare_assignment "${text}" || continue
+    printf '%s\n' "${hit}"
+  done < <(grep -rnE 'IFS=' xtun.sh lib || true)
+}
+
+run_ifs_scope_lint_case() {
+  local hit=""
+  local violations=0
+
+  cd "${ROOT_DIR}" || return 1
+
+  # 判别式自己先过一遍：认得出该报的，也放得过不该报的。
+  # 这条不钉住的话，正则哪天被改松/改紧，lint 会静悄悄地一直绿。
+  # 反向断言必须走 assert_false：写成 `! fn ...` 的话 set -e 会豁免掉整条语句，
+  # 断言失败也照样往下跑（shellcheck SC2251 就是在说这件事）。
+  ifs_line_is_bare_assignment "  IFS='.'"
+  ifs_line_is_bare_assignment 'IFS="${old_ifs}"'
+  assert_false ifs_line_is_bare_assignment '  while IFS= read -r line; do'
+  assert_false ifs_line_is_bare_assignment '  IFS= read -r line'
+  assert_false ifs_line_is_bare_assignment '  local IFS=.'
+
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    printf '[fail] %s：裸的 IFS 赋值，提前 return 会把调用方的 IFS 永久留歪，请改成 local IFS=\n' \
+      "${hit}" >&2
+    violations=$((violations + 1))
+  done < <(ifs_bare_assignment_sites)
+
+  [[ "${violations}" -eq 0 ]]
+}
+
+# is_valid_hostname 之前没有任何测试。补一条：它是给人「试探着问一句合不合法」用的，
+# 返回 1 是正常结局，所以它绝不能在返回之后留下副作用。
+run_hostname_validation_case() {
+  local before=""
+  local label_63=""
+  local label_64=""
+
+  load_functions
+
+  # 长度边界上的两个标签。不要写成 $(printf 'a%.0s' $(seq 1 64)) ——
+  # 那个不加引号的命令替换要靠 IFS 分词，而这条用例测的正是 IFS 会不会被弄脏，
+  # 一旦真的漏了，构造串本身先跟着塌掉，用例就跟着一起说谎。
+  printf -v label_63 '%063d' 0
+  printf -v label_64 '%064d' 0
+
+  before="${IFS}"
+
+  is_valid_hostname "example.com"
+  is_valid_hostname "a.b.example.com"
+  is_valid_hostname "${label_63}.com"
+  assert_false is_valid_hostname ""
+  assert_false is_valid_hostname ".example.com"
+  assert_false is_valid_hostname "example..com"
+  assert_false is_valid_hostname "example.com."
+  assert_false is_valid_hostname "bad_host.com"
+  assert_false is_valid_hostname "-a.example.com"
+  assert_false is_valid_hostname "a-.example.com"
+  assert_false is_valid_hostname "${label_64}.com"
+
+  # 上面那批失败调用一条都不许动到 IFS。以前 -a.example.com 这类会把它留成 "."。
+  [[ "${IFS}" == "${before}" ]]
+}
+
 run_errexit_guard_lint_case() {
   local names=""
   local hit=""

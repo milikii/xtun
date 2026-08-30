@@ -475,7 +475,6 @@ run_install_preflight_checks() {
 
 is_valid_hostname() {
   local host="${1:-}"
-  local old_ifs=""
   local label=""
 
   [[ -n "${host}" ]] || return 1
@@ -483,14 +482,16 @@ is_valid_hostname() {
   [[ "${host}" != .* && "${host}" != *..* && "${host}" != *. ]] || return 1
   [[ "${host}" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
 
-  old_ifs="${IFS}"
-  IFS='.'
+  # 必须是 local IFS。手工存一份再在末尾还原是不够的：下面三条 return 1
+  # 全都从还原语句上面跳走，调用方的 IFS 就被永久留成 "."，
+  # 之后所有不加引号的展开、$*、read 全按 "." 分词。
+  # local 让 bash 在函数返回时自己还原，无论从哪条路径返回。
+  local IFS='.'
   for label in ${host}; do
     [[ -n "${label}" ]] || return 1
     [[ "${#label}" -le 63 ]] || return 1
     [[ "${label}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
   done
-  IFS="${old_ifs}"
 
   return 0
 }
