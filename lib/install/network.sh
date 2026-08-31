@@ -19,6 +19,10 @@ available_cc() {
 # grep -q 命中就立刻退出并关掉读端，sysctl 后面那些写全部踩到 SIGPIPE 变成 141，
 # 然后 pipefail 把 141 抬成整条管道的退出码。慢生产者 + 提前退出的消费者 + pipefail，
 # 三个条件齐了就是必然，不是偶发。
+# （说的是 SIGPIPE 默认处置，也就是 xtun 真正跑的环境：systemd 单元和交互 shell。
+# 祖先进程把 SIGPIPE 设成忽略时——GitHub runner 就是这样——生产者拿到的是 EPIPE
+# 而不是信号，procps 的 sysctl 会当没发生退 0，这条坏管道反而碰巧答对。
+# 形状照样是错的，换个生产者就又坏了，所以 lint 那边禁形状不禁实测结果。）
 # 后果不是报错而是静默降级：write_net_sysctl_conf 里 net.core.default_qdisc = fq
 # 那一行直接不写。本机跑的是 BBRv3 内核，靠同一个 if 里的 `|| bbr_v3_active` 兜住了
 # 才没露出来；普通内核（stock Debian + BBRv1）每次安装都会丢掉 fq。

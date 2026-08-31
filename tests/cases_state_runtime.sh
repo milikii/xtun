@@ -852,7 +852,14 @@ run_die_in_subshell_lint_case() {
 # 在 pipefail 下是个必坏的组合：消费者拿到想要的东西就关掉读端，生产者剩下的写
 # 全部踩到 SIGPIPE，管道整条报失败——而值其实已经取到了。
 # supports_default_qdisc 就是这么坏的：`sysctl -a | grep -q` 在任何支持
-# default_qdisc 的内核上都返回 141，安装时静默丢掉 net.core.default_qdisc = fq。
+# default_qdisc 的内核上都失败，安装时静默丢掉 net.core.default_qdisc = fq。
+# 退出码看环境，也看生产者是谁。SIGPIPE 是默认处置时——systemd 单元、交互 shell，
+# 也就是 xtun 真正跑的地方——生产者一定被信号打死，退 141。祖先进程把 SIGPIPE 设成
+# 忽略时（GitHub runner 就是这样，bash 不恢复启动时已被忽略的信号）生产者拿到的是
+# EPIPE 而不是信号，退多少由它自己定：coreutils 印一行 write error: Broken pipe 退 1，
+# procps 的 sysctl 干脆当没发生退 0。所以判定只认「非 0」，不认具体码。
+# 也正因为退 0 那种情况存在，这条 lint 禁的是形状而不是「实测会不会翻车」：
+# 同一行代码换个信号处置、换个生产者就从静默降级变成碰巧答对，不能留。
 #
 # 名单走生产者黑名单，不做「除了这些都算」的反向名单：判定的关键是生产者会不会在
 # 消费者退出之后还要继续写，而这取决于它吐得有多慢、有多长。
@@ -1004,10 +1011,19 @@ run_qdisc_probe_case() {
   # 先把机制本身钉出来。不这么钉的话，万一哪天 pipefail 被摘掉或者 bash 换了行为，
   # 上面那条 lint 就变成了没有依据的教条，而这条用例会假绿。
   # seq 吐 1.2MB，grep 在第 3 行就命中退出，生产者必然还有一大堆没写完。
+  #
+  # 分两次跑，才能说清「坏的是 pipefail，不是这条管道本身」：
+  # 关掉 pipefail 时它成功——消费者要的答案一个不少地拿到了；
+  # 开着 pipefail 时同一条管道变成失败——被打断的生产者的退出码被抬上来了。
+  # 具体退出码不能钉死：本机是 141（生产者被 SIGPIPE 打死，128 + 13），
+  # GitHub runner 上是 1——runner 的祖先进程把 SIGPIPE 设成了忽略，bash 不会把
+  # 启动时就被忽略的信号恢复回来，于是子进程写关掉的管道拿到的是 EPIPE 而不是信号，
+  # coreutils 自己印一行 write error: Broken pipe 然后退 1。第一版钉死 141，
+  # 本机绿、CI 红，就是栽在这上面。两种形态是同一个 bug，只认「非 0」。
+  ( set +o pipefail; seq 1 200000 | grep -q '^3$' ) >/dev/null 2>&1
   ( seq 1 200000 | grep -q '^3$' ) >/dev/null 2>&1 || status=$?
-  if [[ "${status}" -ne 141 ]]; then
-    printf '[fail] pipefail + SIGPIPE 没有产生 141（实际 %s），这条用例和 pipefail lint 的前提都不成立了\n' \
-      "${status}" >&2
+  if [[ "${status}" -eq 0 ]]; then
+    printf '[fail] pipefail 没有把被打断的生产者的退出码抬上来，这条用例和 pipefail lint 的前提都不成立了\n' >&2
     return 1
   fi
 
