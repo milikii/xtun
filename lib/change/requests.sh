@@ -46,7 +46,7 @@ resolve_cert_mode_change_targets() {
 
   if [[ "${cert_mode_overridden}" -eq 1 ]]; then
     CERT_MODE="${new_cert_mode}"
-    CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
+    CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")" || exit 1
   else
     CERT_MODE=""
     prompt_cert_mode_selection "新的证书模式序号" "${old_cert_mode}"

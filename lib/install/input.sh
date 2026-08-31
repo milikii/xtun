@@ -5,6 +5,17 @@
 # 负责交互输入、参数规范化与安装前校验
 # ------------------------------
 
+# 下面每处 `X="$(normalize_... )"` 后面的 `|| exit 1` 都是必须的，别当成噪音删掉：
+# 这些 normalize_/validate_ 函数在参数不合法时走的是 die，而 die 是 exit——
+# 它跑在 $( ) 的子 shell 里，只能把那个子 shell 打死。错误信息照样印在 stderr 上，
+# 但命令替换的结果是空串，赋值把变量留成空，然后函数一路跑完返回 0。
+# 于是 `是否启用 WARP？ [y/n]` 那里手一抖打成 "maybe"，屏幕上闪一行错误，
+# 安装照常做完、报成功，只是 WARP 静默没装。ENABLE_NET_OPT / xpadding / ECH /
+# VLESS Encryption 全是同一个形状。
+# errexit 兜不住：dispatch_cli_command 那里是 `... || status=$?`，
+# 整棵动态调用树里的 errexit 都被豁免了。
+# 纯赋值语句（含数组追加、拼接赋值）的退出码就是最后那个命令替换的退出码，
+# 所以 `|| exit 1` 接得住；写成 `local X="$(...)"` 就接不住了（shellcheck SC2155）。
 prepare_install_inputs() {
   local guessed_ip=""
 
@@ -20,12 +31,12 @@ prepare_install_inputs() {
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" ""
   prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
   prompt_yes_no XHTTP_VLESS_ENCRYPTION_ENABLED "是否启用 XHTTP CDN 的 VLESS Encryption？ [y/n]" "y"
-  XHTTP_VLESS_ENCRYPTION_ENABLED="$(normalize_yes_no_value "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}")"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="$(normalize_yes_no_value "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}")" || exit 1
   XHTTP_ECH_ENABLED="${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}"
   prompt_yes_no XHTTP_ECH_ENABLED "是否启用 XHTTP CDN 的 ECH？ [y/n]" "n"
   configure_xhttp_ech_from_toggle
   prompt_yes_no XHTTP_XPADDING_ENABLED "是否启用 XHTTP xpadding？ [y/n]" "n"
-  XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED}")"
+  XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED}")" || exit 1
   if [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]; then
     prompt_xhttp_xpadding_settings
   fi
@@ -33,12 +44,12 @@ prepare_install_inputs() {
   prompt_cert_mode_inputs
 
   prompt_yes_no ENABLE_NET_OPT "是否启用网络优化？ [y/n]" "y"
-  ENABLE_NET_OPT="$(normalize_yes_no_value "ENABLE_NET_OPT" "${ENABLE_NET_OPT}")"
+  ENABLE_NET_OPT="$(normalize_yes_no_value "ENABLE_NET_OPT" "${ENABLE_NET_OPT}")" || exit 1
 
   NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
 
   prompt_yes_no ENABLE_WARP "是否启用选择性 WARP 出站？ [y/n]" "y"
-  ENABLE_WARP="$(normalize_yes_no_value "ENABLE_WARP" "${ENABLE_WARP}")"
+  ENABLE_WARP="$(normalize_yes_no_value "ENABLE_WARP" "${ENABLE_WARP}")" || exit 1
   if [[ "${ENABLE_WARP}" == "yes" ]]; then
     prompt_warp_settings
   fi
@@ -47,7 +58,7 @@ prepare_install_inputs() {
 configure_xhttp_ech_from_toggle() {
   local enabled=""
 
-  enabled="$(normalize_yes_no_value "XHTTP_ECH_ENABLED" "${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}")"
+  enabled="$(normalize_yes_no_value "XHTTP_ECH_ENABLED" "${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}")" || exit 1
   if [[ "${enabled}" == "yes" ]]; then
     XHTTP_ECH_CONFIG_LIST="${XHTTP_ECH_CONFIG_LIST:-cloudflare-ech.com+https://223.5.5.5/dns-query}"
     XHTTP_ECH_FORCE_QUERY="${XHTTP_ECH_FORCE_QUERY:-none}"
@@ -139,7 +150,7 @@ prompt_cert_mode_selection() {
   default_choice="$(cert_mode_choice_value "${default_mode}")"
   [[ -n "${CERT_MODE:-}" ]] || show_cert_mode_menu
   prompt_with_default CERT_MODE "${prompt_text}" "${default_choice}"
-  CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
+  CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")" || exit 1
 }
 
 prompt_warp_settings() {
@@ -156,7 +167,7 @@ prompt_warp_settings() {
 
   log "WARP 出站由 Xray 内置 wireguard 承载，默认自动注册一台免费 WARP 设备。"
   prompt_yes_no use_profile "是否改为导入已有的 wgcf profile.conf？ [y/n]" "n"
-  use_profile="$(normalize_yes_no_value "use_profile" "${use_profile}")"
+  use_profile="$(normalize_yes_no_value "use_profile" "${use_profile}")" || exit 1
   [[ "${use_profile}" == "yes" ]] || return
 
   prompt_multiline_value WARP_PROFILE_SOURCE "粘贴 wgcf profile.conf 内容"
@@ -206,7 +217,7 @@ normalize_warp_rules_text() {
     line="$(printf '%s' "${line}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [[ -n "${line}" ]] || continue
     [[ "${line}" != \#* ]] || continue
-    normalized_line="$(normalize_warp_rule_value "${line}")"
+    normalized_line="$(normalize_warp_rule_value "${line}")" || exit 1
 
     case $'\n'"${seen}" in
       *$'\n'"${normalized_line}"$'\n'*)
@@ -384,8 +395,14 @@ prompt_warp_rules_editor() {
 write_warp_rules_file() {
   local tmp_file=""
   local rules_text=""
+  local current_text=""
 
-  rules_text="$(normalize_warp_rules_text "$(current_warp_rules_text)")"
+  # 两层命令替换要拆开写。内层放在参数位置上时退出码会被外层整个吞掉：
+  # current_warp_rules_text 读到一条非法规则会 die，而 die 是 exit，
+  # 只打死了内层子 shell，外层就拿着一个空串当「当前规则」，
+  # 接着把 WARP_RULES_FILE 原地清空——现有规则无声消失。
+  current_text="$(current_warp_rules_text)" || return 1
+  rules_text="$(normalize_warp_rules_text "${current_text}")" || return 1
   mkdir -p "${XRAY_CONFIG_DIR}" || return 1
   backup_path "${WARP_RULES_FILE}" || return 1
   tmp_file="$(mktemp "${XRAY_CONFIG_DIR}/.warp-domains.list.tmp.XXXXXX")"
@@ -560,7 +577,7 @@ ensure_xhttp_ech_format() {
 }
 
 ensure_xhttp_xpadding_format() {
-  XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED:-${DEFAULT_XHTTP_XPADDING_ENABLED}}")"
+  XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED:-${DEFAULT_XHTTP_XPADDING_ENABLED}}")" || exit 1
   if [[ "${XHTTP_XPADDING_ENABLED}" != "yes" ]]; then
     return
   fi
@@ -618,7 +635,7 @@ ensure_warp_outbound_format() {
   fi
   validate_hostport_value "WARP Endpoint" "${WARP_ENDPOINT:-${DEFAULT_WARP_ENDPOINT}}"
   validate_port_value "WARP MTU" "${WARP_MTU:-${DEFAULT_WARP_MTU}}"
-  WARP_RESERVED="$(normalize_warp_reserved_value "${WARP_RESERVED}")"
+  WARP_RESERVED="$(normalize_warp_reserved_value "${WARP_RESERVED}")" || exit 1
 }
 
 validate_install_inputs() {

@@ -117,6 +117,7 @@ change_label_prefix_cmd() {
 
 change_warp_cmd() {
   local -A request=()
+  local target_mode=""
 
   init_change_warp_request request
   parse_change_warp_args request "$@"
@@ -124,7 +125,12 @@ change_warp_cmd() {
   begin_managed_change || return 1
 
   apply_warp_change_request request
-  run_change_warp_action "$(resolve_change_warp_target_mode "${request[target_mode]}")"
+  # 必须先落到变量上再传进去。写成 `run_change_warp_action "$(resolve_...)"` 的话，
+  # 命令替换的退出码会被 run_change_warp_action 自己的退出码整个盖掉——
+  # resolve_change_warp_target_mode 在参数不合法时 die，die 是 exit，
+  # 只打死了 $( ) 那个子 shell，于是这里会拿着一个空的 target_mode 往下跑。
+  target_mode="$(resolve_change_warp_target_mode "${request[target_mode]}")" || exit 1
+  run_change_warp_action "${target_mode}"
 }
 
 change_cert_mode_cmd() {
@@ -196,6 +202,7 @@ change_warp_rules_cmd() {
   local skip_rule=0
   local original_text=""
   local updated_text=""
+  local current_text=""
 
   while [[ $# -gt 0 ]]; do
     if handle_change_common_arg "${1}"; then
@@ -206,12 +213,12 @@ change_warp_rules_cmd() {
     case "${1}" in
       --add-domain)
         require_option_value "${1}" "${@:2}"
-        add_rules+=("$(normalize_warp_rule_value "${2}")")
+        add_rules+=("$(normalize_warp_rule_value "${2}")") || exit 1
         shift 2
         ;;
       --del-domain)
         require_option_value "${1}" "${@:2}"
-        del_rules+=("$(normalize_warp_rule_value "${2}")")
+        del_rules+=("$(normalize_warp_rule_value "${2}")") || exit 1
         shift 2
         ;;
       --reset-defaults)
@@ -242,10 +249,16 @@ change_warp_rules_cmd() {
   log_step "读取当前托管安装状态。"
   load_current_install_context
 
+  # 先把当前规则整段取出来。写成 `done < <(current_warp_rules_text)` 的话，
+  # 进程替换的退出码根本没地方可去：规则文件里混进一条非法规则时
+  # current_warp_rules_text 会 die，die 是 exit，只打死了那个子进程，
+  # 循环读到 0 行、current_rules 空，然后这条命令会把规则文件按空列表重写一遍，
+  # 把原有规则全删掉还报成功。
+  current_text="$(current_warp_rules_text)" || exit 1
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
     current_rules+=("${line}")
-  done < <(current_warp_rules_text)
+  done <<< "${current_text}"
   original_text="$(printf '%s\n' "${current_rules[@]}")"
 
   if [[ "${reset_defaults}" -eq 1 ]]; then

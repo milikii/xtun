@@ -95,7 +95,7 @@ select_output_client_if_requested() {
   if [[ -t 0 && -t 1 && -f "${STATE_FILE}" && -f "${XRAY_CONFIG_FILE}" ]]; then
     load_current_install_context
     if [[ "$(node_client_count)" -gt 1 ]]; then
-      client_name="$(prompt_node_client_selection "请选择要输出链接的客户端")"
+      client_name="$(prompt_node_client_selection "请选择要输出链接的客户端")" || return 1
       write_output_file "${client_name}" || return 1
     fi
   fi

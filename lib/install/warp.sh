@@ -151,7 +151,7 @@ warp_import_profile() {
   WARP_ENDPOINT="${endpoint:-${DEFAULT_WARP_ENDPOINT}}"
   WARP_MTU="${mtu:-${DEFAULT_WARP_MTU}}"
   if [[ -n "${reserved}" ]]; then
-    WARP_RESERVED="$(normalize_warp_reserved_value "${reserved}")"
+    WARP_RESERVED="$(normalize_warp_reserved_value "${reserved}")" || return 1
   fi
 
   log_success "已从 WARP profile 导入 WireGuard 凭据。"

@@ -739,6 +739,294 @@ run_return_trap_lint_case() {
   [[ "${violations}" -eq 0 ]]
 }
 
+# die 是 exit。exit 在 $( ) / <( ) 的子 shell 里只打死那个子 shell：错误信息照样
+# 印在 stderr 上，但命令替换的结果是空串，赋值把变量留成空，函数一路跑完返回 0。
+# errexit 也兜不住——dispatch_cli_command 那里是 `... || status=$?`，
+# 整棵动态调用树的 errexit 全被豁免了。
+# 于是「非法输入」会变成「静默按默认值继续，然后报成功」。所以凡是把会 die 的函数
+# 当取值函数用的地方，都必须自己接住退出码。
+#
+# 这里只认「函数体里直接出现 die」的一层。传递闭包（A 调 B、B 才 die）有 150+ 个函数，
+# 全报出来会把 warp_rule_count_text 这类纯展示路径也扫进来——那些地方拿不到规则数就
+# 显示个空，是想要的降级行为。直接 die 的那批是 normalize_/validate_ 取值函数，
+# 没有一个例外，所以不需要白名单。
+die_capable_function_names() {
+  cd "${ROOT_DIR}" || return 1
+  awk '
+    /^[a-zA-Z_][a-zA-Z0-9_]*\(\)[[:space:]]*\{[[:space:]]*$/ {
+      fn = $0; sub(/\(\).*$/, "", fn); dies = 0; next
+    }
+    /^\}[[:space:]]*$/ { if (fn != "" && dies) { print fn }; fn = ""; next }
+    fn != "" && /(^|[^A-Za-z0-9_])die[[:space:]]/ { dies = 1 }
+  ' xtun.sh lib/*.sh lib/*/*.sh | LC_ALL=C sort -u
+}
+
+die_capable_function_names_contains() {
+  die_capable_function_names | grep -qx "${1}"
+}
+
+# 只有赋值语句（含数组追加、关联数组元素、拼接赋值）的退出码才等于最后那个命令替换的
+# 退出码，`|| ...` 才接得住。放在参数位置上就接不住了：
+#   run_change_warp_action "$(resolve_change_warp_target_mode ...)"
+# 这条的退出码是 run_change_warp_action 自己的，命令替换那份被整个盖掉，
+# 同一行加 `|| exit 1` 守的是错的东西。这种必须先落到变量上再传。
+# `local x="$(...)"` 同样接不住（shellcheck SC2155），所以 local 开头的也算不合格。
+die_substitution_line_is_assignment() {
+  [[ "${1}" =~ ^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?= ]]
+}
+
+die_substitution_line_has_guard() {
+  case "${1}" in
+    *'|| exit'*|*'|| return'*|*'|| die'*|*'|| continue'*|*'|| {'*) return 0 ;;
+  esac
+  return 1
+}
+
+die_value_substitution_sites() {
+  local names="${1}"
+  local hit=""
+  local text=""
+
+  cd "${ROOT_DIR}" || return 1
+  # [$] [(] 用括号表达式写，省掉一层反斜杠转义的账。
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    text="${hit#*:}"
+    text="${text#*:}"
+    if die_substitution_line_is_assignment "${text}" \
+      && die_substitution_line_has_guard "${text}"; then
+      continue
+    fi
+    printf '%s\n' "${hit}"
+  done < <(grep -rnE "[\$][(](${names})[[:space:])]" xtun.sh lib || true)
+}
+
+run_die_in_subshell_lint_case() {
+  local names=""
+  local hit=""
+  local violations=0
+
+  cd "${ROOT_DIR}" || return 1
+
+  # 扫描器坏掉时名单会悄悄变空，lint 跟着一直绿。钉住数量下限和几个一定在里面的名字。
+  [[ "$(die_capable_function_names | grep -c .)" -ge 60 ]]
+  die_capable_function_names | grep -qx 'normalize_yes_no_value'
+  die_capable_function_names | grep -qx 'validate_cert_mode_value'
+  die_capable_function_names | grep -qx 'normalize_warp_rule_value'
+  # 反向也钉住：不 die 的函数不该混进名单，否则「全报出来」等于没报。
+  assert_false_silently die_capable_function_names_contains 'tls_stage_cert_file'
+
+  # 两条判别式各自自检。反向断言必须走 assert_false——写成 `! fn ...`
+  # 会被 set -e 整条豁免掉（shellcheck SC2251）。
+  die_substitution_line_is_assignment '  ENABLE_WARP="$(normalize_yes_no_value "ENABLE_WARP" "${x}")"'
+  die_substitution_line_is_assignment '  add_rules+=("$(normalize_warp_rule_value "${2}")")'
+  die_substitution_line_is_assignment '  request[mode]="$(resolve_x "${y}")"'
+  assert_false die_substitution_line_is_assignment '  run_change_warp_action "$(resolve_x "${y}")"'
+  assert_false die_substitution_line_is_assignment '  local mode="$(resolve_x "${y}")"'
+  assert_false die_substitution_line_is_assignment '  printf "%s" "$(resolve_x)"'
+  assert_false die_substitution_line_is_assignment '  done < <(current_warp_rules_text)'
+
+  die_substitution_line_has_guard '  X="$(fn)" || exit 1'
+  die_substitution_line_has_guard '  X="$(fn)" || return 1'
+  die_substitution_line_has_guard '  X="$(fn)" || die "x"'
+  die_substitution_line_has_guard '  X="$(fn)" || continue'
+  die_substitution_line_has_guard '  X="$(fn)" || {'
+  assert_false die_substitution_line_has_guard '  X="$(fn)"'
+  assert_false die_substitution_line_has_guard '  X="$(fn)" && printf ok'
+
+  names="$(die_capable_function_names | grep -vE '^[[:space:]]*$' | paste -sd '|' -)"
+  [[ -n "${names}" ]]
+
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    printf '[fail] %s：把会 die 的函数放进了命令替换，失败会被子 shell 吞掉。%s\n' \
+      "${hit}" '赋值请补 `|| exit 1`；参数位置请先落到变量上' >&2
+    violations=$((violations + 1))
+  done < <(die_value_substitution_sites "${names}")
+
+  [[ "${violations}" -eq 0 ]]
+}
+
+# 非法输入必须让命令以非 0 退出。修好之前这一批全是「错误信息照印、变量留成空串、
+# 退出码 0」：安装报成功但 WARP/网络优化/ECH/xpadding 静默没生效，
+# change-warp-rules 报成功但那条规则根本没加进去。
+# 每条都在子 shell 里跑，因为守卫用的是 exit；而 `( ... ) || status=$?` 这个写法
+# 顺带把 dispatch 那个「errexit 全程失效」的环境复刻了出来——
+# 也就是说这里验的正是「不靠 errexit 也停得住」。
+# 子 shell 里只放被测调用，不放任何裸 [[ ]] 断言（那些会跟着一起被豁免成空转）。
+assert_invalid_input_fails() {
+  local label="${1}"
+  local status=0
+
+  shift
+  ( "$@" ) >/dev/null 2>&1 || status=$?
+  if [[ "${status}" -eq 0 ]]; then
+    printf '[fail] %s：非法输入却退出 0，调用方会把这次失败当成成功\n' "${label}" >&2
+    return 1
+  fi
+}
+
+assert_valid_input_succeeds() {
+  local label="${1}"
+  local status=0
+
+  shift
+  ( "$@" ) >/dev/null 2>&1 || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    printf '[fail] %s：合法输入被打回（退出码 %s）\n' "${label}" "${status}" >&2
+    return 1
+  fi
+}
+
+# 写成 `[[ ! -e path ]]` 也行，但那条裸断言在 `( ) || status=$?` 之后的上下文里
+# 一样会被 errexit 豁免掉。走函数 + return 1，失败时才真的挂。
+assert_absent_path() {
+  local path="${1}"
+  local label="${2}"
+
+  if [[ -e "${path}" ]]; then
+    printf '[fail] %s（%s 出现了）\n' "${label}" "${path}" >&2
+    return 1
+  fi
+}
+
+probe_cert_mode_selection() {
+  CERT_MODE="${1}"
+  prompt_cert_mode_selection "证书模式序号" "self-signed"
+}
+
+probe_ech_toggle() {
+  XHTTP_ECH_ENABLED="${1}"
+  configure_xhttp_ech_from_toggle
+}
+
+probe_xpadding_format() {
+  XHTTP_XPADDING_ENABLED="${1}"
+  ensure_xhttp_xpadding_format
+}
+
+probe_warp_reserved() {
+  set_test_warp_credentials
+  WARP_RESERVED="${1}"
+  ensure_warp_outbound_format
+}
+
+probe_write_warp_rules_file() {
+  WARP_RULES_TEXT="${1}"
+  write_warp_rules_file
+}
+
+run_invalid_value_exit_status_case() {
+  local workdir=""
+  local root_marker=""
+
+  load_functions
+  stub_side_effects
+  NON_INTERACTIVE=1
+
+  workdir="$(mktemp -d)"
+  XRAY_CONFIG_DIR="${workdir}/xray"
+  WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
+  mkdir -p "${XRAY_CONFIG_DIR}"
+
+  assert_invalid_input_fails 'normalize_warp_rules_text 含非法行' \
+    normalize_warp_rules_text $'geosite:openai\nbad rule here\ndomain:claude.ai'
+  assert_invalid_input_fails 'prompt_cert_mode_selection 非法模式' \
+    probe_cert_mode_selection 'bogus'
+  assert_invalid_input_fails 'configure_xhttp_ech_from_toggle y/n 打错字' \
+    probe_ech_toggle 'maybe'
+  assert_invalid_input_fails 'ensure_xhttp_xpadding_format y/n 打错字' \
+    probe_xpadding_format 'maybe'
+  assert_invalid_input_fails 'ensure_warp_outbound_format 非法 reserved' \
+    probe_warp_reserved '1,2,999999'
+  assert_invalid_input_fails 'write_warp_rules_file 含非法行' \
+    probe_write_warp_rules_file $'geosite:openai\nbad rule here'
+  # 走 dispatch 的那条，也就是用户真正敲的 `xtun change-warp-rules --add-domain ...`。
+  # 只断言「退出码非 0」是不够的：解析循环吞掉失败之后，命令会继续往下走，
+  # 在 load_current_install_context 那里因为没有托管安装而 die，退出码照样非 0——
+  # 用例就绿得毫无道理了（第一次写成这样，变异测试当场抓出来）。
+  # 所以这里把 need_root 换成一个记号：非法值必须在解析阶段就把命令停掉，
+  # 记号一旦出现就说明解析循环没停住。
+  root_marker="${workdir}/need-root-reached"
+  need_root() { : > "${root_marker}"; }
+  assert_invalid_input_fails 'change-warp-rules --add-domain 非法值' \
+    dispatch_cli_command change-warp-rules --add-domain 'bad rule'
+  assert_absent_path "${root_marker}" 'change-warp-rules --add-domain 非法值没在解析阶段停住'
+  assert_invalid_input_fails 'change-warp-rules --del-domain 非法值' \
+    dispatch_cli_command change-warp-rules --del-domain 'bad rule'
+  assert_absent_path "${root_marker}" 'change-warp-rules --del-domain 非法值没在解析阶段停住'
+
+  # 正向：合法输入不许被这批守卫顺手打回。
+  assert_valid_input_succeeds 'normalize_warp_rules_text 全合法' \
+    normalize_warp_rules_text $'geosite:openai\ndomain:claude.ai'
+  assert_valid_input_succeeds 'prompt_cert_mode_selection 合法模式' \
+    probe_cert_mode_selection 'acme-dns-cf'
+  assert_valid_input_succeeds 'configure_xhttp_ech_from_toggle yes' \
+    probe_ech_toggle 'yes'
+  assert_valid_input_succeeds 'ensure_xhttp_xpadding_format no' \
+    probe_xpadding_format 'no'
+  assert_valid_input_succeeds 'ensure_warp_outbound_format 合法 reserved' \
+    probe_warp_reserved '3,4,5'
+  assert_valid_input_succeeds 'write_warp_rules_file 全合法' \
+    probe_write_warp_rules_file $'geosite:openai\ndomain:claude.ai'
+
+  # 非法那次不许留下半份规则文件。上面 write_warp_rules_file 的失败调用先跑，
+  # 合法那次紧跟着重写，所以这里查的是最终内容里没有那条非法规则。
+  assert_absent 'bad rule' "${WARP_RULES_FILE}"
+
+  rm -rf "${workdir}"
+  load_functions
+  reset_feature_defaults
+}
+
+# 规则文件里混进一条非法规则时，change-warp-rules 不许把文件按空列表重写一遍。
+# 这条盯的是进程替换：`done < <(current_warp_rules_text)` 里那个子进程 die 掉，
+# 退出码没有任何地方可去，循环安安静静读到 0 行，接着 add-domain 那条新规则
+# 就成了整份文件的全部内容——原有规则全没了，命令还报成功。
+# lint 抓不到这个形状（current_warp_rules_text 是隔了一层才 die 的），所以必须有行为测试。
+run_warp_rules_corrupt_file_case() {
+  local workdir=""
+  local written_text=""
+  local status=0
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  XRAY_CONFIG_DIR="${workdir}/xray"
+  WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
+  mkdir -p "${XRAY_CONFIG_DIR}"
+  printf '%s\n' 'geosite:openai' 'bad rule here' 'domain:claude.ai' > "${WARP_RULES_FILE}"
+
+  need_root() { :; }
+  start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
+  # WARP_RULES_TEXT 要留空，current_warp_rules_text 才会去读磁盘上那份坏文件。
+  load_current_install_context() { WARP_RULES_TEXT=""; ENABLE_WARP="yes"; }
+  apply_managed_runtime_update() { written_text="${WARP_RULES_TEXT}"; }
+  write_state_file() { :; }
+  write_output_file() { :; }
+  show_links() { :; }
+  log() { :; }
+  log_step() { :; }
+  log_success() { :; }
+
+  NON_INTERACTIVE=1
+  ( change_warp_rules_cmd --add-domain example.org ) >/dev/null 2>&1 || status=$?
+
+  if [[ "${status}" -eq 0 ]]; then
+    printf '[fail] 规则文件里有非法行，change-warp-rules 却退出 0\n' >&2
+    rm -rf "${workdir}"
+    return 1
+  fi
+  # 原有的合法规则必须还在文件里。修好之前这里会只剩 domain:example.org。
+  assert_contains 'geosite:openai' "${WARP_RULES_FILE}"
+  assert_contains 'domain:claude.ai' "${WARP_RULES_FILE}"
+
+  rm -rf "${workdir}"
+  load_functions
+  reset_feature_defaults
+}
+
 # is_valid_hostname 之前没有任何测试。补一条：它是给人「试探着问一句合不合法」用的，
 # 返回 1 是正常结局，所以它绝不能在返回之后留下副作用。
 run_hostname_validation_case() {

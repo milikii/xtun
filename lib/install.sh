@@ -134,7 +134,7 @@ install_xray() {
   local expected_sha256=""
   local checksum_source=""
 
-  arch="$(detect_xray_arch)"
+  arch="$(detect_xray_arch)" || exit 1
   archive_name="$(xray_archive_name "${arch}")"
   digest_name="$(xray_digest_name "${archive_name}")"
   base_url="$(xray_release_base_url)"
