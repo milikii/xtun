@@ -40,6 +40,24 @@ user_block_end_marker() {
   printf '# <<< xtun-user:%s <<<' "${1}"
 }
 
+# 只找到开始标记、没找到结束标记时 extract_user_block 用这个退出码报告。
+USER_BLOCK_UNTERMINATED_STATUS="3"
+
+# 标记行比对前要把首尾空白都剪掉，只剪前面是不够的：
+#   - 手工编辑时在标记行尾多敲一个空格或 Tab，
+#   - 或者从 Windows / 某些编辑器存回去，整份文件变成 CRLF，每行尾多一个 \r，
+# 标记就对不上了，而对不上的后果不是报错——是这一段手工内容在下一次整份重写时
+# 无声消失，配置照样校验通过。renew-cert 是 acme.sh 定时无人值守跑的，
+# 真丢起来没有任何人在看。
+#
+# 还有更坏的一种：只有结束标记对不上（比如只有那一行带了 \r）。
+# 以前的写法是命中开始标记就一路 print 到文件尾，于是结束标记那行、以及它后面
+# 所有 xtun 自己生成的行，全被当成「用户内容」搬进新的用户块里——下一轮重写时
+# 这些陈旧的托管行既重复又被永久冻结（nginx 允许重复的 ssl_certificate，
+# 于是可能悄悄拿旧证书路径去服务）。所以现在先攒着，只有真的遇到结束标记才吐出来；
+# 没遇到就一个字都不吐，并用退出码告诉调用方去报警。
+# 这里刻意不让整份重写失败：renew-cert 挂掉意味着证书到期断服，比丢一段手工调优贵得多，
+# 而旧文件本身还在这次变更的备份目录里，捞得回来。
 extract_user_block() {
   local block_name="${1}"
   local file_path="${2}"
@@ -47,10 +65,19 @@ extract_user_block() {
   [[ -f "${file_path}" ]] || return 0
   awk -v begin_marker="$(user_block_begin_marker "${block_name}")" \
       -v end_marker="$(user_block_end_marker "${block_name}")" '
-    { marker = $0; sub(/^[[:space:]]+/, "", marker) }
+    {
+      marker = $0
+      sub(/^[[:space:]]+/, "", marker)
+      sub(/[[:space:]]+$/, "", marker)
+    }
     marker == begin_marker { inside = 1; next }
-    marker == end_marker { inside = 0; next }
-    inside { print }
+    marker == end_marker {
+      if (inside) { printf "%s", pending; pending = "" }
+      inside = 0
+      next
+    }
+    inside { pending = pending $0 "\n"; next }
+    END { if (inside) exit '"${USER_BLOCK_UNTERMINATED_STATUS}"' }
   ' "${file_path}"
 }
 
@@ -60,8 +87,16 @@ render_user_block() {
   local file_path="${2}"
   local indent="${3:-}"
   local body=""
+  local status=0
 
-  body="$(extract_user_block "${block_name}" "${file_path}")"
+  # 这里只能往 stderr 说话。render_user_block 是在 producer 函数里被 $( ) 调起的，
+  # 而 producer 的 stdout 就是正在生成的那份配置文件——用 log 会把警告直接写进配置里。
+  body="$(extract_user_block "${block_name}" "${file_path}")" || status=$?
+  if [[ "${status}" -eq "${USER_BLOCK_UNTERMINATED_STATUS}" ]]; then
+    warn "${file_path} 里 xtun-user:${block_name} 只有开始标记、没有结束标记（注意标记行尾的空格或 \\r 也会让它对不上）；这一段自定义内容没有搬到新文件里，旧文件在备份目录 ${BACKUP_DIR:-（本次未开启备份会话）}。补回结束标记后重新执行即可。"
+  elif [[ "${status}" -ne 0 ]]; then
+    warn "读取 ${file_path} 里的 xtun-user:${block_name} 失败（退出码 ${status}）；这一段自定义内容没有搬到新文件里。"
+  fi
   printf '%s# 下面这对标记之间的内容不会被 xtun 覆盖，自定义参数写在里面。\n' "${indent}"
   printf '%s%s\n' "${indent}" "$(user_block_begin_marker "${block_name}")"
   [[ -z "${body}" ]] || printf '%s\n' "${body}"

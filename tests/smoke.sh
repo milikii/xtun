@@ -184,6 +184,7 @@ main() {
     run_service_config_helper_case
     run_fallback_site_deploy_case
     run_user_block_preserve_case
+    run_user_block_marker_whitespace_case
     run_managed_apply_case
     run_service_failure_propagation_case
     run_install_step_failure_propagation_case

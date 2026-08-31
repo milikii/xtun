@@ -423,6 +423,91 @@ run_user_block_preserve_case() {
   [[ "$(grep -c '不会被 xtun 覆盖' "${HAPROXY_CONFIG}")" -eq 2 ]]
 }
 
+# 上面那条只走了「标记行一个字节都没被碰过」的路。标记是逐字比对的，而手工编辑
+# 恰恰最容易在看不见的地方改动它：行尾多敲一个空格或 Tab，或者整份文件被某些
+# 编辑器存回成 CRLF，每行尾多一个 \r。对不上的表现不是报错——是这一段手工内容
+# 在下一次整份重写里无声消失，配置照样校验通过。renew-cert 由 acme.sh 定时无人
+# 值守跑，真丢起来没有任何人在看。所以比对前首尾空白都要剪掉。
+run_user_block_marker_whitespace_case() {
+  local workdir=""
+  local variant=""
+  local warning=""
+
+  workdir="$(mktemp -d)"
+  reset_feature_defaults
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_LOCAL_PORT="8001"
+  NGINX_TLS_PORT="8443"
+  TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
+  TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
+
+  for variant in trailing-space trailing-tab crlf; do
+    NGINX_CONF_DIR="${workdir}/${variant}/nginx"
+    NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+    HAPROXY_CONFIG="${workdir}/${variant}/haproxy.cfg"
+    write_haproxy_config
+    write_nginx_config
+
+    sed -i '/>>> xtun-user:haproxy-defaults >>>/a\    timeout client 5m' "${HAPROXY_CONFIG}"
+    sed -i '/>>> xtun-user:nginx-server >>>/a\    client_max_body_size 64m;' "${NGINX_CONFIG_FILE}"
+
+    case "${variant}" in
+      # 只动标记行本身，内容行不碰
+      trailing-space)
+        sed -i '/xtun-user:/ s/$/ /' "${HAPROXY_CONFIG}" "${NGINX_CONFIG_FILE}"
+        ;;
+      trailing-tab)
+        sed -i '/xtun-user:/ s/$/\t/' "${HAPROXY_CONFIG}" "${NGINX_CONFIG_FILE}"
+        ;;
+      # 整份存成 CRLF：标记行和内容行都多一个 \r
+      crlf)
+        sed -i 's/$/\r/' "${HAPROXY_CONFIG}" "${NGINX_CONFIG_FILE}"
+        ;;
+    esac
+
+    write_haproxy_config
+    write_nginx_config
+
+    assert_contains 'timeout client 5m' "${HAPROXY_CONFIG}"
+    assert_contains 'client_max_body_size 64m;' "${NGINX_CONFIG_FILE}"
+    # 认出来之后也不能顺手多复制一份
+    [[ "$(grep -c 'timeout client 5m' "${HAPROXY_CONFIG}")" -eq 1 ]]
+    [[ "$(grep -c 'xtun-user:haproxy-defaults' "${HAPROXY_CONFIG}")" -eq 2 ]]
+    [[ "$(grep -c 'client_max_body_size 64m;' "${NGINX_CONFIG_FILE}")" -eq 1 ]]
+  done
+
+  # 更坏的一种：只有开始标记对得上，结束标记对不上（手工编辑时删掉了，或者只有那
+  # 一行被改动过）。以前的写法是命中开始标记就一路 print 到文件尾，于是结束标记后面
+  # 所有 xtun 自己生成的行都被当成「用户内容」搬进新的用户块——下一轮重写时这些陈旧的
+  # 托管行既重复又被永久冻结。现在改成攒够一整段才吐，没等到结束标记就一个字都不吐。
+  NGINX_CONF_DIR="${workdir}/unterminated/nginx"
+  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+  HAPROXY_CONFIG="${workdir}/unterminated/haproxy.cfg"
+  write_haproxy_config
+  sed -i '/>>> xtun-user:haproxy-defaults >>>/a\    timeout client 5m' "${HAPROXY_CONFIG}"
+  sed -i '/<<< xtun-user:haproxy-defaults <<</d' "${HAPROXY_CONFIG}"
+
+  # 整份重写不能因此失败：renew-cert 挂掉意味着证书到期断服，比丢一段手工调优贵得多，
+  # 而旧文件还在备份目录里。代价换成 stderr 上的一条警告。
+  warning="$(write_haproxy_config 2>&1 >/dev/null)"
+  [[ "${warning}" == *"只有开始标记"* ]]
+  [[ "${warning}" == *"xtun-user:haproxy-defaults"* ]]
+  # 警告只能走 stderr：producer 的 stdout 就是正在生成的那份配置文件
+  assert_absent '只有开始标记' "${HAPROXY_CONFIG}"
+
+  # 结束标记后面的托管内容一行都不许被搬进用户块
+  [[ "$(grep -c '^frontend fe_tls_shared_443$' "${HAPROXY_CONFIG}")" -eq 1 ]]
+  [[ "$(grep -c 'bind :443' "${HAPROXY_CONFIG}")" -eq 1 ]]
+  [[ "$(grep -c '^backend be_xhttp_cdn$' "${HAPROXY_CONFIG}")" -eq 1 ]]
+  [[ "$(grep -c 'xtun-user:haproxy-extra' "${HAPROXY_CONFIG}")" -eq 2 ]]
+  [[ "$(grep -c 'xtun-user:haproxy-defaults' "${HAPROXY_CONFIG}")" -eq 2 ]]
+  # 半个块一个字都不吐，所以这一段手工内容确实丢了——这是上面那句警告要说的事
+  assert_absent 'timeout client 5m' "${HAPROXY_CONFIG}"
+
+  rm -rf "${workdir}"
+}
+
 run_fallback_site_deploy_case() {
   local workdir=""
 
