@@ -14,15 +14,17 @@ available_cc() {
 }
 
 # 这里以前是 `sysctl -a 2>/dev/null | grep -q '^net.core.default_qdisc ='`，
-# 在任何支持 default_qdisc 的内核上都稳定返回「不支持」。
-# sysctl -a 要挨个读一千多个 /proc 文件，边读边往管道里吐（本机 37KB）；
-# grep -q 命中就立刻退出并关掉读端，sysctl 后面那些写全部踩到 SIGPIPE 变成 141，
-# 然后 pipefail 把 141 抬成整条管道的退出码。慢生产者 + 提前退出的消费者 + pipefail，
-# 三个条件齐了就是必然，不是偶发。
-# （说的是 SIGPIPE 默认处置，也就是 xtun 真正跑的环境：systemd 单元和交互 shell。
-# 祖先进程把 SIGPIPE 设成忽略时——GitHub runner 就是这样——生产者拿到的是 EPIPE
-# 而不是信号，procps 的 sysctl 会当没发生退 0，这条坏管道反而碰巧答对。
-# 形状照样是错的，换个生产者就又坏了，所以 lint 那边禁形状不禁实测结果。）
+# 在 xtun 真正的安装路径上稳定返回「不支持」。
+# sysctl -a 要挨个读一千多个 /proc 文件，边读边往管道里吐（本机 1028 行 / 37KB，
+# default_qdisc 落在第 196 行）；grep -q 命中就立刻退出并关掉读端，sysctl 后面
+# 那八百多行写全部踩到 SIGPIPE 变成 141，pipefail 再把 141 抬成整条管道的退出码。
+# 严格说这是一场竞速——生产者能不能在消费者退出之前把剩下的写完——但胜负由调起方式
+# 决定，定下来就不再摇摆，不是那种偶尔翻一次的抖动：
+#   - 脚本形态从交互 / login shell 调起，也就是 `xtun install`、`xtun apply-net-opt`
+#     的真实形态：实测 30/30 全败，退 141。
+#   - systemd 起的进程：SIGPIPE 是被忽略的（IgnoreSIGPIPE 默认就是 yes），生产者拿到
+#     EPIPE 而不是信号，procps 的 sysctl 当没发生退 0，同一行代码实测 0/30 全胜。
+# 所以「我这儿跑着没事」说明不了任何问题——换个调起方式、换个生产者就翻过来。
 # 后果不是报错而是静默降级：write_net_sysctl_conf 里 net.core.default_qdisc = fq
 # 那一行直接不写。本机跑的是 BBRv3 内核，靠同一个 if 里的 `|| bbr_v3_active` 兜住了
 # 才没露出来；普通内核（stock Debian + BBRv1）每次安装都会丢掉 fq。

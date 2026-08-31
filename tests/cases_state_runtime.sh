@@ -853,13 +853,16 @@ run_die_in_subshell_lint_case() {
 # 全部踩到 SIGPIPE，管道整条报失败——而值其实已经取到了。
 # supports_default_qdisc 就是这么坏的：`sysctl -a | grep -q` 在任何支持
 # default_qdisc 的内核上都失败，安装时静默丢掉 net.core.default_qdisc = fq。
-# 退出码看环境，也看生产者是谁。SIGPIPE 是默认处置时——systemd 单元、交互 shell，
-# 也就是 xtun 真正跑的地方——生产者一定被信号打死，退 141。祖先进程把 SIGPIPE 设成
-# 忽略时（GitHub runner 就是这样，bash 不恢复启动时已被忽略的信号）生产者拿到的是
+# 退出码看调起方式，也看生产者是谁。SIGPIPE 是默认处置时——脚本从交互 / login shell
+# 调起，也就是 xtun 安装类命令的真实形态——生产者被信号打死，退 141。
+# 而 systemd 起的进程 SIGPIPE 是被忽略的（IgnoreSIGPIPE 默认就是 yes），GitHub runner
+# 的祖先进程也把它设成了忽略（bash 不恢复启动时已被忽略的信号）；这时生产者拿到的是
 # EPIPE 而不是信号，退多少由它自己定：coreutils 印一行 write error: Broken pipe 退 1，
 # procps 的 sysctl 干脆当没发生退 0。所以判定只认「非 0」，不认具体码。
-# 也正因为退 0 那种情况存在，这条 lint 禁的是形状而不是「实测会不会翻车」：
-# 同一行代码换个信号处置、换个生产者就从静默降级变成碰巧答对，不能留。
+# 也正因为「退 0」这种情况存在，这条 lint 禁的是形状，不是「实测会不会翻车」：
+# 同一行代码换个调起方式就能从静默降级变成碰巧答对（supports_default_qdisc 那条坏管道
+# 实测就是交互 shell 里 30/30 全败、systemd 下 0/30 全胜），拿「我这儿跑着没事」
+# 删掉它是不成立的。
 #
 # 名单走生产者黑名单，不做「除了这些都算」的反向名单：判定的关键是生产者会不会在
 # 消费者退出之后还要继续写，而这取决于它吐得有多慢、有多长。
