@@ -13,8 +13,23 @@ available_cc() {
   fi
 }
 
+# 这里以前是 `sysctl -a 2>/dev/null | grep -q '^net.core.default_qdisc ='`，
+# 在任何支持 default_qdisc 的内核上都稳定返回「不支持」。
+# sysctl -a 要挨个读一千多个 /proc 文件，边读边往管道里吐（本机 37KB）；
+# grep -q 命中就立刻退出并关掉读端，sysctl 后面那些写全部踩到 SIGPIPE 变成 141，
+# 然后 pipefail 把 141 抬成整条管道的退出码。慢生产者 + 提前退出的消费者 + pipefail，
+# 三个条件齐了就是必然，不是偶发。
+# 后果不是报错而是静默降级：write_net_sysctl_conf 里 net.core.default_qdisc = fq
+# 那一行直接不写。本机跑的是 BBRv3 内核，靠同一个 if 里的 `|| bbr_v3_active` 兜住了
+# 才没露出来；普通内核（stock Debian + BBRv1）每次安装都会丢掉 fq。
+# 两条现有用例都把 supports_default_qdisc 整个 stub 掉了，所以谁都没跑到真身。
+# 直接读 /proc/sys 里那个键，和上面 available_cc 一个路子：不开管道，也不用扫全表。
 supports_default_qdisc() {
-  sysctl -a 2>/dev/null | grep -q '^net.core.default_qdisc ='
+  if [[ -e /proc/sys/net/core/default_qdisc ]]; then
+    return 0
+  fi
+
+  sysctl -n net.core.default_qdisc >/dev/null 2>&1
 }
 
 bbr_module_version() {
@@ -167,8 +182,14 @@ joey_bbr_latest_core_version_from_tag() {
 }
 
 joey_bbr_installed_kernel_version() {
+  # awk 这里不能用 `exit` 提前收工。dpkg-query -W 会把整机所有包吐一遍（本机 22KB，
+  # 包多的机器轻松过 64KB 管道缓冲），awk 一 exit 就关掉读端，dpkg-query 剩下的写
+  # 全变 SIGPIPE，pipefail 再把 141 抬成整条管道的退出码——和 supports_default_qdisc
+  # 坏掉的是同一个形状。这里目前是靠 dpkg-query 一次性写完抢在 awk 退出之前才没翻车，
+  # 纯粹是运气。用 seen 标记只取第一条，让 awk 把生产者读到 EOF，生产者就永远看不到
+  # 关掉的管道；没命中时 awk 照旧退 0、输出空串，调用方的契约一点没变。
   dpkg-query -W -f='${db:Status-Abbrev}\t${Package}\t${Version}\n' 2>/dev/null \
-    | awk '$1 ~ /^ii/ && $2 ~ /^linux-image-.*-joeyblog-bbrv3$/ { print $3; exit }'
+    | awk '$1 ~ /^ii/ && $2 ~ /^linux-image-.*-joeyblog-bbrv3$/ && !seen { print $3; seen = 1 }'
 }
 
 validate_joey_bbr_asset_rows() {

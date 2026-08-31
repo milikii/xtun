@@ -192,9 +192,11 @@ main() {
     run_ifs_scope_lint_case
     run_return_trap_lint_case
     run_die_in_subshell_lint_case
+    run_pipefail_sigpipe_lint_case
     run_hostname_validation_case
     run_invalid_value_exit_status_case
     run_warp_rules_corrupt_file_case
+    run_qdisc_probe_case
     run_service_reload_preference_case
     run_managed_rollback_case
     run_optional_component_rollback_case

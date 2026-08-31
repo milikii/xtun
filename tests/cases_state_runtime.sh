@@ -847,7 +847,194 @@ run_die_in_subshell_lint_case() {
   [[ "${violations}" -eq 0 ]]
 }
 
-# 非法输入必须让命令以非 0 退出。修好之前这一批全是「错误信息照印、变量留成空串、
+# pipefail 的另一面：管道里任何一段非 0 都会抬成整条管道的退出码，SIGPIPE 死掉的
+# 那一段也算（128 + 13 = 141）。于是「不设上限的生产者 + 命中就退出的消费者」
+# 在 pipefail 下是个必坏的组合：消费者拿到想要的东西就关掉读端，生产者剩下的写
+# 全部踩到 SIGPIPE，管道整条报失败——而值其实已经取到了。
+# supports_default_qdisc 就是这么坏的：`sysctl -a | grep -q` 在任何支持
+# default_qdisc 的内核上都返回 141，安装时静默丢掉 net.core.default_qdisc = fq。
+#
+# 名单走生产者黑名单，不做「除了这些都算」的反向名单：判定的关键是生产者会不会在
+# 消费者退出之后还要继续写，而这取决于它吐得有多慢、有多长。
+#   - sysctl -a：挨个读一千多个 /proc 文件，边读边吐，必然还没写完。
+#   - dpkg-query -W / dpkg -l / apt list：整机所有包，包多就过 64KB 管道缓冲。
+#   - journalctl / dmesg / systemctl list-* / ps aux：长度没有上界。
+# 反过来 printf / modinfo / ip route / openssl x509 / jq 这些一次就写完了，
+# 消费者提前退出也踩不到，不进名单。
+PIPEFAIL_UNBOUNDED_PRODUCERS='sysctl -a|dpkg-query -W|dpkg -l|apt list|journalctl|dmesg|systemctl list-|ps aux|ps -ef'
+
+# 命中就收工的消费者：head、grep -q/-m、带 exit 的 awk、带 q 的 sed。
+# 带 END 的 awk 不算——END 意味着它一定读到 EOF。
+# 注释要跳过。修这个 bug 的时候必须把坏掉的那条管道原样抄进注释里说明它为什么坏，
+# 不跳过的话 lint 会把那段说明本身报成 finding。
+pipefail_line_is_comment() {
+  [[ "${1}" =~ ^[[:space:]]*# ]]
+}
+
+pipefail_line_has_early_exit_consumer() {
+  local text="${1}"
+
+  [[ "${text}" != *'END {'* && "${text}" != *'END{'* ]] || return 1
+  case "${text}" in
+    *'| head'*|*'|head'*) return 0 ;;
+    *'| grep -q'*|*'| grep -m'*|*'| grep -Eq'*|*'| grep -Fq'*) return 0 ;;
+  esac
+  if [[ "${text}" =~ \|[[:space:]]*awk[^|]*[^A-Za-z0-9_]exit[^A-Za-z0-9_] ]]; then
+    return 0
+  fi
+  if [[ "${text}" =~ \|[[:space:]]*sed[^|]*\;[[:space:]]*q ]]; then
+    return 0
+  fi
+  return 1
+}
+
+pipefail_line_has_unbounded_producer() {
+  [[ "${1}" =~ (${PIPEFAIL_UNBOUNDED_PRODUCERS}) ]]
+}
+
+# 续行要先拼起来再判：坏掉的那两处里 dpkg-query 那处，生产者和消费者本来就分在两行上。
+# 拼接单独抽出来，好让用例拿一份两行的合成输入直接钉住它——这是整条 lint 的命门，
+# 拼接一坏，跨行的管道就永远扫不到，而 finding 数照旧是 0，lint 一路绿。
+pipefail_join_continuations() {
+  awk '
+    {
+      if (buf == "") { start = FNR }
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      buf = buf (buf == "" ? "" : " ") line
+      if (buf ~ /\\$/) { sub(/\\$/, "", buf); next }
+      print FILENAME ":" start ":" buf
+      buf = ""
+    }
+  ' "$@"
+}
+
+pipefail_sigpipe_sites() {
+  local -a files=()
+  local line=""
+
+  cd "${ROOT_DIR}" || return 1
+  while IFS= read -r line; do
+    files+=("${line}")
+  done < <(find lib -type f -name '*.sh' | LC_ALL=C sort)
+
+  pipefail_join_continuations xtun.sh "${files[@]}"
+}
+
+run_pipefail_sigpipe_lint_case() {
+  local hit=""
+  local text=""
+  local sites=""
+  local joined=""
+  local joined_probe=""
+  local violations=0
+
+  cd "${ROOT_DIR}" || return 1
+
+  # 两条判别式先各自自检。修好之后一条 finding 都没有，光看「没报错」分不清是真干净
+  # 还是判别式失灵了。反向断言必须走 assert_false（`! fn` 会被 errexit 整条豁免）。
+  pipefail_line_has_early_exit_consumer "  sysctl -a 2>/dev/null | grep -q '^net.core.default_qdisc ='"
+  pipefail_line_has_early_exit_consumer '  find "${d}" -type d | head -n 1'
+  pipefail_line_has_early_exit_consumer "  dpkg-query -W -f='x' | awk '\$1 ~ /^ii/ { print \$3; exit }'"
+  pipefail_line_has_early_exit_consumer '  cmd | sed -n "2p; q"'
+  assert_false pipefail_line_has_early_exit_consumer '  cmd | awk "{ n++ } END { print n }"'
+  assert_false pipefail_line_has_early_exit_consumer '  cmd | sort | wc -l'
+  assert_false pipefail_line_has_early_exit_consumer '  cmd | awk "{ print \$1 }"'
+
+  pipefail_line_is_comment "  # 这里以前是 sysctl -a | grep -q '^net.core.default_qdisc ='"
+  pipefail_line_is_comment '#!/usr/bin/env bash'
+  assert_false pipefail_line_is_comment '  cmd | head -n 1  # 尾注释不算'
+  assert_false pipefail_line_is_comment '  printf "# not a comment"'
+
+  pipefail_line_has_unbounded_producer '  sysctl -a 2>/dev/null | grep -q x'
+  pipefail_line_has_unbounded_producer "  dpkg-query -W -f='x' | awk '{ exit }'"
+  pipefail_line_has_unbounded_producer '  journalctl -u xray | head -n 1'
+  assert_false pipefail_line_has_unbounded_producer '  printf "%s" "${x}" | grep -q y'
+  assert_false pipefail_line_has_unbounded_producer '  modinfo tcp_bbr | awk "{ exit }"'
+  assert_false pipefail_line_has_unbounded_producer '  sysctl -n net.core.default_qdisc'
+
+  # 扫描器坏掉时行数会悄悄变空，lint 跟着一直绿。钉住它确实在读整棵树。
+  # 这两条断言本身不能用管道，本条 lint 要禁的正是这个形状，写第一版时连着踩了两次：
+  #   pipefail_sigpipe_sites | grep -q ...     awk 还有八千多行没吐完
+  #   printf '%s\n' "${sites}" | grep -q ...   变量 400KB，超了 64KB 管道缓冲
+  # 两次都是 grep -q 命中就退出、生产者吃 SIGPIPE、pipefail 抬成 141。
+  # 存在性判断用 bash 自己的模式匹配，一个子进程都不开；计数用 here-string 喂
+  # grep -c，它一定读到 EOF，不会提前关读端。
+  sites="$(pipefail_sigpipe_sites)"
+  [[ "$(grep -c . <<< "${sites}")" -ge 2000 ]]
+  [[ $'\n'"${sites}" == *$'\n'"lib/install/network.sh:"* ]]
+
+  # 续行拼接单独钉一遍，用合成输入而不是树里某一行——树改了这条还站得住。
+  # 拼接坏掉时 finding 数照旧是 0，上面两条断言也照旧过，只有这里能看出来。
+  joined_probe="${TMPDIR:-/tmp}/pipefail-join-probe.$$"
+  # 单引号里那个 \ 就是要一个字面反斜杠当续行符，不是想转义引号。
+  # shellcheck disable=SC1003
+  printf '%s\n' '  dpkg-query -W -f=x 2>/dev/null \' "    | awk '{ print; exit }'" > "${joined_probe}"
+  joined="$(pipefail_join_continuations "${joined_probe}")"
+  rm -f "${joined_probe}"
+  [[ "$(grep -c . <<< "${joined}")" -eq 1 ]]
+  [[ "${joined}" == *'dpkg-query -W -f=x'*'| awk'* ]]
+  pipefail_line_has_unbounded_producer "${joined}"
+  pipefail_line_has_early_exit_consumer "${joined}"
+
+  while IFS= read -r hit; do
+    [[ -n "${hit}" ]] || continue
+    text="${hit#*:}"
+    text="${text#*:}"
+    if pipefail_line_is_comment "${text}"; then
+      continue
+    fi
+    pipefail_line_has_unbounded_producer "${text}" || continue
+    pipefail_line_has_early_exit_consumer "${text}" || continue
+    printf '[fail] %s：%s\n' "${hit}" \
+      '生产者没有上界，消费者命中就退出，pipefail 会把 SIGPIPE 抬成 141。请让消费者读到 EOF，或先把生产者收窄' >&2
+    violations=$((violations + 1))
+  done < <(pipefail_sigpipe_sites)
+
+  [[ "${violations}" -eq 0 ]]
+}
+
+# lint 是钉形状，这条钉行为：真身能不能答对，以及答错时安装会不会静默降级。
+# 两条现有 net-opt 用例都把 supports_default_qdisc 整个 stub 成 return 0 / return 1，
+# 所以真身一次都没被跑到——bug 就是从这个缺口漏过去的。这里坚决不 stub 它。
+run_qdisc_probe_case() {
+  local workdir=""
+  local status=0
+
+  # 先把机制本身钉出来。不这么钉的话，万一哪天 pipefail 被摘掉或者 bash 换了行为，
+  # 上面那条 lint 就变成了没有依据的教条，而这条用例会假绿。
+  # seq 吐 1.2MB，grep 在第 3 行就命中退出，生产者必然还有一大堆没写完。
+  ( seq 1 200000 | grep -q '^3$' ) >/dev/null 2>&1 || status=$?
+  if [[ "${status}" -ne 141 ]]; then
+    printf '[fail] pipefail + SIGPIPE 没有产生 141（实际 %s），这条用例和 pipefail lint 的前提都不成立了\n' \
+      "${status}" >&2
+    return 1
+  fi
+
+  # 真身：本机内核暴露了 net.core.default_qdisc，就必须答「支持」。
+  if [[ ! -e /proc/sys/net/core/default_qdisc ]]; then
+    printf '[fail] 宿主机没有 /proc/sys/net/core/default_qdisc，这条用例需要一个暴露该键的内核\n' >&2
+    return 1
+  fi
+  supports_default_qdisc
+
+  # 回归点：普通内核（没有 BBRv3、也不需要重启）上，fq 那一行必须照样写进去。
+  # 这三个 stub 之外的东西一律走真身，尤其是 supports_default_qdisc。
+  workdir="$(mktemp -d)"
+  NET_SYSCTL_CONF="${workdir}/net.conf"
+  NET_BBRV3_REBOOT_REQUIRED="no"
+  backup_path() { :; }
+  bbr_v3_active() { return 1; }
+  modprobe() { :; }
+  available_cc() { printf '%s' "reno cubic bbr"; }
+
+  write_net_sysctl_conf
+
+  assert_contains 'net.core.default_qdisc = fq' "${NET_SYSCTL_CONF}"
+  assert_contains 'net.ipv4.tcp_congestion_control = bbr' "${NET_SYSCTL_CONF}"
+  load_functions
+}
+
 # 退出码 0」：安装报成功但 WARP/网络优化/ECH/xpadding 静默没生效，
 # change-warp-rules 报成功但那条规则根本没加进去。
 # 每条都在子 shell 里跑，因为守卫用的是 exit；而 `( ... ) || status=$?` 这个写法
