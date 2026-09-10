@@ -256,6 +256,34 @@ EOF
   grep -q '脚本内容已更新，但版本号保持为 9.9.9。' <<< "${stdout_output}"
 }
 
+run_bundle_script_signature_case() {
+  local installed_dir=""
+  local bundle_dir=""
+
+  installed_dir="$(mktemp -d)/installed"
+  bundle_dir="$(mktemp -d)/bundle"
+
+  mkdir -p "${installed_dir}/lib/base" "${installed_dir}/static/fallback" \
+    "${bundle_dir}/lib/base" "${bundle_dir}/static/fallback" "${bundle_dir}/tests"
+  printf '#!/usr/bin/env bash\nSCRIPT_VERSION="9.9.9"\n' > "${installed_dir}/xtun.sh"
+  printf '# helper\n' > "${installed_dir}/lib/base/helpers.sh"
+  printf '<!doctype html>\n' > "${installed_dir}/static/fallback/index.html"
+
+  # 源码归档比安装目录多出 README / tests 等不进安装目录的文件：签名只看 xtun.sh / lib / static，应相等
+  cp -a "${installed_dir}/xtun.sh" "${installed_dir}/lib" "${installed_dir}/static" "${bundle_dir}/"
+  printf 'readme\n' > "${bundle_dir}/README.md"
+  printf 'test\n' > "${bundle_dir}/tests/smoke.sh"
+
+  SELF_INSTALL_DIR="${installed_dir}"
+  [[ "$(bundle_script_signature "${installed_dir}")" == "$(bundle_script_signature "${bundle_dir}")" ]]
+  installed_script_matches_bundle "${bundle_dir}"
+
+  # 运行文件有差异时签名必须不同
+  printf '#!/usr/bin/env bash\nSCRIPT_VERSION="10.0.0"\n' > "${bundle_dir}/xtun.sh"
+  [[ "$(bundle_script_signature "${installed_dir}")" != "$(bundle_script_signature "${bundle_dir}")" ]]
+  ! installed_script_matches_bundle "${bundle_dir}"
+}
+
 run_install_validation_case() {
   local output=""
 

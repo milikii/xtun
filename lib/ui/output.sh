@@ -436,7 +436,6 @@ build_link_context() {
   xhttp_extra_component="$(uri_encode "${xhttp_extra_json}")"
   XHTTP_URI="$(build_xhttp_uri "${xhttp_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${xhttp_extra_component}")"
   split_extra_json="$(build_xhttp_split_extra_json)"
-  split_extra_v6_json="$(build_xhttp_split_extra_json "[${SERVER_IP6}]")"
   split_extra_component="$(uri_encode "${split_extra_json}")"
   XHTTP_SPLIT_URI="$(build_xhttp_uri "${xhttp_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${split_extra_component}")"
   reverse_split_extra_json="$(build_xhttp_reverse_split_extra_json)"
@@ -456,7 +455,7 @@ build_link_context() {
   if [[ -n "${SERVER_IP6:-}" ]]; then
     REALITY_V6_URI="$(build_reality_uri "$(prefixed_node_label "REALITY-V6")" "[${SERVER_IP6}]")"
     local split_v6_component=""
-    split_v6_component="$(uri_encode "${split_extra_v6_json}")"
+    split_v6_component="$(uri_encode "$(build_xhttp_split_extra_json "[${SERVER_IP6}]")")"
     XHTTP_SPLIT_CDN_REALITY_V6_URI="$(build_xhttp_uri "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY-V6")" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${split_v6_component}" "[${SERVER_IP6}]")"
   fi
 }

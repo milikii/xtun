@@ -531,6 +531,7 @@ nginx_server_config() {
   local fallback_location=""
   local xhttp_location=""
   local listen_line=""
+  local quic_block=""
 
   fallback_location="$(nginx_fallback_location_config)"
   xhttp_location="$(nginx_xhttp_location_config)"
@@ -540,7 +541,6 @@ nginx_server_config() {
   else
     listen_line="listen 127.0.0.1:${NGINX_TLS_PORT} ssl http2;"
   fi
-  quic_block=""
   # haproxy 只占 TCP 443，UDP 443 空着：nginx 直接在公网地址监听 QUIC，
   # TLS 也在 nginx 终结，grpc_pass 不变。条件不满足时整段关闭。
   if h3_enabled; then

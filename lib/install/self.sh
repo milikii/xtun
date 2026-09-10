@@ -49,13 +49,16 @@ bundle_script_version() {
   sed -n 's/^SCRIPT_VERSION="\([^"]*\)".*/\1/p' "${bundle_root}/xtun.sh" 2>/dev/null | head -n 1
 }
 
+# 只哈希运行时会被安装的三个路径（xtun.sh / lib / static），与 SELF_INSTALL_DIR 的内容对齐。
+# 源码归档（codeload tar.gz）里还有 README / tests / docs 等不进安装目录的文件，
+# 若把它们算进去，installed_script_matches_bundle 永远为假，update-script 每次都全量重装。
 bundle_script_signature() {
   local bundle_root="${1}"
 
   [[ -d "${bundle_root}" ]] || return 0
   (
     cd "${bundle_root}" || exit 0
-    find . -type f -print | LC_ALL=C sort | while IFS= read -r path; do
+    find xtun.sh lib static -type f -print 2>/dev/null | LC_ALL=C sort | while IFS= read -r path; do
       sha256sum "${path}"
     done | sha256sum | awk '{print $1}'
   )
