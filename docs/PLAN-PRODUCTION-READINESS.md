@@ -5,7 +5,7 @@
 > 核心决策：当前必须接入 `v26.9.9`；后续默认追踪官方最新已发布版本，包含 pre-release，不采用 stable 优先策略。
 > 本文是 [当前计划](PLAN.md) 的详细施工依据：先完成目标核心接入、默认安装与导出修复，再验证维护可靠性；后量子扩展另行验收。
 
-REALITY/XHTTP/ECH 的逐字段决定、社区依据及导出规则见 [参数契约](PARAMETERS.md)；Android v2rayNG、Windows v2rayN、Debian NAS Docker 的现场步骤见 [测试 VPS 验收手册](TEST-VPS-RUNBOOK.md)。两份文档均为本计划的实施约束，当前没有把待测项目标为通过。
+REALITY/XHTTP/ECH 的逐字段决定、社区依据及导出规则见 [参数契约](PARAMETERS.md)；Android v2rayNG、Windows v2rayN、Debian NAS Docker 的现场步骤见 [测试 VPS 验收手册](TEST-VPS-RUNBOOK.md)；本轮独立 VPS 的实机推进与人工交互问题见 [实机交互记录](REPORT-2026-09-12-VPS-INTERACTION.md)。这些文档均为本计划的实施约束，当前没有把待测项目标为通过。
 
 ## 1. 结论与目标边界
 
@@ -65,6 +65,10 @@ REALITY/XHTTP/ECH 的逐字段决定、社区依据及导出规则见 [参数契
 | F13 | `XHTTP_ECH_FORCE_QUERY` 被 CLI 接收、写入 state 并展示；导出未生成有效设置，目标版本 TLSConfig 也无 `echForceQuery` | 用户可设置一个没有实际效果的选项；应清理入口与展示，并保留旧状态的兼容读取 | P1 |
 | F14 | [bootstrap](../xtun.sh) 在进入菜单前调用 `bootstrap_install_bundle_to_self` | 用户仅打开菜单并选择退出也会持久化安装 `/usr/local/sbin/xtun` 与 bundle，属于隐性系统修改 | P1 |
 | F15 | [upgrade_cmd](../lib/change/commands.sh) 未先比较当前核心与目标 tag | 显式升级到当前相同版本仍会重新下载、替换并重启服务；缺少“已是最新”或显式 reinstall 语义 | P2 |
+| F16 | 交互安装的 IPv6 提示写“留空跳过”，但存在默认值时回车接受默认值 | 用户以为跳过 IPv6，实际导出节点 6/7；`--no-ipv6` 又存在 F04 吞参缺陷 | P1 |
+| F17 | 网络优化、Joey BBRv3 内核与 WARP 的交互默认值均为 yes | 新手一路回车可能安装第三方内核、需要重启并注册 WARP 设备 | P1 |
+| F18 | `show-links --qr` 先输出完整部署文档再输出二维码 | 用户只要扫码时被迫滚动大量文本；缺少二维码优先入口 | P2 |
+| F19 | 状态面板“监听 :443”未标明 TCP | UDP/443 被其它服务占用时容易误解为任意 443 监听 | P2 |
 
 F05 此前在本轮审查中做了两层复现：纯生成器输出中，根部 ALPN 为 `["h3"]`、`tlsSettings.alpn` 为空；把该输出嵌入客户端配置后，**Xray 26.3.27 的 `run -test` 仍返回 `Configuration OK`**。这是旧核心的实测记录，不是 `v26.9.9` 二进制验收。另行核对的 `v26.9.9` 源码确认：ALPN 属于 TLSConfig，XHTTP 根据 TLS 的 NextProtocol 决定 H2/H3。因此新核心仍须增加语义和实际路径测试。[S2]、[S3]、[S8]
 
@@ -520,6 +524,8 @@ Xray 字段以官方 docs/source 和目标版本源码为依据，摘要不能�
 Actions 结果：候选提交 `32ac9ea` 已推送，CI run [34703713056](https://github.com/milikii/xtun/actions/runs/34703713056) 中 `shellcheck-and-smoke` 与 `install-smoke` 均成功；`latest-check` 按事件条件跳过，默认 latest 路径以上述本地真实下载验证为准。因此 T01 的代码、CI 与容器验收已完成，正式 tag 仍等待 T02/T03 的 P0 修复。
 
 ### 2026-09-12 T02/T03 部分实施与独立 VPS 交互验收
+
+详细操作时间线、提交/Actions 矩阵、人体工程学问题清单和证据边界见 [2026-09-12 独立 VPS 实机推进与交互验收记录](REPORT-2026-09-12-VPS-INTERACTION.md)。
 
 代码提交 `96e6c67` 完成第一批 T02/T03 与交互修复：无参数 `check-sni` 先回读 state/config 再推导 SNI、target 和本机 IP；HTTP 探测改用 `curl --connect-to`，保留 URL/SNI/Host 并连接实际 target host/port；安装输入在 REALITY SNI、target 与 XHTTP 域名后立即校验；安装、变更和菜单 2 输出紧凑链接摘要；H3 未启用时不再检查 UDP/443，H3 启用时也必须确认监听进程属于 nginx。公开入口复测发现摘要沿用临时脚本名，提交 `d104f6f` 将后续命令固定为安装后的 `xtun`。
 
