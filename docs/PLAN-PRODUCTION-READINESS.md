@@ -511,11 +511,11 @@ Xray 字段以官方 docs/source 和目标版本源码为依据，摘要不能�
 
 ### 2026-09-12 T01 实施状态
 
-本工作树已完成 T01 的代码实施：新增共享版本解析/下载模块，安装与升级支持显式 `--xray-version`，默认解析 latest-published（包含 pre-release），CI 改用共享 `v26.9.9` 基线，安装冒烟脚本移出 YAML，并补齐版本选择、摘要冲突、候选命令与 PNG 计数回归。
+提交 `32ac9ea` 已完成 T01 的代码实施：新增共享版本解析/下载模块，安装与升级支持显式 `--xray-version`，默认解析 latest-published（包含 pre-release），CI 改用共享 `v26.9.9` 基线，安装冒烟脚本移出 YAML，并补齐版本选择、摘要冲突、候选命令与 PNG 计数回归。
 
 本地验证结果：入口、lib、tests 全部 `bash -n` 与 ShellCheck 通过；`tests/smoke.sh` 完整通过（`smoke ok`）；真实 latest 检查在临时目录下载并验证 `v26.9.9`，记录 `prerelease=true`、提交 `52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`、arm64 资产 `Xray-linux-arm64-v8a.zip` 与 SHA256 `3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c`，并通过候选 `version`、`x25519`、`vlessenc` 与服务端/参照客户端 `run -test`。
 
-未执行项：GitHub Actions 两个 job 尚未运行；本机没有 Docker/Podman/systemd-nspawn，真实 Debian systemd 容器安装未执行；未修改或重启本机生产服务。因此 T01 仍按未完成处理，等待 CI 与容器验收。下一步是提交/推送候选并核对 CI，然后推进 T02/T03。
+Actions 结果：候选提交 `32ac9ea` 已推送，CI run [34703713056](https://github.com/milikii/xtun/actions/runs/34703713056) 中 `shellcheck-and-smoke` 与 `install-smoke` 均成功；`latest-check` 按事件条件跳过，默认 latest 路径以上述本地真实下载验证为准。因此 T01 的代码、CI 与容器验收已完成，正式 tag 仍等待 T02/T03 的 P0 修复。
 
 ## 13. 主要依据
 
