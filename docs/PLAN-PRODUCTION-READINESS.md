@@ -50,9 +50,9 @@ REALITY/XHTTP/ECH 的逐字段决定、社区依据及导出规则见 [参数契
 
 | 编号 | 证据与位置 | 实际影响 | 优先级 |
 | --- | --- | --- | --- |
-| F01 | [CI](../.github/workflows/ci.yml) 内嵌脚本语法错误；[二维码测试](../tests/cases_output.sh) SC2012 | 当前公开版本没有完整的绿色安装验收 | P0 |
-| F02 | [sni.sh](../lib/cli/sni.sh) 的 `run_sni_checks` 把 target 主机名传给 `sni_probe_http`，后者用于 curl `--resolve` 的 IP 位置 | 普通 `域名:443` 目标会使 HTTP 探测失败；本轮最小复现 curl 返回 49。现有 CI 用 `--skip-sni-check` 掩盖了这条路径 | P0 |
-| F03 | 同文件的无参数入口先因空 target 退出；`--timeout 0` 被接受；HTTP 探测固定连接 443 | 已安装节点的便捷检查入口失效；超时和实际检查目标不可靠 | P1 |
+| F01 | [CI](../.github/workflows/ci.yml) 内嵌脚本语法错误；[二维码测试](../tests/cases_output.sh) SC2012 | 已由 `32ac9ea` 修复并恢复两个 job 的绿色安装验收 | P0 |
+| F02 | [sni.sh](../lib/cli/sni.sh) 的 `run_sni_checks` 把 target 主机名传给 `sni_probe_http`，后者用于 curl `--resolve` 的 IP 位置 | 已由 `96e6c67` 改为 `curl --connect-to`，并按 target 主机与端口探测 | P0 |
+| F03 | 同文件的无参数入口先因空 target 退出；`--timeout 0` 被接受；HTTP 探测固定连接 443 | 无参数入口与 target 端口已由 `96e6c67` 修复；timeout 校验仍待 T03 | P1 |
 | F04 | [安装参数表](../lib/cli/install.sh) 把 `--no-ipv6` 放进取值参数表 | 单独使用返回“需要值”；后接 `--disable-warp` 时会吞掉该开关并把它写入 `SERVER_IP6`。本轮两种情况均已复现 | P0 |
 | F05 | [output.sh](../lib/ui/output.sh) 的 `build_xhttp_split_h3_extra_json` 将 `alpn: ["h3"]` 放在 `downloadSettings` 根部 | Xray 标准结构要求 `downloadSettings.tlsSettings.alpn`；下行没有被指定为 H3，可能仍按 H2 工作，单纯“能上网”也抓不到错误 | P1 |
 | F06 | 同文件 `build_link_context` 给 IPv6 分离节点的外层 `build_xhttp_uri` 传入 VPS IPv6 | 名称宣称 CDN 上行，URI 实际直接连接源站 IPv6；CDN 被绕开，Origin CA 证书场景还可能验证失败 | P1 |
@@ -61,8 +61,10 @@ REALITY/XHTTP/ECH 的逐字段决定、社区依据及导出规则见 [参数契
 | F09 | [runtime.sh](../lib/base/runtime.sh) 部分流程在服务变更后写 state/output，失败直接返回；[commands.sh](../lib/change/commands.sh) 的 `change_uuid_cmd` 未接入统一回滚 | 存在运行配置、磁盘配置、状态和链接处于不同代的失败窗口。代码路径已核对，尚未做真实故障注入 | P1 |
 | F10 | `upgrade_cmd` 中 `install_xray`/setcap 失败直接返回；安装函数会先替换二进制，再写资源文件 | 安装后半段失败时可能留下部分新核心文件，不能把“返回非零”当成“已恢复旧版本” | P1 |
 | F11 | [本地 TLS 探测](../lib/ui/core.sh) 无超时，仅按 `openssl s_client` 退出码判断 | 诊断可能长时间等待，也没有证明主机名、证书信任或真实代理链路正确 | P1 |
-| F12 | [核心下载](../lib/install.sh) 使用 `/releases/latest`，CI 固定 `v26.3.27` | 按当前代码安装和验收均不能实现用户要求的 `v26.9.9` 与后续预发布追踪 | P0 |
+| F12 | [核心下载](../lib/install.sh) 使用 `/releases/latest`，CI 固定 `v26.3.27` | 已由 `32ac9ea` 修复为 latest-published 解析、显式 tag 与双来源摘要校验 | P0 |
 | F13 | `XHTTP_ECH_FORCE_QUERY` 被 CLI 接收、写入 state 并展示；导出未生成有效设置，目标版本 TLSConfig 也无 `echForceQuery` | 用户可设置一个没有实际效果的选项；应清理入口与展示，并保留旧状态的兼容读取 | P1 |
+| F14 | [bootstrap](../xtun.sh) 在进入菜单前调用 `bootstrap_install_bundle_to_self` | 用户仅打开菜单并选择退出也会持久化安装 `/usr/local/sbin/xtun` 与 bundle，属于隐性系统修改 | P1 |
+| F15 | [upgrade_cmd](../lib/change/commands.sh) 未先比较当前核心与目标 tag | 显式升级到当前相同版本仍会重新下载、替换并重启服务；缺少“已是最新”或显式 reinstall 语义 | P2 |
 
 F05 此前在本轮审查中做了两层复现：纯生成器输出中，根部 ALPN 为 `["h3"]`、`tlsSettings.alpn` 为空；把该输出嵌入客户端配置后，**Xray 26.3.27 的 `run -test` 仍返回 `Configuration OK`**。这是旧核心的实测记录，不是 `v26.9.9` 二进制验收。另行核对的 `v26.9.9` 源码确认：ALPN 属于 TLSConfig，XHTTP 根据 TLS 的 NextProtocol 决定 H2/H3。因此新核心仍须增加语义和实际路径测试。[S2]、[S3]、[S8]
 
@@ -516,6 +518,20 @@ Xray 字段以官方 docs/source 和目标版本源码为依据，摘要不能�
 本地验证结果：入口、lib、tests 全部 `bash -n` 与 ShellCheck 通过；`tests/smoke.sh` 完整通过（`smoke ok`）；真实 latest 检查在临时目录下载并验证 `v26.9.9`，记录 `prerelease=true`、提交 `52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`、arm64 资产 `Xray-linux-arm64-v8a.zip` 与 SHA256 `3e38d72dfc5eb65c91df0e5583e9b6676c32232041da47de6ae73946b526d66c`，并通过候选 `version`、`x25519`、`vlessenc` 与服务端/参照客户端 `run -test`。
 
 Actions 结果：候选提交 `32ac9ea` 已推送，CI run [34703713056](https://github.com/milikii/xtun/actions/runs/34703713056) 中 `shellcheck-and-smoke` 与 `install-smoke` 均成功；`latest-check` 按事件条件跳过，默认 latest 路径以上述本地真实下载验证为准。因此 T01 的代码、CI 与容器验收已完成，正式 tag 仍等待 T02/T03 的 P0 修复。
+
+### 2026-09-12 T02/T03 部分实施与独立 VPS 交互验收
+
+代码提交 `96e6c67` 完成第一批 T02/T03 与交互修复：无参数 `check-sni` 先回读 state/config 再推导 SNI、target 和本机 IP；HTTP 探测改用 `curl --connect-to`，保留 URL/SNI/Host 并连接实际 target host/port；安装输入在 REALITY SNI、target 与 XHTTP 域名后立即校验；安装、变更和菜单 2 输出紧凑链接摘要；H3 未启用时不再检查 UDP/443，H3 启用时也必须确认监听进程属于 nginx。公开入口复测发现摘要沿用临时脚本名，提交 `d104f6f` 将后续命令固定为安装后的 `xtun`。
+
+本地验证：40 个 `.sh` 文件全部 `bash -n` 与 ShellCheck 通过；`tests/smoke.sh` 完整通过（`smoke ok`）。最终代码提交 `d104f6f` 的 Actions run [34705621691](https://github.com/milikii/xtun/actions/runs/34705621691) 成功。该提交只部分满足 T02/T03：`--no-ipv6` 吞参（F04）、timeout 0/负数、极简镜像依赖、bootstrap 隐性自安装和环境/端口预检仍未完成。
+
+独立测试 VPS 为 Debian 12 bookworm x86_64，原有非托管 hysteria 占用 UDP/443，TCP/443 空闲。初始交互安装按菜单 1 走默认值，输入 `www.stanford.edu`、`cdn.example.test`、自签名证书并禁用网络优化 / nginx 主配置接管 / WARP；当时 SNI HTTP 项因 F02 失败，选择 `i` 继续后完成部署。该过程确认安装草稿可保留重试输入，也暴露出菜单 2 长输出、菜单 10 无参数失效、QUIC 误报和必填项过晚校验四类交互问题。
+
+最终公开入口验收：先执行 `xtun uninstall --yes`，再从 `raw.githubusercontent.com/milikii/xtun/main` 下载 `d104f6f` 后的脚本非交互全新安装。安装时默认 SNI 预检通过（11 PASS、1 WARN，仅握手耗时提示），安装后无参数复检为 12 PASS；Xray 解析并安装 `v26.9.9`（提交 `52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`，校验来源 baseline and GitHub Release API），Xray/Nginx/HAProxy 配置与本地 TLS 探测通过，三个服务 active，输出 7 条节点与 7 张 PNG。安装完成摘要显示正确的 `xtun show-links` 与 `xtun show-links --qr` 后续命令。
+
+维护与负路径交互：菜单 2 显示 7 条节点摘要；无参数 `check-sni` 通过；`change-path` 修改到 `/content/live2` 后服务重载、链接与 PNG 同步，改回 `/content/live` 后摘要保持一致；`apply-config` 重建配置成功；`upgrade --xray-version v26.9.9` 可复现指定版本；空 SNI 在第 5 个输入处立即失败，非法路径与 `--summary --qr` 组合均被拒绝。诊断在 H3 未启用时显示“不检查”，不再把既有 hysteria 的 UDP/443 误报为 xtun QUIC；未接管 nginx 主配置时继续提示 `worker_connections=768`，符合当前选择。
+
+仍未验收：真实 GUI 客户端导入与传输、Cloudflare 橙云/Full 模式、H3 实际 UDP 路径、证书链语义和持续运行。H3 在该 VPS 因 Debian nginx 未编译 http_v3 且 UDP/443 已被 hysteria 占用而不可用；若未来启用 H3，安装前必须明确检查该冲突。`upgrade --xray-version` 指向当前相同版本时仍会重新下载并重启服务，后续应评估“已是最新直接跳过”或显式 reinstall 语义。bootstrap 在仅打开菜单并退出前仍会持久化安装管理命令，这保留为 T02/T06 的隐性系统修改问题。
 
 ## 13. 主要依据
 
