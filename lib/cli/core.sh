@@ -27,8 +27,8 @@ show_links_summary() {
 
   printf '\n%s\n' "节点链接摘要"
   printf '链接文件: %s\n' "${OUTPUT_FILE}"
-  printf '完整内容: %s show-links\n' "${XTUN_COMMAND_NAME:-xtun}"
-  printf '终端二维码: %s show-links --qr\n' "${XTUN_COMMAND_NAME:-xtun}"
+  printf '完整内容: xtun show-links\n'
+  printf '终端二维码: xtun show-links --qr\n'
   printf '\n'
 
   while IFS=$'\t' read -r node_number label; do

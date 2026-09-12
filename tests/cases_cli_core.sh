@@ -41,6 +41,7 @@ run_show_links_summary_case() {
   workdir="$(mktemp -d)"
   OUTPUT_FILE="${workdir}/output.md"
   STATE_FILE="${workdir}/missing-state.env"
+  XTUN_COMMAND_NAME='xtun-final-install.sh'
   cat > "${OUTPUT_FILE}" <<'EOF'
 # Xray 部署信息
 
@@ -61,6 +62,7 @@ EOF
   [[ "${output}" == *"节点 1: REALITY"* ]]
   [[ "${output}" == *"节点 8: H3"* ]]
   [[ "${output}" != *"vless://"* ]]
+  [[ "${output}" != *"xtun-final-install.sh show-links"* ]]
 
   if output="$(show_links --summary --qr)" 2>/dev/null; then
     return 1
