@@ -525,36 +525,52 @@ EOF
   hash_value="$(parse_xray_dgst_sha256 "${dgst_file}" "Xray-linux-64.zip")"
   [[ "${hash_value}" == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ]]
 
-  metadata_json='{"assets":[{"name":"Xray-linux-64.zip","browser_download_url":"https://example.invalid/Xray-linux-64.zip","digest":"sha256:0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"}]}'
-  hash_value="$(normalize_xray_sha256_value "$(xray_release_asset_field_from_metadata "${metadata_json}" "Xray-linux-64.zip" "digest")")"
+  cat > "${dgst_file}" <<'EOF'
+MD5= 3e1fc0f4ca54dc32b733ecd0ade75100
+SHA1= d8a8c3ecf4e620c34ed78e1e51a0a2de63fc808e
+SHA2-256= 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+SHA2-512= cf6daeb9c85f6f75ccf02c895f67b8c900b7374c4af4c015bf2283cf5a6eebb80736540b764572f345a200b0afbc0b6c1346e3ff87828fe13dcfcf65de5d231e
+EOF
+  hash_value="$(parse_xray_dgst_sha256 "${dgst_file}" "Xray-linux-64.zip")"
   [[ "${hash_value}" == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ]]
-  [[ "$(xray_release_asset_field_from_metadata "${metadata_json}" "Xray-linux-64.zip" "browser_download_url")" == "https://example.invalid/Xray-linux-64.zip" ]]
+
+  metadata_json='{"assets":[{"name":"Xray-linux-64.zip","browser_download_url":"https://example.invalid/Xray-linux-64.zip","digest":"sha256:0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"}]}'
+  hash_value="$(normalize_xray_sha256_value "$(xray_release_asset_field "${metadata_json}" "Xray-linux-64.zip" "digest")")"
+  [[ "${hash_value}" == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ]]
+  [[ "$(xray_release_asset_field "${metadata_json}" "Xray-linux-64.zip" "browser_download_url")" == "https://example.invalid/Xray-linux-64.zip" ]]
 }
 
 run_install_xray_checksum_failure_case() {
   local output=""
+  local workdir=""
+  local archive_sha256=""
+
+  workdir="$(mktemp -d)"
+  printf 'not-a-real-zip' >"${workdir}/archive"
+  archive_sha256="$(sha256sum "${workdir}/archive" | awk '{print $1}')"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
-detect_xray_arch() { printf '64'; }
+XRAY_SELECTED_TAG="v26.3.27"
+XRAY_SELECTED_COMMIT="d2758a0000000000000000000000000000000000"
+XRAY_SELECTED_ARCHIVE_NAME="Xray-linux-64.zip"
+XRAY_SELECTED_ARCHIVE_URL="https://example.invalid/Xray-linux-64.zip"
+XRAY_SELECTED_DGST_URL=""
+XRAY_SELECTED_EXPECTED_SHA256="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 curl() {
-  case "\$*" in
-    *Xray-linux-64.zip.dgst*)
-      printf '%s\n' 'SHA256 (Xray-linux-64.zip) = 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' > "\${4}"
-      ;;
-    *Xray-linux-64.zip*)
-      printf '%s' 'not-a-real-zip' > "\${4}"
-      ;;
-  esac
+  local output_path="\${@: -1}"
+  printf 'not-a-real-zip' >"\${output_path}"
 }
-install_xray
+xray_download_release "${workdir}"
 EOF
 )"; then
+    rm -rf "${workdir}"
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'Xray-core 安装包 SHA256 校验失败'
+  rm -rf "${workdir}"
+  printf '%s' "${output}" | grep -q 'Xray 安装包 SHA256 校验失败'
 }
 
 run_install_packages_failure_case() {

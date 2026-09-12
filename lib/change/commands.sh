@@ -9,6 +9,8 @@ upgrade_cmd() {
   local previous_version=""
   local current_version=""
 
+  parse_upgrade_args "$@"
+
   need_root
   ensure_debian_family
   [[ -x "${XRAY_BIN}" ]] || die "找不到当前 Xray 可执行文件：${XRAY_BIN}"
@@ -43,6 +45,25 @@ upgrade_cmd() {
   log_success "升级完成。"
   log "备份目录：${BACKUP_DIR}"
   [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
+}
+
+parse_upgrade_args() {
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --xray-version)
+        [[ $# -ge 2 ]] || die "参数 --xray-version 需要值。"
+        XRAY_VERSION_REQUEST="${2}"
+        shift 2
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "未知的 upgrade 参数：${1}"
+        ;;
+    esac
+  done
 }
 
 change_uuid_cmd() {

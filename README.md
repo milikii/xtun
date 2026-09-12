@@ -61,6 +61,16 @@ bash xtun.sh
 xtun
 ```
 
+### Xray 核心版本策略
+
+新安装和 `xtun upgrade` 默认解析 Xray-core 最新已发布版本，包含 pre-release；单次操作会固定 tag、tag 指向的提交、资产 URL 和 SHA256。需要复现指定版本时使用：
+
+```bash
+xtun upgrade --xray-version vX.Y.Z
+```
+
+CI 当前用 `v26.9.9` 作为可复现基线；`latest-check` 工作流单独验证默认追新路径。
+
 后续维护都可以直接运行 `xtun`，不用再进入仓库目录。
 
 菜单顶部只画一块精简面板（服务状态、监听 443、WARP 开关），不跑配置自检和 TLS 握手，所以翻菜单不会卡。需要完整体检时走菜单 `4`、`xtun status` 或 `xtun diagnose`。
@@ -192,7 +202,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | --- | --- |
 | `install [参数]` | 安装或重装 |
 | `update-script` | 更新脚本本体 |
-| `upgrade` | 升级 Xray 核心 |
+| `upgrade [--xray-version vX.Y.Z]` | 升级 Xray 核心；默认追踪最新已发布版本 |
 | `check-sni [域名]` | Reality 目标域名 12 项预检 |
 | `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
 | `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
@@ -340,7 +350,7 @@ xtun version
 | --- | --- |
 | `restart` | 重启 xray、haproxy、nginx |
 | `repair-perms` | 修复托管配置、证书、日志权限并尝试重启 |
-| `upgrade` | 升级 Xray core，并校验 `.dgst` SHA256 |
+| `upgrade [--xray-version vX.Y.Z]` | 升级 Xray core，校验发布 API / `.dgst` SHA256 |
 | `update-script` | 更新 `/usr/local/lib/xtun` bundle 和 `/usr/local/sbin/xtun` wrapper |
 | `apply-net-opt` | 重新应用 Joey BBRv3 网络优化和 qdisc/sysctl 配置 |
 | `apply-config` | 按当前状态重新生成 xray / haproxy / nginx 托管配置 |

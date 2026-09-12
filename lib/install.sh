@@ -13,14 +13,6 @@ install_packages() {
   log_success "依赖包安装完成。"
 }
 
-xray_release_base_url() {
-  printf '%s' "https://github.com/XTLS/Xray-core/releases/latest/download"
-}
-
-xray_release_api_url() {
-  printf '%s' "https://api.github.com/repos/XTLS/Xray-core/releases/latest"
-}
-
 managed_package_names() {
   printf '%s\n' \
     "haproxy" \
@@ -31,83 +23,12 @@ managed_package_names() {
     "qrencode"
 }
 
-xray_archive_name() {
-  local arch="${1}"
-  printf 'Xray-linux-%s.zip' "${arch}"
-}
-
-xray_digest_name() {
-  local archive_name="${1}"
-  printf '%s.dgst' "${archive_name}"
-}
-
-fetch_xray_release_metadata_json() {
-  curl -fsSL \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$(xray_release_api_url)"
-}
-
-xray_release_asset_field_from_metadata() {
-  local metadata_json="${1}"
-  local asset_name="${2}"
-  local field_name="${3}"
-
-  [[ -n "${metadata_json}" ]] || return 0
-  command -v jq >/dev/null 2>&1 || return 0
-
-  jq -r \
-    --arg asset_name "${asset_name}" \
-    --arg field_name "${field_name}" \
-    '.assets[]? | select(.name == $asset_name) | .[$field_name] // empty' \
-    <<< "${metadata_json}" 2>/dev/null | head -n 1
-}
-
 normalize_xray_sha256_value() {
-  local raw_value="${1:-}"
-  local normalized=""
-
-  normalized="$(printf '%s' "${raw_value}" | tr '[:upper:]' '[:lower:]' | sed -E 's/^[[:space:]]*sha256:[[:space:]]*//; s/^[[:space:]]+|[[:space:]]+$//g')"
-  if [[ "${normalized}" =~ ^[0-9a-f]{64}$ ]]; then
-    printf '%s' "${normalized}"
-  fi
+  xray_normalize_sha256 "${1:-}"
 }
 
 parse_xray_dgst_sha256() {
-  local dgst_file="${1}"
-  local asset_name="${2}"
-  local value=""
-
-  value="$(grep -Fi "${asset_name}" "${dgst_file}" 2>/dev/null | grep -Eo '[0-9a-fA-F]{64}' | head -n 1 || true)"
-  if [[ -z "${value}" ]]; then
-    value="$(grep -Ei 'sha256' "${dgst_file}" 2>/dev/null | grep -Eo '[0-9a-fA-F]{64}' | head -n 1 || true)"
-  fi
-  if [[ -z "${value}" ]]; then
-    value="$(
-      awk -v asset_name="${asset_name}" '
-        BEGIN { IGNORECASE = 1; asset_seen = 0 }
-        {
-          line = tolower($0)
-          if (index($0, asset_name) > 0) {
-            asset_seen = 1
-            next
-          }
-
-          if (asset_seen && line ~ /sha(2-)?256/) {
-            if (match(line, /[0-9a-f]{64}/)) {
-              print substr(line, RSTART, RLENGTH)
-              exit
-            }
-          }
-        }
-      ' "${dgst_file}" 2>/dev/null || true
-    )"
-  fi
-  if [[ -z "${value}" ]]; then
-    value="$(grep -Eo '[0-9a-fA-F]{64}' "${dgst_file}" 2>/dev/null | head -n 1 || true)"
-  fi
-
-  normalize_xray_sha256_value "${value}"
+  xray_parse_dgst_sha256 "${1}" "${2}"
 }
 
 verify_file_sha256() {
@@ -124,62 +45,40 @@ verify_file_sha256() {
 install_xray() {
   local arch=""
   local tmp_dir=""
-  local archive_name=""
-  local digest_name=""
-  local base_url=""
-  local release_metadata_json=""
-  local archive_url=""
-  local digest_url=""
-  local archive_path=""
-  local digest_path=""
-  local expected_sha256=""
-  local checksum_source=""
 
   arch="$(detect_xray_arch)" || exit 1
-  archive_name="$(xray_archive_name "${arch}")"
-  digest_name="$(xray_digest_name "${archive_name}")"
-  base_url="$(xray_release_base_url)"
-  release_metadata_json="$(fetch_xray_release_metadata_json 2>/dev/null || true)"
-  archive_url="$(xray_release_asset_field_from_metadata "${release_metadata_json}" "${archive_name}" "browser_download_url")"
-  digest_url="$(xray_release_asset_field_from_metadata "${release_metadata_json}" "${digest_name}" "browser_download_url")"
-  expected_sha256="$(normalize_xray_sha256_value "$(xray_release_asset_field_from_metadata "${release_metadata_json}" "${archive_name}" "digest")")"
   tmp_dir="$(mktemp -d)"
-  archive_path="${tmp_dir}/${archive_name}"
-  digest_path="${tmp_dir}/${digest_name}"
 
-  log_step "下载 Xray-core 最新版本。"
-  log "资源文件：${archive_name}"
-  log "校验文件：${digest_name}"
-  [[ -n "${archive_url}" ]] || archive_url="${base_url}/${archive_name}"
-  curl -fsSL "${archive_url}" -o "${archive_path}" || return 1
-
-  if [[ -n "${expected_sha256}" ]]; then
-    checksum_source="GitHub Release API digest"
-  else
-    [[ -n "${digest_url}" ]] || digest_url="${base_url}/${digest_name}"
-    curl -fsSL "${digest_url}" -o "${digest_path}" || return 1
-    expected_sha256="$(parse_xray_dgst_sha256 "${digest_path}" "${archive_name}")"
-    checksum_source="${digest_name}"
+  if ! xray_release_context_ready; then
+    log_step "解析 Xray-core 版本。"
+    xray_prepare_release_context "${XRAY_VERSION_REQUEST}" "${arch}" || return 1
   fi
 
-  log "校验来源：${checksum_source}"
-  verify_file_sha256 "${archive_path}" "${expected_sha256}" "Xray-core 安装包" || return 1
-  log_success "Xray-core 安装包校验通过。"
-  unzip -qo "${archive_path}" -d "${tmp_dir}/xray" || return 1
+  log_step "下载并校验 Xray-core ${XRAY_SELECTED_TAG}。"
+  log "资源文件：${XRAY_SELECTED_ARCHIVE_NAME}"
+  log "tag 指向提交：${XRAY_SELECTED_COMMIT}"
+  if ! (
+    trap 'rm -rf "${tmp_dir}"' EXIT
+    xray_download_release "${tmp_dir}" || exit 1
+    unzip -qo "${tmp_dir}/${XRAY_SELECTED_ARCHIVE_NAME}" -d "${tmp_dir}/xray" || exit 1
+    xray_validate_candidate_archive "${tmp_dir}" || exit 1
 
-  mkdir -p /usr/local/bin "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" /var/log/xray || return 1
-  install -m 0755 "${tmp_dir}/xray/xray" "${XRAY_BIN}" || return 1
-
-  if [[ -f "${tmp_dir}/xray/geoip.dat" ]]; then
-    install -m 0644 "${tmp_dir}/xray/geoip.dat" "${XRAY_ASSET_DIR}/geoip.dat" || return 1
-  fi
-
-  if [[ -f "${tmp_dir}/xray/geosite.dat" ]]; then
-    install -m 0644 "${tmp_dir}/xray/geosite.dat" "${XRAY_ASSET_DIR}/geosite.dat" || return 1
+    mkdir -p /usr/local/bin "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" /var/log/xray || exit 1
+    install -m 0755 "${tmp_dir}/xray/xray" "${XRAY_BIN}" || exit 1
+    if [[ -f "${tmp_dir}/xray/geoip.dat" ]]; then
+      install -m 0644 "${tmp_dir}/xray/geoip.dat" "${XRAY_ASSET_DIR}/geoip.dat" || exit 1
+    fi
+    if [[ -f "${tmp_dir}/xray/geosite.dat" ]]; then
+      install -m 0644 "${tmp_dir}/xray/geosite.dat" "${XRAY_ASSET_DIR}/geosite.dat" || exit 1
+    fi
+  ); then
+    rm -rf "${tmp_dir}"
+    return 1
   fi
 
   rm -rf "${tmp_dir}"
-  log_success "Xray-core 已安装到 ${XRAY_BIN}。"
+  log "校验来源：${XRAY_SELECTED_CHECKSUM_SOURCE}"
+  log_success "Xray-core ${XRAY_SELECTED_TAG} 已安装到 ${XRAY_BIN}。"
 }
 
 ensure_xray_bind_capability() {
@@ -289,6 +188,7 @@ generate_reality_keys_if_needed() {
 
 generate_xhttp_vless_encryption_if_needed() {
   local enc_output=""
+  local encryption_pair=""
 
   if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" != "yes" ]]; then
     XHTTP_VLESS_DECRYPTION=""
@@ -301,14 +201,16 @@ generate_xhttp_vless_encryption_if_needed() {
   fi
 
   enc_output="$("${XRAY_BIN}" vlessenc)"
-  XHTTP_VLESS_DECRYPTION="$(printf '%s\n' "${enc_output}" | awk -F'"' '/"decryption":/ {print $4; exit}')"
-  XHTTP_VLESS_ENCRYPTION="$(printf '%s\n' "${enc_output}" | awk -F'"' '/"encryption":/ {print $4; exit}')"
+  encryption_pair="$(parse_xhttp_vless_encryption_pair "${enc_output}")" || die "无法解析 XHTTP 的 VLESS Encryption 认证方案。"
+  XHTTP_VLESS_DECRYPTION="$(printf '%s' "${encryption_pair}" | cut -f1)"
+  XHTTP_VLESS_ENCRYPTION="$(printf '%s' "${encryption_pair}" | cut -f2)"
 
   [[ -n "${XHTTP_VLESS_DECRYPTION}" ]] || die "生成 XHTTP 的 VLESS decryption 失败。"
   [[ -n "${XHTTP_VLESS_ENCRYPTION}" ]] || die "生成 XHTTP 的 VLESS encryption 失败。"
 }
 
 install_draft_file_text() {
+  write_state_kv "XRAY_VERSION_REQUEST" "${XRAY_VERSION_REQUEST-}"
   write_state_kv "SERVER_IP" "${SERVER_IP-}"
   write_state_kv "NODE_LABEL_PREFIX" "${NODE_LABEL_PREFIX-}"
   write_state_kv "REALITY_UUID" "${REALITY_UUID-}"

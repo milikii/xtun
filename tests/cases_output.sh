@@ -777,6 +777,8 @@ run_node_link_entries_case() {
 run_link_qr_png_case() {
   local workdir=""
   local png_dir=""
+  local png_count=0
+  local png_file=""
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
@@ -816,7 +818,10 @@ run_link_qr_png_case() {
   write_output_file
 
   [[ "$(stat -c '%a' "${QR_OUTPUT_DIR}")" == "700" ]]
-  [[ "$(ls "${QR_OUTPUT_DIR}"/*.png | wc -l)" -eq 5 ]]
+  while IFS= read -r -d '' png_file; do
+    png_count=$((png_count + 1))
+  done < <(find "${QR_OUTPUT_DIR}" -maxdepth 1 -type f -name '*.png' -print0)
+  [[ "${png_count}" -eq 5 ]]
   [[ -f "${QR_OUTPUT_DIR}/01-HKG-REALITY.png" ]]
   [[ -f "${QR_OUTPUT_DIR}/05-HKG-XHTTP-SPLIT-REALITY-CDN.png" ]]
   [[ "$(stat -c '%a' "${QR_OUTPUT_DIR}/01-HKG-REALITY.png")" == "600" ]]

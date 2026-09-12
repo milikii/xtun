@@ -5,6 +5,12 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+
+env:
+  XRAY_VERSION: v26.9.9
 
 jobs:
   shellcheck-and-smoke:
@@ -16,26 +22,15 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck jq openssl unzip
+          sudo apt-get install -y shellcheck jq openssl unzip curl ca-certificates
 
       # smoke 会把宿主机的 xray 软链进沙箱，然后真的去跑 xray vlessenc / x25519 /
       # run -test。runner 上没有 xray，所以第 4 条用例就 die 了——CI 从 3b167b7
       # 起一直红在这儿，而本机是装着 xray 的生产节点，85 条全绿，谁都没看出来。
-      # 版本钉死并校验 sha256：CI 红了应该是这个仓库的问题，
+      # CI 显式复现共享版本模块中的基线 tag；默认 latest 路径由 latest-check 单独验证。
       # 不该是上游哪天发了个新版本。要升级就一起改这两行。
       - name: Install Xray-core
-        env:
-          XRAY_VERSION: v26.3.27
-          XRAY_SHA256: 23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
-        run: |
-          set -Eeuo pipefail
-          tmp="$(mktemp -d)"
-          curl -fsSL -o "${tmp}/xray.zip" \
-            "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
-          printf '%s  %s\n' "${XRAY_SHA256}" "${tmp}/xray.zip" | sha256sum -c -
-          unzip -qo "${tmp}/xray.zip" -d "${tmp}/xray"
-          sudo install -m 0755 "${tmp}/xray/xray" /usr/local/bin/xray
-          /usr/local/bin/xray version | head -n 1
+        run: bash tests/install-smoke.sh install-core
 
       - name: Run Shellcheck
         run: shellcheck xtun.sh $(find lib tests -type f -name '*.sh' | sort)
@@ -84,30 +79,7 @@ jobs:
           exit 1
 
       - name: Run install smoke
-        run: |
-          docker exec smoke bash -euxc '
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update -qq
-            apt-get install -y -qq curl openssl jq ca-certificates procps >/dev/null
-            cp -a /src /root/xtun
-            cd /root/xtun
-            bash xtun.sh install --non-interactive \
-              --server-ip 127.0.0.1 \
-              --reality-sni www.stanford.edu \
-              --xhttp-domain cdn.example.test \
-              --cert-mode self-signed \
-              --disable-warp \
-              --disable-net-opt \
-              --no-manage-nginx-main \
-              --skip-sni-check
-            bash xtun.sh diagnose
-            test -d /root/xtun-qr
-            test "$(ls /root/xtun-qr/*.png | wc -l)" -ge 5
-            test ! -e /var/www/xtun-sub
-            ! grep -q '/sub/' /etc/nginx/conf.d/xtun.conf
-            xtun show-links --qr | grep -q '二维码 ('
-            grep -q '^## 二维码' /root/xtun-output.md
-          '
+        run: docker exec -e XRAY_VERSION="${XRAY_VERSION}" smoke bash /src/tests/install-smoke.sh container
 
       - name: TLS debug（diagnose 失败时留现场）
         if: ${{ always() }}
@@ -128,3 +100,19 @@ jobs:
       - name: Stop container
         if: ${{ always() }}
         run: docker rm -f smoke
+
+  latest-check:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq unzip curl ca-certificates
+
+      - name: Check latest published Xray-core
+        run: bash tests/install-smoke.sh check-latest

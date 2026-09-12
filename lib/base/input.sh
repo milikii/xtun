@@ -16,7 +16,7 @@ usage() {
   ${command_name}
   ${command_name} install [参数]
   ${command_name} update-script
-  ${command_name} upgrade
+  ${command_name} upgrade [--xray-version vX.Y.Z]
   ${command_name} check-sni [域名] [--target host:port] [--timeout N]
   ${command_name} change-uuid [参数]
   ${command_name} change-sni [参数]
@@ -37,6 +37,7 @@ usage() {
   ${command_name} help
 
 安装参数:
+  --xray-version VALUE        显式指定 Xray-core tag；默认追踪最新官方已发布版本（包含 pre-release）。
   --non-interactive           非交互运行；缺少必要参数时直接失败。
   --server-ip VALUE           REALITY 直连节点的公网 IP 或域名。
   --node-label-prefix VALUE   导出节点名称前缀，例如 HKG 或 SJC。

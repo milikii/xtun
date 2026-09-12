@@ -28,6 +28,7 @@ EOF
 
 install_value_specs() {
   cat <<'EOF'
+--xray-version:XRAY_VERSION_REQUEST
 --server-ip:SERVER_IP
 --server-ip6:SERVER_IP6
 --no-ipv6:SERVER_IP6:

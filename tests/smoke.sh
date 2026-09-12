@@ -7,6 +7,7 @@ set -Eeuo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_state_runtime.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_change.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_cli_and_install.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_versions.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_sni.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_nginx_net.sh"
 
@@ -177,6 +178,14 @@ main() {
     run_indirect_value_sanitize_case
     run_prompt_reuse_case
     run_install_validation_case
+    run_xray_version_selection_case
+    run_xray_latest_pagination_case
+    run_xray_explicit_release_context_case
+    run_xray_release_metadata_failure_case
+    run_xray_release_digest_conflict_case
+    run_xray_candidate_commands_case
+    run_xray_host_candidate_case
+    run_xray_version_argument_case
     run_xray_digest_parse_case
     run_install_xray_checksum_failure_case
     run_install_packages_failure_case
