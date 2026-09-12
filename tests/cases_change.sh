@@ -116,6 +116,7 @@ run_change_command_case() {
   local output_written=0
   local written_prefix=""
   local shown_links=0
+  local shown_links_args=""
   local rules_written=""
   local backup_sessions=0
   local stdout_file=""
@@ -154,6 +155,7 @@ run_change_command_case() {
   }
   show_links() {
     shown_links=$((shown_links + 1))
+    shown_links_args+="${*} "
   }
   log() { :; }
   log_step() { :; }
@@ -166,6 +168,7 @@ run_change_command_case() {
   # 改 SNI 时目标跟着换（0.11 只改 SNI 不改 target 是隐性缺陷）
   [[ "${runtime_target}" == "new.example.com:443" ]]
   [[ "${shown_links}" -eq 1 ]]
+  [[ "${shown_links_args}" == "--summary " ]]
 
   # --opt=value 与 --opt value 必须等价
   runtime_sni=""

@@ -56,16 +56,22 @@ sni_probe_cert() {
 # 输出一行：<code> <http_version> <redirect_url> <time_appconnect> <server_header>
 sni_probe_http() {
   local sni="${1}"
-  local target_ip="${2}"
+  local target="${2}"
   local timeout="${3}"
+  local target_host="${target%:*}"
+  local target_port="${target##*:}"
   local response=""
+
+  if [[ "${target}" != *:* ]]; then
+    target_port="443"
+  fi
 
   command -v curl >/dev/null 2>&1 || return 1
   response="$(timeout "${timeout}" curl -sS -o /dev/null \
     --max-time "${timeout}" \
     --http2 \
     -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' \
-    --resolve "${sni}:443:${target_ip}" \
+    --connect-to "${sni}:443:${target_host}:${target_port}" \
     -D - \
     -w '\n__META__%{http_code} %{http_version} %{redirect_url} %{time_appconnect}' \
     "https://${sni}/" 2>/dev/null)" || return 1
@@ -311,7 +317,7 @@ run_sni_checks() {
 
   cert_output="$(sni_probe_cert "${target}" "${sni}" "${timeout}")" || cert_output=""
 
-  http_output="$(sni_probe_http "${sni}" "${target_host}" "${timeout}")" || http_output=""
+  http_output="$(sni_probe_http "${sni}" "${target}" "${timeout}")" || http_output=""
 
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
@@ -386,8 +392,6 @@ sni_check_cmd() {
   done
 
   [[ "${timeout}" =~ ^[0-9]+$ ]] || die "--timeout 必须是正整数：${timeout}"
-  [[ -n "${target}" ]] || target="${sni:+$(default_reality_target_for_sni "${sni}")}"
-  [[ -n "${target}" ]] || die "请指定要检查的域名。"
 
   if [[ -z "${sni}" ]]; then
     load_existing_state
@@ -395,6 +399,8 @@ sni_check_cmd() {
     sni="${REALITY_SNI:-}"
   fi
   [[ -n "${sni}" ]] || die "请指定要检查的域名。"
+  [[ -n "${target}" ]] || target="${sni:+$(default_reality_target_for_sni "${sni}")}"
+  [[ -n "${target}" ]] || die "请指定要检查的域名。"
   if [[ -z "${target}" || "${target}" == "${sni}:443" ]]; then
     target="$(default_reality_target_for_sni "${sni}")"
   fi
@@ -404,6 +410,7 @@ sni_check_cmd() {
     load_config_runtime_context
     server_ip="${SERVER_IP:-}"
   fi
+  [[ -n "${server_ip}" ]] || server_ip="${SERVER_IP:-}"
 
   run_sni_checks "${sni}" "${target}" "${server_ip}" "${timeout}"
 }

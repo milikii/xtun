@@ -16,6 +16,7 @@ run_usage_case() {
   [[ "${output}" == *$'\n  xtun diagnose'* ]]
   [[ "${output}" == *$'\n  xtun apply-net-opt'* ]]
   [[ "${output}" == *$'\n  xtun apply-config'* ]]
+  [[ "${output}" == *$'\n  xtun show-links [--qr] [--summary]'* ]]
 }
 
 run_show_links_without_state_case() {
@@ -31,6 +32,101 @@ EOF
 
   output="$(show_links)"
   [[ "${output}" == "vless://example-link" ]]
+}
+
+run_show_links_summary_case() {
+  local workdir=""
+  local output=""
+
+  workdir="$(mktemp -d)"
+  OUTPUT_FILE="${workdir}/output.md"
+  STATE_FILE="${workdir}/missing-state.env"
+  cat > "${OUTPUT_FILE}" <<'EOF'
+# Xray 部署信息
+
+## 节点 1
+
+链接:
+vless://uuid@example.test:443#REALITY
+
+## 节点 8
+
+链接:
+vless://uuid@example.test:443#H3
+EOF
+
+  output="$(show_links --summary)"
+  [[ "${output}" == *"节点链接摘要"* ]]
+  [[ "${output}" == *"完整内容: xtun show-links"* ]]
+  [[ "${output}" == *"节点 1: REALITY"* ]]
+  [[ "${output}" == *"节点 8: H3"* ]]
+  [[ "${output}" != *"vless://"* ]]
+
+  if output="$(show_links --summary --qr)" 2>/dev/null; then
+    return 1
+  fi
+}
+
+run_quic_port_text_case() {
+  h3_enabled() { return 1; }
+  ss() {
+    printf '%s\n' 'UNCONN 0 0 0.0.0.0:443 0.0.0.0:* users:(("hysterity",pid=1,fd=3))'
+  }
+  [[ "$(quic_port_text)" == "不检查（H3 未启用）" ]]
+
+  h3_enabled() { return 0; }
+  [[ "$(quic_port_text)" == "有 UDP 监听，但不是 nginx" ]]
+
+  ss() {
+    printf '%s\n' 'UNCONN 0 0 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=1,fd=6))'
+  }
+  [[ "$(quic_port_text)" == "运行中" ]]
+  quic_port_listening
+
+  ss() {
+    printf '%s\n' 'UNCONN 0 0 0.0.0.0:443 0.0.0.0:*'
+  }
+  [[ "$(quic_port_text)" == "有 UDP 监听，无法确认归属（需要 root）" ]]
+
+  unset -f ss
+  h3_enabled() { return 1; }
+}
+
+run_install_prompt_early_validation_case() {
+  local workdir=""
+  local output=""
+
+  workdir="$(mktemp -d)"
+  guess_server_ip() { printf '203.0.113.10'; }
+  guess_server_ip6() { :; }
+  default_node_label_prefix() { printf 'VPS'; }
+  random_uuid() { printf '11111111-1111-1111-1111-111111111111'; }
+  default_reality_target_for_sni() { printf '%s:443' "${1}"; }
+  random_hex() { printf 'abcd1234'; }
+  random_path() { printf '/assets/v3'; }
+  prompt_with_default() {
+    printf '%s\n' "${1}" >> "${workdir}/prompts.txt"
+    case "${1}" in
+      REALITY_SNI) printf -v "${1}" '%s' '' ;;
+      REALITY_TARGET) printf -v "${1}" '%s' 'www.stanford.edu:443' ;;
+      *) printf -v "${1}" '%s' "${3}" ;;
+    esac
+  }
+  prompt_yes_no() { printf -v "${1}" '%s' 'no'; }
+  prompt_cert_mode_selection() { CERT_MODE='self-signed'; }
+  prompt_cert_mode_inputs() { :; }
+  prompt_warp_settings() { :; }
+
+  if output="$(prepare_install_inputs 2> "${workdir}/error.txt")"; then
+    return 1
+  fi
+  grep -q 'REALITY SNI 不是合法域名：' "${workdir}/error.txt"
+  grep -q '^REALITY_SNI$' "${workdir}/prompts.txt"
+  grep -q '^REALITY_TARGET$' "${workdir}/prompts.txt"
+  ! grep -q '^XHTTP_UUID$' "${workdir}/prompts.txt"
+
+  rm -rf "${workdir}"
+  load_functions
 }
 
 run_single_file_bootstrap_case() {

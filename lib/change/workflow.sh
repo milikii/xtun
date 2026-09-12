@@ -88,10 +88,10 @@ finish_managed_change() {
 
   log_success "${message}"
   log "备份目录：${BACKUP_DIR}"
-  # 只有真的改了客户端链接才值得再喷一整份部署文档；
+  # 只有真的改了客户端链接才值得提示重新导入；完整文档留在输出文件里；
   # WARP 出站与分流规则都在服务端侧，链接一个字都不会变。
   [[ "${show_links_after}" == "yes" ]] || return 0
-  show_links
+  show_links --summary
 }
 
 run_single_value_change_cmd() {

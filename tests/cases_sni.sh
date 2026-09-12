@@ -116,6 +116,30 @@ run_sni_judge_dns_case() {
   printf '%s\n' "${out}" | grep -q '^FAIL|DNS 解析|'
 }
 
+run_sni_probe_http_target_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  SNI_CURL_ARGS_FILE="${workdir}/curl-args.txt"
+  curl() { printf '%s\n' "$*" >> "${SNI_CURL_ARGS_FILE}"; }
+  timeout() {
+    shift
+    curl "$@"
+  }
+
+  sni_probe_http 'www.stanford.edu' '1.2.3.4:8443' 5 > /dev/null
+  grep -Fq -- '--connect-to www.stanford.edu:443:1.2.3.4:8443' "${SNI_CURL_ARGS_FILE}"
+  grep -Fq -- 'https://www.stanford.edu/' "${SNI_CURL_ARGS_FILE}"
+
+  SNI_CURL_ARGS_FILE="${workdir}/curl-args-default-port.txt"
+  sni_probe_http 'www.stanford.edu' 'www.stanford.edu:443' 5 > /dev/null
+  grep -Fq -- '--connect-to www.stanford.edu:443:www.stanford.edu:443' "${SNI_CURL_ARGS_FILE}"
+
+  unset -f curl timeout
+  unset SNI_CURL_ARGS_FILE
+  rm -rf "${workdir}"
+}
+
 run_sni_check_cmd_case() {
   local workdir=""
   local status=0
@@ -163,7 +187,19 @@ run_sni_check_cmd_case() {
   output="$(sni_check_cmd www.stanford.edu --target 1.2.3.4:443 2>/dev/null)" || true
   printf '%s\n' "${output}" | grep -q '(target 1.2.3.4:443)'
 
+  # 菜单 10 无参数：从已保存状态回填 SNI / target / 本机 IP
+  STATE_FILE="${workdir}/state.env"
+  cat > "${STATE_FILE}" <<'EOF'
+SERVER_IP='203.0.113.9'
+REALITY_SNI='www.stanford.edu'
+REALITY_TARGET='www.stanford.edu:443'
+EOF
+  run_sni_checks() { printf '%s|%s|%s|%s\n' "$@"; }
+  output="$(sni_check_cmd)"
+  [[ "${output}" == "www.stanford.edu|www.stanford.edu:443|203.0.113.9|10" ]]
+
   rm -rf "${workdir}"
+  load_functions
 }
 
 run_install_preflight_sni_case() {

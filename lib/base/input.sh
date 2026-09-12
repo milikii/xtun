@@ -26,7 +26,7 @@ usage() {
   ${command_name} change-cert-mode [参数]
   ${command_name} renew-cert [参数]
   ${command_name} uninstall [--yes] [--purge]
-  ${command_name} show-links [--qr]
+  ${command_name} show-links [--qr] [--summary]
   ${command_name} diagnose
   ${command_name} status [--raw]
   ${command_name} restart
@@ -175,6 +175,7 @@ check-sni 参数:
 
 链接参数:
   --qr                        额外输出每条分享链接的终端二维码（qrencode 由安装器安装）。
+  --summary                   只显示链接文件、节点清单和获取完整内容 / 二维码的命令。
 
 示例:
   ${command_name}

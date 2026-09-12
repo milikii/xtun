@@ -33,9 +33,12 @@ prepare_install_inputs() {
   prompt_with_default REALITY_UUID "REALITY UUID" "$(random_uuid)"
   prompt_with_default REALITY_SNI "REALITY 可见 SNI" "${DEFAULT_REALITY_SNI}"
   prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "$(default_reality_target_for_sni "${REALITY_SNI}")"
+  ensure_reality_sni_format
+  ensure_reality_target_format
   prompt_with_default REALITY_SHORT_ID "REALITY 短 ID" "$(random_hex 8)"
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" ""
+  ensure_xhttp_domain_format
   prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
   prompt_yes_no XHTTP_VLESS_ENCRYPTION_ENABLED "是否启用 XHTTP CDN 的 VLESS Encryption？ [y/n]" "y"
   XHTTP_VLESS_ENCRYPTION_ENABLED="$(normalize_yes_no_value "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}")" || exit 1

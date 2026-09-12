@@ -167,6 +167,9 @@ main() {
     run_begin_managed_change_resolves_xray_user_case
     run_usage_case
     run_show_links_without_state_case
+    run_show_links_summary_case
+    run_quic_port_text_case
+    run_install_prompt_early_validation_case
     run_render_output_file_qr_case
     run_single_file_bootstrap_case
     run_bootstrap_archive_resolve_case
@@ -252,6 +255,7 @@ main() {
     run_sni_judge_http_case
     run_sni_judge_cert_case
     run_sni_judge_dns_case
+    run_sni_probe_http_target_case
     run_sni_check_cmd_case
     run_install_preflight_sni_case
     run_reality_fallback_inbound_case

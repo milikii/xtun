@@ -68,6 +68,10 @@ run_dispatch_case() {
     dispatched="diagnose"
     dispatched_args="$*"
   }
+  show_links() {
+    dispatched="show-links"
+    dispatched_args="$*"
+  }
   uninstall_cmd() {
     dispatched="uninstall"
     dispatched_args="$*"
@@ -119,6 +123,10 @@ run_dispatch_case() {
   run_cli_command diagnose
   [[ "${dispatched}" == "diagnose" ]]
 
+  run_cli_command show-links --summary
+  [[ "${dispatched}" == "show-links" ]]
+  [[ "${dispatched_args}" == "--summary" ]]
+
   run_cli_command apply-net-opt
   [[ "${dispatched}" == "apply-net-opt" ]]
 
@@ -139,6 +147,10 @@ run_dispatch_case() {
 
   run_menu_choice 3
   [[ "${dispatched}" == "diagnose" ]]
+
+  run_menu_choice 2
+  [[ "${dispatched}" == "show-links" ]]
+  [[ "${dispatched_args}" == "--summary" ]]
 
   run_menu_choice 6
   [[ "${dispatched}" == "update-script" ]]
@@ -168,6 +180,7 @@ run_install_flow_case() {
   local steps=()
   local logged=""
   local shown=0
+  local shown_links_args=""
   local rolled_runtime=0
   local rolled_optional=0
   local rolled_install_runtime=0
@@ -217,12 +230,14 @@ run_install_flow_case() {
   }
   show_links() {
     shown=1
+    shown_links_args="$*"
   }
 
   install_cmd --non-interactive --disable-warp
 
   [[ "${steps[*]}" == "prepare:--non-interactive --disable-warp runtime files optional finalize" ]]
   [[ "${shown}" -eq 1 ]]
+  [[ "${shown_links_args}" == "--summary" ]]
   [[ "${draft_writes}" -eq 0 ]]
   [[ "${draft_clears}" -eq 1 ]]
   printf '%s' "${logged}" | grep -q 'STEP:准备安装参数与运行环境。'

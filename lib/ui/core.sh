@@ -551,8 +551,36 @@ have_qrencode() {
 
 # UDP 443（QUIC）监听探测
 quic_port_listening() {
-  command -v ss >/dev/null 2>&1 || return 1
-  ss -lunH '( sport = :443 )' 2>/dev/null | grep -q .
+  [[ "$(quic_port_text)" == "运行中" ]]
+}
+
+quic_port_text() {
+  local listeners=""
+
+  if ! command -v ss >/dev/null 2>&1; then
+    printf '未探测'
+    return
+  fi
+  if ! h3_enabled; then
+    printf '不检查（H3 未启用）'
+    return
+  fi
+
+  listeners="$(ss -lunpH '( sport = :443 )' 2>/dev/null)"
+  if grep -Fq 'users:(("nginx"' <<< "${listeners}"; then
+    printf '运行中'
+    return
+  fi
+  if [[ -z "${listeners}" ]]; then
+    printf '未监听'
+    return
+  fi
+  if ! grep -q 'users:' <<< "${listeners}"; then
+    printf '有 UDP 监听，无法确认归属（需要 root）'
+    return
+  fi
+
+  printf '有 UDP 监听，但不是 nginx'
 }
 
 check_badge() {

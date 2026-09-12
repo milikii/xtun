@@ -20,13 +20,48 @@ render_output_file_qr() {
   done < "${OUTPUT_FILE}"
 }
 
+show_links_summary() {
+  local node_number=""
+  local label=""
+  local link_count=0
+
+  printf '\n%s\n' "节点链接摘要"
+  printf '链接文件: %s\n' "${OUTPUT_FILE}"
+  printf '完整内容: %s show-links\n' "${XTUN_COMMAND_NAME:-xtun}"
+  printf '终端二维码: %s show-links --qr\n' "${XTUN_COMMAND_NAME:-xtun}"
+  printf '\n'
+
+  while IFS=$'\t' read -r node_number label; do
+    [[ -n "${node_number}" ]] || continue
+    link_count=$((link_count + 1))
+    printf '节点 %s: %s\n' "${node_number}" "${label}"
+  done < <(
+    awk '
+      /^## 节点 [0-9]+$/ { node_number=$3; next }
+      /^vless:\/\// {
+        label=$0
+        sub(/^.*#/, "", label)
+        print node_number "\t" label
+      }
+    ' "${OUTPUT_FILE}"
+  )
+
+  if [[ "${link_count}" -eq 0 ]]; then
+    warn "输出文件中没有找到节点链接。"
+  fi
+}
+
 show_links() {
   local show_qr=0
+  local summary=0
 
   while [[ $# -gt 0 ]]; do
     case "${1}" in
       --qr)
         show_qr=1
+        ;;
+      --summary)
+        summary=1
         ;;
       --help|-h|help)
         usage
@@ -39,8 +74,18 @@ show_links() {
     shift
   done
 
+  if [[ "${show_qr}" -eq 1 && "${summary}" -eq 1 ]]; then
+    die "--summary 不能与 --qr 同时使用。"
+  fi
+
   # show-links 是纯查看：不重写任何文件，输出文件丢了就明说。
   [[ -f "${OUTPUT_FILE}" ]] || die "找不到输出文件：${OUTPUT_FILE}"
+
+  if [[ "${summary}" -eq 1 ]]; then
+    show_links_summary
+    return
+  fi
+
   cat "${OUTPUT_FILE}"
 
   if [[ "${show_qr}" -eq 1 ]]; then
@@ -159,7 +204,7 @@ diagnose_cmd() {
   printf '%s\n' "监听 8001: $(listening_port_text 8001)"
   printf '%s\n' "监听 8443: $(listening_port_text 8443)"
   printf '%s\n' "XHTTP H3: $(if h3_enabled; then printf '已启用（Alt-Svc h3=:443）'; else printf '未启用（%s）' "$(h3_disabled_reason)"; fi)"
-  printf '%s\n' "QUIC (UDP 443): $(if quic_port_listening; then printf '运行中'; else printf '未监听'; fi)"
+  printf '%s\n' "QUIC (UDP 443): $(quic_port_text)"
   printf '%s\n' "监听 [::]:443: $(if ss -ltnH '( sport = :443 )' 2>/dev/null | grep -q '\[::\|\*:'; then printf '运行中'; else printf '未监听'; fi)"
   printf '%s\n' "Xray 配置: $(xray_config_check_text)"
   printf '%s\n' "Nginx 配置: $(nginx_config_check_text)"
@@ -195,7 +240,10 @@ diagnose_cmd() {
     [[ "$(net_stack_state)" == "ok" ]] || config_failures+=("拥塞控制不是 bbr 系")
   fi
   if h3_enabled; then
-    quic_port_listening || port_failures+=("QUIC (UDP 443) 未监听")
+    case "$(quic_port_text)" in
+      "运行中"|"有 UDP 监听，无法确认归属（需要 root）") ;;
+      *) port_failures+=("QUIC (UDP 443) 未监听或非 nginx 监听") ;;
+    esac
   fi
 
   if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
@@ -421,7 +469,7 @@ uninstall_cmd() {
 show_main_menu() {
   cat <<'EOF'
   1. 安装或重装
-  2. 查看节点链接与二维码
+  2. 查看节点链接摘要
   3. 运行诊断
   4. 刷新状态面板
   5. 重启服务
@@ -590,7 +638,7 @@ dispatch_cli_command() {
 run_menu_choice() {
   case "${1}" in
     1) run_cli_command install ;;
-    2) run_cli_command show-links ;;
+    2) run_cli_command show-links --summary ;;
     3) run_cli_command diagnose ;;
     4) run_cli_command status ;;
     5) run_cli_command restart ;;
