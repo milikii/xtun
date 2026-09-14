@@ -1,7 +1,7 @@
 # 批次 B 实施报告：任务菜单、单节点取用与 H3 意图
 
 > 日期：2026-09-14。范围：W07 的实现与自动验证、W11.1、W09.1，以及直接相关的回归修复。用户已授权继续实施、提交和 push。正式 tag/release、生产迁移与完整人机/网络验收不在本次完成结论内。
-> 当前入口：[PLAN](PLAN.md)；目标与遗留：[详细工单](PLAN-UX-RELIABILITY.md)；行为契约：[D27–D31](DECISIONS-UX-RELIABILITY.md#d27)。前序报告保持原样，不把本次结果回写成旧时已通过。
+> 当前入口：[PLAN](PLAN.md)；目标与遗留：[详细工单](PLAN-UX-RELIABILITY.md)；行为契约：[D27–D32](DECISIONS-UX-RELIABILITY.md#d27)。前序报告保持原样，不把本次结果回写成旧时已通过。
 
 ## 1. 结论与候选身份
 
@@ -10,9 +10,11 @@
 | 对象 | 准确记录 |
 | --- | --- |
 | 接手 Git 基线 | `main / c1fabf74bbfa8a9132c40b65ccb4678424bb5111`；开工 fetch 后与 origin/main 一致，保留累积工作区 |
-| 提交范围 | `a1da4c71005617e2a6eba5c1264de76c7ddde00c` 已 push，包含前序 W01–W06/W08.1、A 批累积实现与 B 批。其后的 CI 修复仅改测试、工作流和文档，见 §4.1 |
+| 提交范围 | `a1da4c71005617e2a6eba5c1264de76c7ddde00c` 已 push，包含前序 W01–W06/W08.1、A 批累积实现与 B 批。`c7bc473` / `115f22b` 修复测试与 CI，见 §4.1；后续首次安装日志权限修复涉及运行代码，见 §4.2 |
 | 脚本 / state | `1.1.0` / schema `2`；没有因中间候选另升发布版本 |
-| 最终运行内容摘要 | `31574b9dbd302342dad45461ab9c435ece6e3e158c3666ba394601e17e56fd67`；由 `bundle_script_signature` 对 `xtun.sh/lib/static` 计算 |
+| B 初始运行内容摘要 | `31574b9dbd302342dad45461ab9c435ece6e3e158c3666ba394601e17e56fd67`；由 `bundle_script_signature` 对 `xtun.sh/lib/static` 计算 |
+| 日志权限修复后摘要 | `df15775f7ca139d42d60c864a527a8b33308cfb4ec0bc39142da8e2ec60f4349`；相对初始 B 仅增加安装启动前的权限整理与失败恢复分支 |
+| 日志修复候选归档 | `candidate-log-permissions-v3.tar.gz`；SHA256 `2548758fdbe1d98c8d5f7a26e18edbf37839a1e9c4422174af6e7a8bc826d7fb`；含当前运行内容和 222 条 smoke 的测试内容，私有证据目录 `ci-followup/` |
 | push 前验收归档 | `candidate-acceptance.tar.gz`；SHA256 `e481b18c081d007eaefc576460c3847f67d7f7d656d5692ba9ed4117a1d3e26e`；包含当时运行文件、tests、`.shellcheckrc`。后续测试修复以 Git 内容为准，不声称该归档已含修复 |
 | 目标 Xray | `v26.9.9 / 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`；本机使用独立 arm64 核心，VPS 使用 amd64 核心 |
 | 本机验证 | arm64，Bash 5.2.37；本机已安装的生产 bundle/core 保持原状 |
@@ -112,7 +114,19 @@ ALPN 依据为仓库官方快照的 `source/config/transport_internet.go`（Stre
 
 补充修复后，在私有挂载空间隐藏宿主证书和系统 geo 目录，使用独立归档中的核心/数据运行 220/220 smoke 通过；54 个 Shell 静态检查及 68/68、9/9 两套 PTY 再次通过。显式缺 geo 目录会在用例开始前失败；安装日志管道的注入失败保留退出码 7 并产生含错误末尾的 annotation。
 
-修复没有改动 `xtun.sh/lib/static`，运行摘要与 VPS 已安装候选保持一致。新增私有证据放在本报告证据根的 `ci-followup/`，包括原始失败、普通用户复现、修复后回归和后续公开 CI 查询；它与 push 前归档分开保留。发布门槛、真人/真实传输和下一批 C 的范围不变。
+本节的测试/工作流修复没有改动 `xtun.sh/lib/static`，运行摘要仍为初始 B。新增私有证据放在本报告证据根的 `ci-followup/`，包括原始失败、普通用户复现、修复后回归和后续公开 CI 查询；它与 push 前归档分开保留。发布门槛、真人/真实传输和下一批 C 的范围不变。
+
+### 4.2 干净安装中的日志权限缺陷
+
+`115f22bdb9ed9b507bca5eb40f755e15cea624c4` 的 [CI 34846941441](https://github.com/milikii/xtun/actions/runs/34846941441) 中，ShellCheck、220 条 smoke 和两套 PTY 全部通过。Debian 13 容器完成配置校验后，启动服务失败并进入恢复；新装的共享 nginx/HAProxy 包仍存在，被如实列为未完全恢复，未清掉 pending 冒充成功。
+
+随后使用实际 v26.9.9 核心复现：root `run -test` 返回 0，但新建的 access/error 日志为 root:root / 0600；降到 UID/GID 65534 的独立进程执行相同校验，返回 23，明确报日志 `permission denied`。使用真实安装 finalization 的新回归在修复前同样失败，避免以已有日志的部署替代新装证据。
+
+安装现在在 `validate_configs` 之后、启动服务之前执行运行用户检查与 `ensure_managed_permissions all`。原有日志元数据已纳入当前 generation；整理失败走同代恢复，不进入服务启动。两个回归分别验证真实低权限核心可打开首次日志，以及中途 chown 失败时不启动服务、恢复旧配置与目录/日志 UID/GID/mode、保留日志内容。
+
+本机 arm64 的 222/222 smoke 与 54 个 Shell 静态检查通过；新增两例也在 umask 077 下通过。低权限用例显式准备可遍历的夹具配置目录，避免调用者 umask 把问题遮在读取配置阶段。候选的原生 VPS 复验和新提交 CI 另行核对；§5 的 20 项维护记录继续对应初始 B 归档，不改写成新运行内容已重跑全部场景。
+
+VPS 复验还发现旧 QR 错误断言的 `printf | grep -q` 会因提前关闭管道而返回 141。多行长错误的最小复现保留该退出码；改用 here-string 后匹配成功返回 0，保留相同的错误内容断言。早期候选与两次夹具失败日志保留，最终测试内容使用上表 v3 归档。
 
 ## 5. 测试 VPS 的实际维护
 

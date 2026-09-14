@@ -5,6 +5,7 @@ set -Eeuo pipefail
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_TMP_DIR=""
 SMOKE_LOG_FILE=""
+SMOKE_CONTAINER_MODE=0
 
 report_smoke_failure() {
   local status="${1}" line="${2}" command_text="${3}"
@@ -12,6 +13,9 @@ report_smoke_failure() {
 
   if [[ -n "${SMOKE_LOG_FILE}" && -s "${SMOKE_LOG_FILE}" ]]; then
     message+=$'\n'"$(tail -n 30 "${SMOKE_LOG_FILE}")"
+  fi
+  if [[ "${SMOKE_CONTAINER_MODE}" -eq 1 ]]; then
+    message+=$'\n'"$(journalctl --no-pager -u xray.service -u nginx.service -u haproxy.service -n 20 2>&1 || true)"
   fi
   printf '[fail] %s\n' "${message}" >&2
   if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
@@ -98,6 +102,7 @@ container_install() {
   local output_file="/root/xtun-output.md"
   local nginx_config="/etc/nginx/conf.d/xtun.conf"
 
+  SMOKE_CONTAINER_MODE=1
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq curl openssl jq ca-certificates procps >/dev/null

@@ -912,7 +912,7 @@ run_link_qr_png_case() {
   err="$(write_output_file 2>&1 >/dev/null)"
   [[ -f "${OUTPUT_FILE}" ]]
   [[ ! -e "${QR_OUTPUT_DIR}" ]]
-  printf '%s' "${err}" | grep -q 'qrencode'
+  grep -q 'qrencode' <<< "${err}"
 
   # qrencode 单条失败：整批作废，这一代二维码不提交，上一代原样留着。
   # 半套新图或者「新配置配旧图」都是不能提交的状态（D12/H14）。
@@ -951,7 +951,7 @@ run_link_qr_png_case() {
   [[ "$(cat "${QR_OUTPUT_DIR}/01-HKG-REALITY.png")" == "old-png" ]]
   # 暂存目录不能留下：失败现场只该是备份目录里的那份
   [[ -z "$(find "$(dirname "${QR_OUTPUT_DIR}")" -maxdepth 1 -name '*.staging.*' -print -quit)" ]]
-  printf '%s' "${err}" | grep -q '生成失败'
+  grep -q '生成失败' <<< "${err}"
 
   load_functions
 }

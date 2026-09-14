@@ -420,6 +420,13 @@ finalize_installation() {
     return 1
   fi
 
+  # root 的首次 run -test 会创建 0600 日志。确认日志归 xray 用户所有后
+  # 才启动低权限服务；原有日志的权限已由 begin_install_generation 保存。
+  if ! ensure_xray_user lookup || ! ensure_managed_permissions all; then
+    generation_failed "安装运行文件权限准备失败"
+    return 1
+  fi
+
   if ! restart_services; then
     generation_failed "核心服务未能达到 active"
     return 1

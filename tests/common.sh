@@ -36,7 +36,7 @@ require_test_host_tools() {
   [[ -x "${TEST_HOST_XRAY_BIN}" ]] \
     || missing+="  ${TEST_HOST_XRAY_BIN}（xray 可执行文件，用例要真的跑 vlessenc / x25519 / run -test）"$'\n'
 
-  for tool in jq openssl; do
+  for tool in jq openssl setpriv; do
     command -v "${tool}" >/dev/null 2>&1 || missing+="  ${tool}"$'\n'
   done
   for asset in geoip.dat geosite.dat; do

@@ -356,6 +356,96 @@ run_generation_created_service_restore_case() {
   rm -rf "${workdir}"
 }
 
+# 首次安装时，root 配置校验新建日志后，低权限服务仍必须能够打开日志。
+run_install_fresh_log_permissions_case() {
+  local workdir=""
+  local path=""
+
+  load_functions
+  workdir="$(mktemp -d)"
+  chmod 0755 "${workdir}"
+  generation_case_setup "${workdir}"
+  # 服务用户需要穿过夹具目录；不能让调用测试时的 umask 遮住日志权限问题。
+  chmod 0755 "${XRAY_CONFIG_DIR}"
+  XRAY_UID=65534
+  XRAY_GID=65534
+  XRAY_LOG_DIR="${workdir}/xray-logs"
+  XRAY_BIN="${workdir}/xray-core"
+  install -m 0755 "${TEST_HOST_XRAY_BIN}" "${XRAY_BIN}"
+  install -d -m 0750 -o "${XRAY_UID}" -g "${XRAY_GID}" "${XRAY_LOG_DIR}"
+  jq -cn --argjson log "$(xray_log_json)" \
+    '{log: $log, inbounds: [], outbounds: [{protocol: "freedom", tag: "direct"}]}' > "${XRAY_CONFIG_FILE}"
+
+  # 使用真实核心创建首批日志；其它服务的配置不属于本用例。
+  validate_configs() { validate_xray_config; }
+  restart_services() {
+    setpriv --reuid="${XRAY_UID}" --regid="${XRAY_GID}" --clear-groups \
+      "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}" > "${workdir}/service-user.log" 2>&1 || return 1
+    printf 'service-user-ok\n' > "${workdir}/service-user-ok"
+  }
+  write_state_file() { printf 'committed-state\n' > "${STATE_FILE}"; }
+  write_output_file() { printf 'committed-output\n' > "${OUTPUT_FILE}"; }
+
+  start_backup_session
+  if ! finalize_installation > "${workdir}/finalize.log" 2>&1; then
+    [[ ! -f "${workdir}/service-user.log" ]] || cat "${workdir}/service-user.log" >&2
+    printf '[fail] 全新日志的低权限启动失败：%s\n' "${LOGGED}" >&2
+    return 1
+  fi
+  [[ -s "${workdir}/service-user-ok" ]]
+  for path in "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"; do
+    [[ "$(stat -c '%u:%g:%a' "${path}")" == '65534:65534:640' ]]
+  done
+  [[ ! -e "${PENDING_OP_FILE}" ]]
+  rm -rf "${workdir}"
+  load_functions
+}
+
+run_install_log_permission_failure_case() {
+  local workdir=""
+  local fail_once=1
+  local path=""
+
+  load_functions
+  workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
+  XRAY_UID=65534
+  XRAY_GID=65534
+  XRAY_LOG_DIR="${workdir}/xray-logs"
+  mkdir -m 0755 "${XRAY_LOG_DIR}"
+  printf 'original-config\n' > "${XRAY_CONFIG_FILE}"
+  for path in "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"; do
+    printf 'original-log\n' > "${path}"
+    chmod 0644 "${path}"
+  done
+  validate_configs() { printf 'candidate-config\n' > "${XRAY_CONFIG_FILE}"; }
+  restart_services() { printf 'unexpected\n' > "${workdir}/restarted"; }
+  chown() {
+    if [[ "${!#}" == "${XRAY_LOG_DIR}/error.log" && "${fail_once}" -eq 1 ]]; then
+      fail_once=0
+      return 1
+    fi
+    command chown "$@"
+  }
+
+  start_backup_session
+  if finalize_installation > "${workdir}/finalize.log" 2>&1; then
+    printf '[fail] 日志权限失败不能提交安装\n' >&2
+    return 1
+  fi
+  [[ "${fail_once}" -eq 0 && ! -e "${workdir}/restarted" ]]
+  [[ "${GENERATION_RECOVERY_RESULT}" == restored-verified && ! -e "${PENDING_OP_FILE}" ]]
+  [[ "$(cat "${XRAY_CONFIG_FILE}")" == original-config ]]
+  [[ "$(stat -c '%u:%g:%a' "${XRAY_LOG_DIR}")" == '0:0:755' ]]
+  for path in "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"; do
+    [[ "$(stat -c '%u:%g:%a' "${path}")" == '0:0:644' ]]
+    [[ "$(cat "${path}")" == original-log ]]
+  done
+  unset -f chown
+  rm -rf "${workdir}"
+  load_functions
+}
+
 # 配置、state、输出与二维码是同一代的交付物：二维码生成失败会把已经写下的
 # 新配置和新 state 一起退回去，不允许留下「新配置 + 旧产物」（H14/D12）。
 run_generation_products_rollback_case() {

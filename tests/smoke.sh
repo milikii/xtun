@@ -263,6 +263,8 @@ main() {
     run_generation_created_service_restore_case
     run_generation_recovery_failed_case
     run_generation_path_restore_rules_case
+    run_install_fresh_log_permissions_case
+    run_install_log_permission_failure_case
     run_generation_products_rollback_case
     run_backup_directory_symlink_case
     run_generation_callsite_prewrite_failure_case
