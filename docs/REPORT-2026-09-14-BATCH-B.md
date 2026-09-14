@@ -102,6 +102,16 @@ ALPN 依据为仓库官方快照的 `source/config/transport_internet.go`（Stre
 
 修复后本机 arm64 的 54 个 Shell 文件静态检查、220/220 smoke、68/68 安装 PTY、9/9 菜单 PTY 通过。普通用户下安装 CLI/菜单一致性用例返回 0；完整三套测试的权限前置检查分别返回 2。VPS 只读复验五节点/PNG 新断言通过，SSH 仍为 PID 524、active/enabled。Debian 13 干净容器的完整结果须由新提交的 CI 补齐，不能用这次已有部署上的 QR 检查代替。
 
+后续提交 `c7bc47329edc2bb969175e502ddf942b96b1f48c` 的 [CI 34844671940](https://github.com/milikii/xtun/actions/runs/34844671940) 中，两套 PTY 与 ShellCheck 已通过，smoke 继续暴露缺少 geo 数据的问题，容器确认在完整安装命令内失败、早于 QR 检查：
+
+- CI 的核心准备步骤只安装二进制，真实 `run -test` 在加载 `geoip:private` 时失败。Xray v26.9.9 的 `common/platform/others.go:GetAssetLocation` 会在指定目录缺文件时继续查系统目录，因此本机/VPS 的已部署数据遮住了缺项。原用例在私有挂载空间屏蔽系统 geo 目录后，明确报 `failed to open geoip.dat`；没有移动或删除宿主文件。
+- 核心准备改为从同一份已校验归档安装两份数据；测试入口显式检查资源目录并设置 `XRAY_LOCATION_ASSET`。二维码恢复用例增加“编码器确实被调用”的断言，避免把更早的配置失败误当成预期故障。
+- 容器安装/诊断保留独立日志，失败 annotation 附末尾 30 行并保持 pipeline 的真实退出码，以便继续定位干净系统安装失败。
+
+上述源码按固定提交 `52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120` 核对；仓库滚动官网 `docs/stable/config/env.md` 用于环境变量解释。该源文件不在原选定快照范围内，固定版本原文保存在私有证据的 `official-source/`，未改写技能快照。
+
+补充修复后，在私有挂载空间隐藏宿主证书和系统 geo 目录，使用独立归档中的核心/数据运行 220/220 smoke 通过；54 个 Shell 静态检查及 68/68、9/9 两套 PTY 再次通过。显式缺 geo 目录会在用例开始前失败；安装日志管道的注入失败保留退出码 7 并产生含错误末尾的 annotation。
+
 修复没有改动 `xtun.sh/lib/static`，运行摘要与 VPS 已安装候选保持一致。新增私有证据放在本报告证据根的 `ci-followup/`，包括原始失败、普通用户复现、修复后回归和后续公开 CI 查询；它与 push 前归档分开保留。发布门槛、真人/真实传输和下一批 C 的范围不变。
 
 ## 5. 测试 VPS 的实际维护

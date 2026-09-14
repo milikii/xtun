@@ -92,14 +92,17 @@ H25–H29 已完成前序报告列出的自动/实机复验；H30 已有批次 B
 
 ### 2.4 已有自动与 VPS 套件的复现
 
-先保留工作区和候选摘要，检查准确核心身份。以下命令在 root shell 执行，使用独立核心，不安装生产核心。完整 smoke 和两套 PTY 会经过真实安装/维护的 root 检查；测试 worker 隔离托管路径和服务调用，无 root 帮助入口由 smoke 内的 `setpriv` 单独验证。若通过 sudo 执行，显式保留 `TEST_HOST_XRAY_BIN`：
+先保留工作区和候选摘要，检查准确核心身份。以下命令在 root shell 执行，使用同一官方归档中的独立核心和 geo 数据，不安装生产核心。完整 smoke 和两套 PTY 会经过真实安装/维护的 root 检查；测试 worker 隔离托管路径和服务调用，无 root 帮助入口由 smoke 内的 `setpriv` 单独验证。若通过 sudo 执行，显式保留 `TEST_HOST_XRAY_BIN` 和 `TEST_HOST_XRAY_ASSET_DIR`：
 
 ```bash
-export TEST_HOST_XRAY_BIN=/path/to/isolated/xray
+export TEST_HOST_XRAY_BIN=/path/to/isolated/xray-release/xray
+export TEST_HOST_XRAY_ASSET_DIR=/path/to/isolated/xray-release
 bash tests/smoke.sh
 python3 tests/install-boundary.py --evidence /path/to/private-evidence
 python3 tests/task-menu-boundary.py --evidence /path/to/private-menu-evidence
 ```
+
+资源目录须含可读非空的 `geoip.dat` 和 `geosite.dat`。测试显式设置 Xray 的资源查找目录；仅复制二进制不算具备完整测试依赖。缺文件会在开始运行用例前报错。
 
 在授权测试 VPS 的候选目录执行下面的原生套件。systemd/ownership 使用唯一测试 unit；filesystem 仅填满专用 tmpfs；deployment 会实际替换这台 VPS 的安装内容。先备份它的配置、二进制、unit/drop-in、包清单与 SSH 指纹，已有 pending 要先处理。完整现场保留为 root 私有目录。
 

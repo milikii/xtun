@@ -4,11 +4,15 @@ set -Eeuo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_TMP_DIR=""
+SMOKE_LOG_FILE=""
 
 report_smoke_failure() {
   local status="${1}" line="${2}" command_text="${3}"
   local message="tests/install-smoke.sh:${line}: ${command_text} (exit ${status})"
 
+  if [[ -n "${SMOKE_LOG_FILE}" && -s "${SMOKE_LOG_FILE}" ]]; then
+    message+=$'\n'"$(tail -n 30 "${SMOKE_LOG_FILE}")"
+  fi
   printf '[fail] %s\n' "${message}" >&2
   if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
     message="${message//\%/%25}"
@@ -49,6 +53,9 @@ install_core() {
   xray_validate_candidate_commands "${binary_path}" "${XRAY_SELECTED_TAG}"
 
   sudo install -m 0755 "${binary_path}" /usr/local/bin/xray
+  # run -test 会加载路由中的 geoip/geosite；与核心一起使用同一校验归档的资源。
+  sudo install -d -m 0755 /usr/local/share/xray
+  sudo install -m 0644 "${SMOKE_TMP_DIR}/xray/geoip.dat" "${SMOKE_TMP_DIR}/xray/geosite.dat" /usr/local/share/xray/
   version_output="$(/usr/local/bin/xray version)"
   printf '%s\n' "${version_output}"
   printf 'tag=%s\ncommit=%s\narchive=%s\nsha256=%s\n' \
@@ -96,6 +103,8 @@ container_install() {
   apt-get install -y -qq curl openssl jq ca-certificates procps >/dev/null
   cp -a "${source_dir}" "${workdir}"
   cd "${workdir}"
+  SMOKE_LOG_FILE="${workdir}/install-smoke.log"
+  install -m 0600 /dev/null "${SMOKE_LOG_FILE}"
 
   bash xtun.sh install --non-interactive \
     --server-ip 127.0.0.1 \
@@ -106,9 +115,9 @@ container_install() {
     --disable-net-opt \
     --no-manage-nginx-main \
     --skip-sni-check \
-    --xray-version "${XRAY_VERSION:?XRAY_VERSION is required}"
+    --xray-version "${XRAY_VERSION:?XRAY_VERSION is required}" 2>&1 | tee "${SMOKE_LOG_FILE}"
 
-  bash xtun.sh diagnose
+  bash xtun.sh diagnose 2>&1 | tee -a "${SMOKE_LOG_FILE}"
 
   while IFS= read -r -d '' png_file; do
     png_count=$((png_count + 1))

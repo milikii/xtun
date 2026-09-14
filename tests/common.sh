@@ -19,16 +19,29 @@ TEST_SANDBOX_ROOT="${TEST_SANDBOX_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/xtun-test-s
 # 缺什么现在开跑前一次说清楚。
 # ------------------------------
 TEST_HOST_XRAY_BIN="${TEST_HOST_XRAY_BIN:-/usr/local/bin/xray}"
+if [[ -z "${TEST_HOST_XRAY_ASSET_DIR:-}" ]]; then
+  TEST_HOST_XRAY_ASSET_DIR="$(dirname "$(readlink -f "${TEST_HOST_XRAY_BIN}")")"
+  if [[ ! -f "${TEST_HOST_XRAY_ASSET_DIR}/geoip.dat" && "${TEST_HOST_XRAY_BIN}" == /usr/local/bin/xray ]]; then
+    TEST_HOST_XRAY_ASSET_DIR=/usr/local/share/xray
+  fi
+fi
+# 指定只读资源来源，避免校验意外借用宿主机其它安装的 geo 数据。
+export XRAY_LOCATION_ASSET="${TEST_HOST_XRAY_ASSET_DIR}"
 
 require_test_host_tools() {
   local missing=""
   local tool=""
+  local asset=""
 
   [[ -x "${TEST_HOST_XRAY_BIN}" ]] \
     || missing+="  ${TEST_HOST_XRAY_BIN}（xray 可执行文件，用例要真的跑 vlessenc / x25519 / run -test）"$'\n'
 
   for tool in jq openssl; do
     command -v "${tool}" >/dev/null 2>&1 || missing+="  ${tool}"$'\n'
+  done
+  for asset in geoip.dat geosite.dat; do
+    [[ -s "${TEST_HOST_XRAY_ASSET_DIR}/${asset}" && -r "${TEST_HOST_XRAY_ASSET_DIR}/${asset}" ]] \
+      || missing+="  ${TEST_HOST_XRAY_ASSET_DIR}/${asset}（与测试核心配套的路由资源；可设置 TEST_HOST_XRAY_ASSET_DIR）"$'\n'
   done
 
   [[ -n "${missing}" ]] || return 0

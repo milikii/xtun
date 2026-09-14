@@ -393,7 +393,7 @@ run_generation_products_rollback_case() {
 
   # 二维码这一代画不出来：整批作废，不能提交（D12）。
   have_qrencode() { return 0; }
-  qrencode() { return 1; }
+  qrencode() { printf 'called\n' >> "${workdir}/qr-attempts"; cat >/dev/null; return 1; }
   restart_xray_service() { :; }
   # 权限收尾要真实的 xray 用户，这条用例只关心同代边界。
   ensure_managed_permissions() { :; }
@@ -406,6 +406,7 @@ run_generation_products_rollback_case() {
   set -e
 
   [[ "${status}" -ne 0 ]]
+  [[ -s "${workdir}/qr-attempts" ]] || { printf '[fail] 未到达二维码故障注入：%s\n' "${LOGGED}" >&2; return 1; }
   [[ "${GENERATION_RECOVERY_RESULT}" == "restored-verified" ]]
   [[ "$(cat "${XRAY_CONFIG_FILE}")" == "old-config" ]]
   [[ "$(cat "${STATE_FILE}")" == "old-state" ]]
