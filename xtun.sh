@@ -20,7 +20,6 @@ SCRIPT_VERSION="1.1.0"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xtun"
 SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xtun"
 BOOTSTRAP_SELF_INSTALL_DIR="${XTUN_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
-BOOTSTRAP_SELF_COMMAND_PATH="${XTUN_SELF_COMMAND_PATH:-${SELF_COMMAND_PATH_DEFAULT}}"
 BOOTSTRAP_REPO_OWNER="${XTUN_BOOTSTRAP_REPO_OWNER:-milikii}"
 BOOTSTRAP_REPO_NAME="${XTUN_BOOTSTRAP_REPO_NAME:-xtun}"
 BOOTSTRAP_BRANCH_REF="${XTUN_BOOTSTRAP_BRANCH_REF:-main}"
@@ -93,35 +92,69 @@ exec_bundle_root() {
     bash "${bundle_root}/xtun.sh" "$@"
 }
 
-bootstrap_install_bundle_to_self() {
+bootstrap_known_command() {
+  case "${1:-menu}" in
+    menu|install|update-script|upgrade|recover|check-sni|change-uuid|change-sni|change-path|change-h3|change-warp|change-warp-rules|change-cert-mode|renew-cert|uninstall|show-links|diagnose|status|restart|repair-perms|apply-config|apply-net-opt|version|--version|-v|help|--help|-h)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+bootstrap_local_usage() {
+  local command_name="${XTUN_COMMAND_NAME:-$(basename "${0}")}"
+
+  printf 'xtun.sh v%s\n\n' "${SCRIPT_VERSION}"
+  printf '用法:\n'
+  printf '  %s [command]\n\n' "${command_name}"
+  printf '常用命令:\n'
+  printf '  install             安装或重装\n'
+  printf '  status              查看状态\n'
+  printf '  diagnose            运行诊断\n'
+  printf '  show-links          查看节点链接\n'
+  printf '  check-sni           检查 SNI 目标\n'
+  printf '  help                显示帮助\n'
+  printf '  version             显示版本\n'
+}
+
+bootstrap_dispatch_local_entry() {
+  local command="${1:-menu}"
+
+  case "${command}" in
+    help|--help|-h)
+      bootstrap_local_usage
+      exit 0
+      ;;
+    version|--version|-v)
+      printf 'xtun.sh v%s\n' "${SCRIPT_VERSION}"
+      exit 0
+      ;;
+    *)
+      if ! bootstrap_known_command "${command}"; then
+        printf '[错误] 未知命令：%s\n' "${command}" >&2
+        exit 1
+      fi
+      ;;
+  esac
+}
+
+bootstrap_run_temp_bundle() {
   local bundle_root="${1}"
-  local target_entry="${BOOTSTRAP_SELF_INSTALL_DIR}/xtun.sh"
-  local wrapper_path="${BOOTSTRAP_SELF_COMMAND_PATH}"
-  local staging_dir=""
-  local wrapper_tmp=""
+  local tmp_dir="${2}"
+  local status=0
 
-  [[ "${EUID}" -eq 0 ]] || return 0
-  bundle_root_ready "${bundle_root}" || return 0
-
-  staging_dir="$(mktemp -d "$(dirname "${BOOTSTRAP_SELF_INSTALL_DIR}")/.xtun.bootstrap.XXXXXX")"
-  install -m 0755 "${bundle_root}/xtun.sh" "${staging_dir}/xtun.sh"
-  cp -a "${bundle_root}/lib" "${staging_dir}/lib"
-  if [[ -d "${bundle_root}/static" ]]; then
-    cp -a "${bundle_root}/static" "${staging_dir}/static"
+  shift 2
+  env \
+    ROOT_DIR="${bundle_root}" \
+    XTUN_COMMAND_NAME="${XTUN_COMMAND_NAME:-$(basename "${0}")}" \
+    bash "${bundle_root}/xtun.sh" "$@" || status=$?
+  if ! rm -rf "${tmp_dir}" 2>/dev/null; then
+    printf '[错误] 清理临时目录失败：%s\n' "${tmp_dir}" >&2
+    [[ "${status}" -ne 0 ]] || status=1
   fi
-
-  install -d -m 0755 "$(dirname "${wrapper_path}")"
-  wrapper_tmp="$(mktemp)"
-  cat > "${wrapper_tmp}" <<EOF
-#!/usr/bin/env bash
-export XTUN_COMMAND_NAME="\$(basename "\$0")"
-exec "${target_entry}" "\$@"
-EOF
-
-  rm -rf "${BOOTSTRAP_SELF_INSTALL_DIR}"
-  mv "${staging_dir}" "${BOOTSTRAP_SELF_INSTALL_DIR}"
-  install -m 0755 "${wrapper_tmp}" "${wrapper_path}"
-  rm -f "${wrapper_tmp}"
+  exit "${status}"
 }
 
 bootstrap_script_root_if_needed() {
@@ -133,9 +166,10 @@ bootstrap_script_root_if_needed() {
   bundle_root_ready "${SCRIPT_ROOT}" && return 0
 
   if bundle_root_ready "${XTUN_BOOTSTRAP_ROOT:-}"; then
-    bootstrap_install_bundle_to_self "${XTUN_BOOTSTRAP_ROOT}"
     exec_bundle_root "${XTUN_BOOTSTRAP_ROOT}" "$@"
   fi
+
+  bootstrap_dispatch_local_entry "$@"
 
   command -v curl >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 curl，无法自动拉取脚本 bundle。"
   command -v tar >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 tar，无法自动拉取脚本 bundle。"
@@ -146,10 +180,11 @@ bootstrap_script_root_if_needed() {
   if curl -fsSL "${archive_url}" -o "${archive_path}" && tar -xzf "${archive_path}" -C "${tmp_dir}"; then
     bundle_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
     if bundle_root_ready "${bundle_root}"; then
-      bootstrap_install_bundle_to_self "${bundle_root}"
-      exec_bundle_root "${bundle_root}" "$@"
+      bootstrap_run_temp_bundle "${bundle_root}" "${tmp_dir}" "$@"
     fi
   fi
+
+  rm -rf "${tmp_dir}"
 
   if bundle_root_ready "${BOOTSTRAP_SELF_INSTALL_DIR}"; then
     exec_bundle_root "${BOOTSTRAP_SELF_INSTALL_DIR}" "$@"
@@ -159,6 +194,8 @@ bootstrap_script_root_if_needed() {
 }
 
 bootstrap_script_root_if_needed "$@"
+# 操作日志默认关闭：只有 begin_mutation 之后的写操作才允许追加记录。
+OPERATION_LOG_ENABLED=0
 STATE_VERSION_CURRENT="2"
 DEFAULT_WARP_PEER_PUBLIC_KEY="bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 DEFAULT_WARP_ENDPOINT="engage.cloudflareclient.com:2408"
@@ -192,12 +229,14 @@ XRAY_SELECTED_ARCHIVE_URL=""
 XRAY_SELECTED_DGST_URL=""
 XRAY_SELECTED_EXPECTED_SHA256=""
 XRAY_SELECTED_CHECKSUM_SOURCE=""
+XRAY_CONTEXT_REQUEST=""
+XRAY_CONTEXT_ARCH=""
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_ASSET_DIR="/usr/local/share/xray"
 XRAY_SERVICE_FILE="/etc/systemd/system/xray.service"
-SELF_COMMAND_PATH="/usr/local/sbin/xtun"
+SELF_COMMAND_PATH="${XTUN_SELF_COMMAND_PATH:-${SELF_COMMAND_PATH_DEFAULT}}"
 SELF_INSTALL_DIR="${BOOTSTRAP_SELF_INSTALL_DIR}"
 HAPROXY_CONFIG="/etc/haproxy/haproxy.cfg"
 NGINX_MAIN_CONFIG="/etc/nginx/nginx.conf"
@@ -212,6 +251,11 @@ NGINX_MAIN_MANAGED=""
 NET_BBR_KERNEL=""
 FALLBACK_SITE_DIR="/var/www/xtun-fallback"
 FALLBACK_SITE_SOURCE_DIR="${SCRIPT_ROOT}/static/fallback"
+XRAY_LOG_DIR="${XTUN_XRAY_LOG_DIR:-/var/log/xray}"
+XRAY_STATE_DIR="${XTUN_XRAY_STATE_DIR:-/var/lib/xray}"
+# service_exists 只看这几个目录。做成变量，测试才能把「服务是否存在」
+# 沙箱化——在生产机上跑用例时，真实单元文件一直存在，用例会把宿主机当沙箱用。
+SYSTEMD_UNIT_DIRS=("/etc/systemd/system" "/lib/systemd/system" "/usr/lib/systemd/system")
 STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
 OUTPUT_FILE="/root/xtun-output.md"
 QR_OUTPUT_DIR="/root/xtun-qr"
@@ -220,6 +264,12 @@ TLS_CERT_FILE="${SSL_DIR}/cert.pem"
 TLS_KEY_FILE="${SSL_DIR}/key.pem"
 WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
 BACKUP_ROOT="/root/xtun-backups"
+# 首次接管原件（例如别人的 nginx 主配置）和可轮转的事务备份分开放，
+# 保留规则永远不许动这里。
+XTUN_VAR_DIR="${XTUN_VAR_DIR:-/var/lib/xtun}"
+ORIGINALS_ROOT="${XTUN_ORIGINALS_ROOT:-${XTUN_VAR_DIR}/originals}"
+# 变更中途掉电/被杀留下的未完成操作清单。查看入口只报告它，不自行恢复。
+PENDING_OP_FILE="${XTUN_PENDING_OP_FILE:-${XTUN_VAR_DIR}/pending-op.tsv}"
 BACKUP_KEEP_COUNT="${XTUN_BACKUP_KEEP_COUNT:-5}"
 OP_LOG_DIR="/var/log/xtun"
 OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
@@ -241,10 +291,28 @@ NON_INTERACTIVE=0
 NGINX_RESTART_REQUIRED="no"
 ENABLE_WARP=""
 ENABLE_NET_OPT=""
+H3_INTENT=""
+H3_DECISION="off"
 NET_BBRV3_REBOOT_REQUIRED="no"
 CERT_MODE=""
 SERVER_IP=""
 SERVER_IP6=""
+# 存在性：absent / provided / disabled。空字符串不再兼任「没给」和「明确禁用」。
+SERVER_IP_PRESENCE="absent"
+SERVER_IP6_PRESENCE="absent"
+# 安装任务与本次动作的显式输入登记（D06）。菜单和 CLI 都只往这里填值。
+INSTALL_TASK_REQUEST=""
+INSTALL_TASK=""
+INSTALL_TASK_SOURCE=""
+INSTALL_PROVIDED_VARS=" "
+INSTALL_CONFIRMED=0
+INSTALL_DRAFT_SAVED=0
+INSTALL_IDENTITY_ROTATED=0
+INSTALL_ROTATE_PREVIOUS_PATH=""
+# SNI 预检的「本次动作」事实（D09）：跳过/忽略只对这一次安装有效，
+# 既不写 state，也不把失败改写成通过；装完还要再报一次。
+SNI_PREFLIGHT_SKIPPED=0
+SNI_PREFLIGHT_IGNORED=0
 NODE_LABEL_PREFIX=""
 REALITY_UUID=""
 REALITY_SNI=""
@@ -312,6 +380,7 @@ fi
 . "${SCRIPT_ROOT}/lib/generators.sh"
 . "${SCRIPT_ROOT}/lib/state.sh"
 . "${SCRIPT_ROOT}/lib/base/runtime.sh"
+. "${SCRIPT_ROOT}/lib/base/generation.sh"
 
 . "${SCRIPT_ROOT}/lib/ui.sh"
 . "${SCRIPT_ROOT}/lib/commands.sh"

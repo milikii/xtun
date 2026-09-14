@@ -1,14 +1,15 @@
 # v26.9.9 参数契约：REALITY、XHTTP、Cloudflare 与 ECH
 
-> 核对日期：2026-09-12。Xray 基线：`v26.9.9`，提交 `52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`。
-> 状态：官方字段、固定版本源码与相关社区讨论已核对；下述生成器调整、客户端导入和真实网络验收尚未实施。
-> 本文约束 [生产就绪计划](PLAN-PRODUCTION-READINESS.md) 的 T04/T07/T10/T11；现场操作见 [测试 VPS 验收手册](TEST-VPS-RUNBOOK.md)。后续最新版仍包含预发布，按主计划推进版本及参数修订。
+> 原参数核对日期：2026-09-12；现状与工单映射更新：2026-09-14。Xray 可复现基线仍为 `v26.9.9 / 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`，不把本机 `26.3.27` 当成同一核心。
+> 状态：批次 B 已实现 H3 意图/本地能力检查并修复节点 9 ALPN；节点 7、users/xmux/ECH 迁移、独立导出和三端仍未完整交付，见[批次 B 报告](REPORT-2026-09-14-BATCH-B.md)。
+> 当前依赖：[推进计划](PLAN-UX-RELIABILITY.md) 的 W09/W10/W11/W12/W13/W15，以及[决策 D01–D30](DECISIONS-UX-RELIABILITY.md)；现场步骤见[验收手册](TEST-VPS-RUNBOOK.md)。旧 T 编号仅作追溯。
+> 后续默认最新版仍包含预发布，一次候选锁定准确核心。真人/设备后排，独立参数工作可继续；源码支持不等于用户设备、域名和网络已经验证。
 
 ## 1. 当前结论与已作出的决定
 
-**参数规划已细化，但当前项目还没有达到“所有参数均已实现并验证可用”的状态。** 当前代码仍有 H3 ALPN 层级、IPv6 split 地址、旧 `xmux` 输出和无效 ECH 开关等问题。`v26.9.9` 的原生核心、v2rayNG/v2rayN 的 URI 导入源码提供了实现 ECH 的基础；用户实际安装版本、Cloudflare zone 和大陆接入网络尚未验证。
+**参数规划已细化，但当前项目还没有达到“所有参数均已实现并验证可用”的状态。** 批次 B 修复了节点 9 的 H3 ALPN 层级；当前仍有节点 7 IPv6 split 地址、旧 `xmux` 输出和无效 ECH 开关等工作。`v26.9.9` 的原生核心、v2rayNG/v2rayN 的 URI 导入源码提供了实现 ECH 的基础；用户实际安装版本、Cloudflare zone 和大陆接入网络尚未验证。
 
-本轮补充查阅了 Xray 仓库的 XHTTP 主讨论、分享规范、ECH PR 和故障讨论。社区案例用来设计测试，字段含义及默认值回到官方 `docs/stable/config/`、`source/` 和固定提交核对。不能把旧评论中的参数原样写回新模板。
+2026-09-12 参数审查查阅了 Xray 仓库的 XHTTP 主讨论、分享规范、ECH PR 和故障讨论；此次更新保留这些证据与日期，没有新增真实网络通过结论。社区案例用来设计测试，字段含义及默认值回到官方 `docs/stable/config/`、`source/` 和固定提交核对。`docs/stable/` 是滚动官方文档目录名，不保证与某个 stable release 配套；版本行为以对应固定源码为准，不能把旧评论原样写回新模板。
 
 | 问题 | 决定与边界 |
 | --- | --- |
@@ -17,6 +18,7 @@
 | 用哪个 DoH | `https://dns.alidns.com/dns-query` 作为首轮候选，允许显式替换；不承诺所有大陆网络可达 |
 | 查询哪个名字 | 优先查询真实 CDN 域名的 HTTPS/ECH 记录；该记录不可用时，提供显式的 Cloudflare 共享名方案，仍须验证边缘接受 |
 | 新装默认 | 五类主节点保持基础配置；ECH 默认关闭。提供普通 CDN 与可选 ECH 变体，用户可以分别导入 |
+| H3 默认与信任 | W09.1 已实现显式选择、新装默认关闭、证书/UDP 归属检查；公共信任链的本地检查不代替客户端及公网验证 |
 | 已配置 ECH 但连接失败 | 该 ECH 连接失败并说明原因；用户可以手动选择普通 CDN/REALITY。不得静默删掉 ECH 或改用普通 TLS |
 | 首批客户端 | Android v2rayNG、Windows v2rayN、Debian NAS 的 Xray-core Docker；准确应用版本、核心版本和镜像摘要在实施时记录 |
 | 首批 ECH 认证范围 | 先完成节点 3 的 CDN+ECH；节点 4/5/7/9 的 ECH 分层组合逐个追加，不能继承节点 3 的通过结论 |
@@ -41,6 +43,20 @@
 
 节点 4/5 的 `downloadSettings` 只有传输设置，不另造一套 VLESS 用户。节点 2/4/5/7 的 REALITY 外层密钥仍与服务端 REALITY 相匹配，里面承载的 XHTTP 流量使用 `XHTTP_UUID`。不要把两个 UUID 合并，也不要给 XHTTP 用户复制 Vision flow。
 
+### 2.1 已实现的 H3 意图与判定边界
+
+| 对象 | 当前实现 | 边界 |
+| --- | --- | --- |
+| `H3_INTENT` | state/draft 保存 `off / on / legacy-on / unknown`；新装 off | 旧 state 缺字段时按完整托管 nginx server 识别，查看不落盘；不明意图需显式选择 |
+| 安装/维护入口 | 安装 `--enable-h3` / `--disable-h3`；`change-h3` 同名开关 | 互斥；启用条件不足返回非零，不能静默关掉旧 H3 |
+| 组件 | 检查实际 nginx 可执行文件的 http_v3 模块 | 包版本字符串不代表实际二进制能力 |
+| 证书 | 密钥匹配、DNS SAN、有效期、服务器用途、完整链到发行版 Mozilla 公共根 | 排除管理员导入的私有 CA；Origin CA、自签、缺链和未知工具/信任不能放行 |
+| UDP 443 | 空闲，或全部监听进程属于已有托管 H3 与 nginx.service cgroup | 进程名相同仍不足以证明归属；外来或未知监听阻断，不停止外来服务 |
+| `H3_DECISION` | 每次应用前重算；nginx、Alt-Svc、节点 8/9 和说明共用 | transient；不能当作持久的公网能力证明 |
+| 节点 9 下行 | `D.tlsSettings.alpn=["h3"]`；D 根部不写 alpn | 外层 CDN 仍为 H2。字段依据 TLSConfig 和 XHTTP `decideHTTPVersion`，真实 UDP 路径待 W15.4 [P2]、[P4]、[P6] |
+
+W09.1 的共享证书检查供 W12 后续复用；人工/自动续期共锁、成对提升和实际供证核验尚未因此完成。自动用例中的自建测试根仅验证逻辑，不作为公网证书实证。
+
 ## 3. REALITY 的确定参数与新版本兼容门槛
 
 ### 3.1 服务端、客户端及目标
@@ -64,15 +80,17 @@
 | `C.realitySettings.spiderX` | default-kept / 客户端 | 基础模板省略；按需定制时验证导入，不用它修复密钥或版本不兼容 | [P3] |
 | `S.realitySettings.minClientVer/maxClientVer/maxTimeDiff` | default-kept / 服务端 | 不添加未经验证的版本或时差阈值；系统时间同步纳入安装检查 | [P3] |
 | `S.realitySettings.limitFallbackUpload/limitFallbackDownload` | default-kept / 服务端 | 保留现有 SNI 过滤，不另加固定回落限速模板 | [P3] |
-| `S.realitySettings.mldsa65Seed`、`C.realitySettings.mldsa65Verify` | optional / 双方 | 留待 T12；不能为了“最新版”默认开启签名 | [P3]、[P4] |
+| `S.realitySettings.mldsa65Seed`、`C.realitySettings.mldsa65Verify` | optional / 双方 | 留待 W17（旧 T12）；不能为了“最新版”默认开启签名 | [P3]、[P4] |
 
 这里存在两条不同的回落：`realitySettings.target → 2444 → 远端 target` 处理 REALITY 鉴权失败流量；VLESS `fallbacks.dest → XHTTP 本地入站` 处理合法外层中的相应数据。保持前者的 SNI sniffing、routeOnly 与限制路由，不能在参数升级时顺手合并两条路径。
+
+users/clients 迁移不能只按“新字段优先”处理。目标版本 [VLESS 构建源码](../.claude/skills/xray-core-official-knowledge/source/config/vless.go) 在 `Clients != nil` 时用 clients 覆盖 users，因此显式空数组 `clients: []` 也覆盖非空 users。W10 需以实际生效身份为依据读取和迁移，分别覆盖缺字段、null、空数组和冲突内容，规范写出一种结构；不能从无效的另一数组猜测并恢复用户身份。[P1]
 
 ### 3.2 v26.9.9 新增的实际兼容检查
 
 固定 tag 的 `go.mod` 锁定 REALITY 依赖 `8cdf7bf9c7f09cb9814bf08c3eb877f68b85fba8`。其服务端源码要求客户端**初始 ClientHello 的 key_share 包含合法的 X25519MLKEM768，并位于可选的 X25519 之前**；缺失或次序不符合要求时退出 REALITY 鉴权路径。[P5]、[P5R]
 
-因此，“客户端能填写 REALITY”“fingerprint 下拉框有 chrome”均不足以认定可连接此服务端。T07/T10/T11 必须检查实际客户端核心和握手；覆盖节点 1/2/4/5/6/7，不能只验证 Vision 直连。参照客户端首先使用同一 v26.9.9 核心，GUI 再验证实际内核。
+因此，“客户端能填写 REALITY”“fingerprint 下拉框有 chrome”均不足以认定可连接此服务端。W10/W13/W15 必须检查实际客户端核心和握手；覆盖节点 1/2/4/5/6/7，不能只验证 Vision 直连。参照客户端首先使用同一 v26.9.9 核心，GUI 再验证实际内核。
 
 这与目标网站的 PQ 能力、可选 ML-DSA 签名是三项不同检查。同一依赖源码仍接受目标 ServerHello 使用 X25519 或 X25519MLKEM768，所以不能把“目标必须协商 PQ”升级为所有普通 REALITY 节点的硬性门槛。目标证书链长度大于 3500 字节也仍属于额外签名准备条件。[P3]、[P5R]
 
@@ -233,21 +251,23 @@ URI → 客户端字段 → 运行 JSON 应恰好还原一层编码。测试 `+`
 
 这是所核对提交的源码能力，**不是用户已经安装了这些提交或对应版本的证明**。不能以应用最新版、Docker `:latest` 标签或一个 ECH 输入框代替实际核心版本和握手记录。[P13]、[P14]
 
-建议交接顺序为：T01 接入 v26.9.9 → T02/T03 默认安装修复 → T04/T05 导出与证书 → T06/T07 参数迁移与客户端导出 → T08/T09 恢复/续证 → T10 原生参照 → T11 测试 VPS 与三端交互。依赖允许的工作按主计划推进，T07 内再按以下小步验收：
+前序恢复见[接手报告](REPORT-2026-09-14-W04R-W05R.md)，W07/W11.1/W09.1 见[批次 B 报告](REPORT-2026-09-14-BATCH-B.md)；G1 强制断电仍待验证。下一独立批次 C 为 W08.2/8.3 安装身份，随后按主计划推进 W09 余项、W10 参数迁移及 W11 导出；W12 完成证书生命周期，W13 全程提供回归。设备到位后补 W14/W15，两轮真人和真实三端仍是统一完整发布的必要证据。参数工作分项及旧编号映射如下：
 
-| 子项 | 交付 | 通过条件 |
+| 当前工单（旧子项） | 交付 | 通过条件 |
 | --- | --- | --- |
-| T07-A | §2–4 节点/参数预期与 users/xmux 迁移 | 与固定源码一致，旧凭据保留，新增 REALITY 客户端约束有测试 |
-| T07-B | ECH 字段校验、旧 force 入口停用、来源选择 | 正确 TLS 层、编码完整、旧 state 兼容；拒绝格式错误不产生“已启用”假成功 |
-| T07-C | 可选变体、原生 JSON 与输出状态 | 基础五节点编号/数量不变，按需导出无服务变更，产物同源且字段完整 |
-| T10-ECH | 原生强制 ECH 的正向/负向验证工具与报告格式 | 有运行配置证据，失败不降级；测试夹具不依赖生产域名 |
-| T11-ECH | 真实 CF 域名 + AliDNS 候选 + 三端/实际网络 | 按验收手册完成冷启动、故障、轮换、休眠与人工操作；未通过组合准确列为待支持 |
+| W09/W10（T07-A） | §2–4 节点/参数预期与 users/xmux 迁移 | 与固定源码一致，旧凭据保留，新增 REALITY 客户端约束有测试 |
+| W10（T07-B） | ECH 字段校验、旧 force 入口停用、来源选择 | 正确 TLS 层、编码完整、旧 state 兼容；拒绝格式错误不产生“已启用”假成功 |
+| W10/W11（T07-C） | 可选变体、原生 JSON 与输出状态 | 基础五节点编号/数量不变，按需导出无服务变更，产物同源且字段完整 |
+| W13（T10-ECH） | 原生强制 ECH 正向/负向验证工具与报告格式 | 有运行配置证据，失败不降级；测试夹具不依赖生产域名 |
+| W14/W15（T11-ECH） | 真实 CF 域名 + AliDNS 候选 + 三端/实际网络 | 按验收手册完成冷启动、故障、轮换、休眠与人工操作；未通过组合准确列为待支持 |
 
-如只完成了 T07，交付状态只能写“生成/迁移已完成”，不能写“大陆 ECH 已稳定可用”。
+只完成 W10/W11 的生成和迁移时，如实记录代码及自动验证状态，不能写“大陆 ECH 已稳定可用”。迁移基线还需覆盖实际生产 `0.11.14 bundle / state v2 / core 26.3.27` 与历史 state v1；本轮不修改生产 state。
 
 ## 9. 可追溯来源
 
-本地官方知识库的 [sources.yaml](../.claude/skills/xray-core-official-knowledge/sources.yaml) 标记同步日为 2026-09-09，源码提交与目标 tag 相同。本轮核对的配置/传输文件及 TLS/REALITY 主文件与固定 tag 一致；REALITY 底层握手规则额外追踪到 go.mod 锁定的依赖。`changelog/`、`extracted/` 不作为字段结论的替代证据。
+本地官方知识库的 [sources.yaml](../.claude/skills/xray-core-official-knowledge/sources.yaml) 当前为 revision `2026-09-14.1`，同步日 2026-09-14。`source/config/`、`source/transport/`、`source/runtime/` 的相应文件固定于 `v26.9.9 / 52a412d9…`；`source/stable/v26.3.27/` 是另一版本，不能混用。REALITY 底层握手规则还要追踪 go.mod 锁定依赖。
+
+`docs/stable/` 对应滚动官方文档提交 `46c680b71b18b48b9cc6e55e596405bd0442ab8a`，目录名不代表与 stable 发布逐项匹配。本文原 2026-09-12 的固定版本与社区查询证据保留；新增字段结论须回查对应 docs/source。`changelog/`、`extracted/` 和社区评论不作为字段结论的替代证据。
 
 - [P1] [VLESS 配置解析（固定提交）][P1]：入站 users/clients、出站用户与 Encryption。
 - [P2] [StreamConfig（固定提交）][P2]：下载流的独立设置与 TLS 层级。

@@ -1,5 +1,7 @@
 # shellcheck shell=bash
 
+declare -A GENERATION_TEST_INSTALLED GENERATION_TEST_ACTIVE GENERATION_TEST_ENABLED
+
 run_state_context_case() {
   local workdir=""
 
@@ -251,7 +253,7 @@ EOF
   [[ "${output}" == "old" ]]
 }
 
-run_begin_managed_change_resolves_xray_user_case() {
+run_begin_managed_change_defers_user_mutation_case() {
   local ensure_calls=0
 
   need_root() { :; }
@@ -268,9 +270,9 @@ run_begin_managed_change_resolves_xray_user_case() {
   XRAY_GID=""
   begin_managed_change
 
-  [[ "${ensure_calls}" -eq 1 ]]
-  [[ "${XRAY_UID}" == "123" ]]
-  [[ "${XRAY_GID}" == "456" ]]
+  [[ "${ensure_calls}" -eq 0 ]]
+  [[ -z "${XRAY_UID}" ]]
+  [[ -z "${XRAY_GID}" ]]
 }
 
 # 这几个函数都在 `if ! xxx; then 回滚; fi` 里被调用，而 `if !` 会关掉整条调用链上的
@@ -390,19 +392,24 @@ run_install_step_failure_propagation_case() {
   install_optional_components || status=$?
   [[ "${status}" -ne 0 ]]
 
-  # 托管文件是分别落盘的，写到一半失败要回滚，不能留半新半旧。
-  local rollback_calls=0
+  # 托管文件是分别落盘的，写到一半失败要整代回退，不能留半新半旧。
+  local recovery_calls=0
+  begin_generation() { GENERATION_ACTIVE="yes"; }
   write_tls_assets() { :; }
   write_xray_config() { return 1; }
   validate_configs() { :; }
   restart_core_services() { :; }
   write_state_file() { :; }
   write_output_file() { :; }
-  rollback_managed_runtime_state() { rollback_calls=$((rollback_calls + 1)); }
+  recover_generation() {
+    recovery_calls=$((recovery_calls + 1))
+    GENERATION_ACTIVE="no"
+    GENERATION_RECOVERY_RESULT="restored-verified"
+  }
   status=0
   apply_managed_files "no" || status=$?
   [[ "${status}" -ne 0 ]]
-  [[ "${rollback_calls}" -eq 1 ]]
+  [[ "${recovery_calls}" -eq 1 ]]
 
   load_functions
 }
@@ -491,7 +498,9 @@ errexit_unguarded_call_sites() {
         return text
       }
       function propagates(text) {
-        return (text == "}" || text == ";;" || text == "return" || text == "return $?")
+        # `return 1` 这种带字面退出码的收尾同样把失败原样传出去：
+        # 调用点后面紧跟一条无条件的 return，非零状态不会被吞掉。
+        return (text == "}" || text == ";;" || text == "return" || text == "return $?" || text ~ /^return [0-9]+$/)
       }
       function resolve(text,   shown) {
         if (pending == "") {
@@ -1188,8 +1197,9 @@ run_errexit_guard_lint_case() {
 
   # 自动那半边一旦被改坏（awk 认不出函数定义了），名单会悄悄退化成只剩显式清单，
   # lint 看着还是绿的。这里钉两个一定在里面的名字，让它坏得出声。
-  errexit_returning_step_names | grep -qx 'write_xray_config'
-  errexit_returning_step_names | grep -qx 'install_cmd'
+  # grep -q 提前关管道会让源码扫描器撞 SIGPIPE；要读完输出再给断言结果。
+  errexit_returning_step_names | grep -x 'write_xray_config' >/dev/null
+  errexit_returning_step_names | grep -x 'install_cmd' >/dev/null
 
   while IFS= read -r hit; do
     [[ -n "${hit}" ]] || continue
@@ -1240,8 +1250,8 @@ run_dead_global_lint_case() {
   # 扫描器一旦被改坏（awk 认不出顶层赋值了），名单会悄悄变空，lint 看着还是绿的。
   # 钉一个数量下限和两个一定在里面的名字，让它坏得出声。
   [[ "$(xtun_toplevel_global_names | grep -c .)" -ge 100 ]]
-  xtun_toplevel_global_names | grep -qx 'XHTTP_PATH'
-  xtun_toplevel_global_names | grep -qx 'STATE_FILE'
+  xtun_toplevel_global_names | grep -x 'XHTTP_PATH' >/dev/null
+  xtun_toplevel_global_names | grep -x 'STATE_FILE' >/dev/null
 
   while IFS= read -r name; do
     [[ -n "${name}" ]] || continue
@@ -1260,6 +1270,8 @@ run_service_reload_preference_case() {
   log_success() { :; }
   ensure_xray_user() { :; }
   ensure_managed_permissions() { :; }
+  # 重启结果现在要真的核对（H11）：服务的「存在/active」在沙箱里需要显式给出来。
+  sandbox_stub_services_active
   systemctl() {
     calls="${calls}${*}\n"
     case "${1:-}" in
@@ -1321,6 +1333,12 @@ run_managed_apply_case() {
   local xray_write_calls=0
   local xray_validate_calls=0
   local xray_restart_calls=0
+  local workdir=""
+
+  load_functions
+  workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
+  ensure_xray_user() { :; }
 
   write_tls_assets() {
     tls_calls=$((tls_calls + 1))
@@ -1350,6 +1368,7 @@ run_managed_apply_case() {
     xray_restart_calls=$((xray_restart_calls + 1))
   }
 
+  start_backup_session
   apply_managed_runtime_update
   [[ "${tls_calls}" -eq 0 ]]
   [[ "${runtime_calls}" -eq 1 ]]
@@ -1358,6 +1377,7 @@ run_managed_apply_case() {
   [[ "${state_calls}" -eq 1 ]]
   [[ "${output_calls}" -eq 1 ]]
 
+  start_backup_session
   apply_managed_update
   [[ "${tls_calls}" -eq 1 ]]
   [[ "${runtime_calls}" -eq 2 ]]
@@ -1366,6 +1386,7 @@ run_managed_apply_case() {
   [[ "${state_calls}" -eq 2 ]]
   [[ "${output_calls}" -eq 2 ]]
 
+  start_backup_session
   apply_xray_only_managed_update
   [[ "${xray_write_calls}" -eq 1 ]]
   [[ "${xray_validate_calls}" -eq 1 ]]
@@ -1500,12 +1521,18 @@ run_xray_only_update_write_failure_case() {
   log() { :; }
   log_step() { :; }
   log_success() { :; }
+  begin_generation_xray_only() { GENERATION_ACTIVE="yes"; }
+  ensure_xray_user() { :; }
   write_xray_config() { return 1; }
   validate_xray_config() { validated=$((validated + 1)); }
   write_state_file() { :; }
   write_output_file() { :; }
   restart_xray_service() { :; }
-  rollback_xray_config_state() { rollback_calls=$((rollback_calls + 1)); }
+  recover_generation() {
+    rollback_calls=$((rollback_calls + 1))
+    GENERATION_ACTIVE="no"
+    GENERATION_RECOVERY_RESULT="restored-verified"
+  }
 
   status=0
   apply_xray_only_managed_update || status=$?
@@ -1521,9 +1548,10 @@ run_xray_only_update_write_failure_case() {
 run_managed_rollback_case() {
   local workdir=""
   local status=0
-  local recovery_calls=0
 
+  load_functions
   workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
   XRAY_CONFIG_DIR="${workdir}/xray"
   XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
   HAPROXY_CONFIG="${workdir}/haproxy.cfg"
@@ -1535,18 +1563,6 @@ run_managed_rollback_case() {
   printf 'old-haproxy\n' > "${HAPROXY_CONFIG}"
   printf 'old-nginx\n' > "${NGINX_CONFIG_FILE}"
 
-  backup_path() {
-    local path="${1}"
-    local target=""
-
-    if [[ ! -e "${path}" ]]; then
-      return
-    fi
-
-    target="${BACKUP_DIR}${path}"
-    mkdir -p "$(dirname "${target}")"
-    cp -a "${path}" "${target}"
-  }
   write_runtime_managed_files() {
     backup_path "${XRAY_CONFIG_FILE}"
     backup_path "${HAPROXY_CONFIG}"
@@ -1558,21 +1574,28 @@ run_managed_rollback_case() {
   validate_configs() {
     return 1
   }
-  ensure_xray_user() {
-    recovery_calls=$((recovery_calls + 1))
-  }
+  ensure_xray_user() { :; }
+  # 回退之后要重新检查服务（H11）：沙箱里显式声明服务是 active 的。
+  GENERATION_TEST_INSTALLED[xray.service]=yes
+  GENERATION_TEST_ACTIVE[xray.service]=active
+  GENERATION_TEST_INSTALLED[haproxy.service]=yes
+  GENERATION_TEST_ACTIVE[haproxy.service]=active
+  GENERATION_TEST_INSTALLED[nginx.service]=yes
+  GENERATION_TEST_ACTIVE[nginx.service]=active
   ensure_managed_permissions() { :; }
-  systemctl() { :; }
   log() { :; }
   warn() { :; }
 
+  start_backup_session
   set +e
   apply_managed_runtime_update >/dev/null 2>&1
   status=$?
   set -e
 
   [[ "${status}" -ne 0 ]]
-  [[ "${recovery_calls}" -eq 1 ]]
+  # 结果要能区分「已回退且验证通过」和「回退失败」：这条路径必须是前者。
+  [[ "${GENERATION_RECOVERY_RESULT}" == "restored-verified" ]]
+  [[ "${#GENERATION_UNRESTORED[@]}" -eq 0 ]]
   [[ "$(cat "${XRAY_CONFIG_FILE}")" == "old-xray" ]]
   [[ "$(cat "${HAPROXY_CONFIG}")" == "old-haproxy" ]]
   [[ "$(cat "${NGINX_CONFIG_FILE}")" == "old-nginx" ]]
@@ -1622,72 +1645,56 @@ run_optional_component_rollback_case() {
   load_functions
 }
 
+# 同代回退（D11/D12/H13）：有快照的路径还原、本次创建的文件删除、本次没碰过的
+# 路径既不算失败也不算未恢复，最后必须确认服务回到 active 才算「已回退且验证通过」。
 run_install_rollback_helper_case() {
   local workdir=""
+  local never_touched=""
+
+  # 这条用例要跑真实的备份实现（smoke 的 stub_side_effects 把 backup_path 换成了空操作），
+  # 先把真实实现装回来，需要桩的部分下面单独覆盖。
+  load_functions
 
   workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
   BACKUP_DIR="${workdir}/backup"
   XRAY_CONFIG_DIR="${workdir}/xray"
   XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
   HAPROXY_CONFIG="${workdir}/haproxy.cfg"
   NGINX_CONFIG_FILE="${workdir}/nginx.conf"
-  XRAY_SERVICE_FILE="${workdir}/xray.service"
-  SSL_DIR="${workdir}/ssl"
-  TLS_CERT_FILE="${SSL_DIR}/cert.pem"
-  TLS_KEY_FILE="${SSL_DIR}/key.pem"
-  ACME_RELOAD_HELPER="${workdir}/cert-reload.sh"
-  mkdir -p "${BACKUP_DIR}" "${XRAY_CONFIG_DIR}" "${SSL_DIR}"
+  STATE_FILE="${workdir}/state.env"
+  OUTPUT_FILE="${workdir}/output.md"
+  QR_OUTPUT_DIR="${workdir}/qr"
+  never_touched="${workdir}/never-touched.conf"
+  mkdir -p "${BACKUP_DIR}" "${XRAY_CONFIG_DIR}"
 
   printf 'old-xray\n' > "${XRAY_CONFIG_FILE}"
   printf 'old-haproxy\n' > "${HAPROXY_CONFIG}"
   printf 'old-nginx\n' > "${NGINX_CONFIG_FILE}"
-  printf 'old-service\n' > "${XRAY_SERVICE_FILE}"
-  printf 'old-cert\n' > "${TLS_CERT_FILE}"
-  printf 'old-key\n' > "${TLS_KEY_FILE}"
-  printf 'old-helper\n' > "${ACME_RELOAD_HELPER}"
 
-  backup_path() {
-    local path="${1}"
-    local target=""
-
-    if [[ ! -e "${path}" ]]; then
-      return
-    fi
-
-    target="${BACKUP_DIR}${path}"
-    mkdir -p "$(dirname "${target}")"
-    cp -a "${path}" "${target}"
-  }
-  backup_path "${XRAY_CONFIG_FILE}"
-  backup_path "${HAPROXY_CONFIG}"
-  backup_path "${NGINX_CONFIG_FILE}"
-  backup_path "${XRAY_SERVICE_FILE}"
-  backup_path "${TLS_CERT_FILE}"
-  backup_path "${TLS_KEY_FILE}"
-  backup_path "${ACME_RELOAD_HELPER}"
+  GENERATION_TEST_INSTALLED[xray.service]=yes
+  GENERATION_TEST_ACTIVE[xray.service]=active
+  printf 'bystander\n' > "${never_touched}"
+  start_backup_session
+  begin_generation_paths rollback-helper xray.service -- "${XRAY_CONFIG_FILE}" "${HAPROXY_CONFIG}" "${NGINX_CONFIG_FILE}" "${QR_OUTPUT_DIR}"
 
   printf 'new-xray\n' > "${XRAY_CONFIG_FILE}"
   printf 'new-haproxy\n' > "${HAPROXY_CONFIG}"
   printf 'new-nginx\n' > "${NGINX_CONFIG_FILE}"
-  printf 'new-service\n' > "${XRAY_SERVICE_FILE}"
-  printf 'new-cert\n' > "${TLS_CERT_FILE}"
-  printf 'new-key\n' > "${TLS_KEY_FILE}"
-  printf 'new-helper\n' > "${ACME_RELOAD_HELPER}"
+  mkdir -p "${QR_OUTPUT_DIR}"
+  printf 'png\n' > "${QR_OUTPUT_DIR}/01-node.png"
 
-  ensure_xray_user() { :; }
-  ensure_managed_permissions() { :; }
-  systemctl() { :; }
-  warn() { :; }
+  recover_generation
 
-  rollback_managed_runtime_state "yes" "yes"
-
+  [[ "${GENERATION_RECOVERY_RESULT}" == "restored-verified" ]]
+  [[ "${#GENERATION_UNRESTORED[@]}" -eq 0 ]]
   [[ "$(cat "${XRAY_CONFIG_FILE}")" == "old-xray" ]]
   [[ "$(cat "${HAPROXY_CONFIG}")" == "old-haproxy" ]]
   [[ "$(cat "${NGINX_CONFIG_FILE}")" == "old-nginx" ]]
-  [[ "$(cat "${XRAY_SERVICE_FILE}")" == "old-service" ]]
-  [[ "$(cat "${TLS_CERT_FILE}")" == "old-cert" ]]
-  [[ "$(cat "${TLS_KEY_FILE}")" == "old-key" ]]
-  [[ "$(cat "${ACME_RELOAD_HELPER}")" == "old-helper" ]]
+  [[ ! -e "${QR_OUTPUT_DIR}" ]]
+  [[ "$(cat "${never_touched}")" == bystander ]]
+
+  load_functions
 }
 
 run_restart_optional_service_case() {
@@ -1702,7 +1709,7 @@ run_restart_optional_service_case() {
   }
   log() { :; }
 
-  restart_cmd
+  restart_cmd --non-interactive
   [[ " ${restarted[*]} " == *" xray.service "* ]]
   [[ " ${restarted[*]} " == *" haproxy.service "* ]]
   [[ " ${restarted[*]} " == *" nginx.service "* ]]
@@ -1716,7 +1723,7 @@ run_restart_optional_service_case() {
     ENABLE_NET_OPT="yes"
   }
 
-  restart_cmd
+  restart_cmd --non-interactive
   [[ " ${restarted[*]} " == *" ${NET_SERVICE_NAME} "* ]]
   [[ " ${restarted[*]} " != *" warp-svc.service "* ]]
   load_functions

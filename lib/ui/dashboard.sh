@@ -7,7 +7,7 @@
 
 # 菜单每转一圈都要重画一次面板，所以这里只保留决策必需的行：
 # 不跑 xray/nginx/haproxy -t、不做本地 TLS 握手、不读证书。
-# 需要完整体检时走 xtun status 或菜单 4。
+# 需要完整体检时走 xtun status 或「查看状态与诊断」。
 show_dashboard_brief() {
   local xray_state=""
   local haproxy_state=""
@@ -23,18 +23,20 @@ show_dashboard_brief() {
   divider
   if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
     panel_row "安装状态" "$(style_text "${C_GREEN}" "已托管")  脚本 v${SCRIPT_VERSION}"
-    panel_row "REALITY" "${SERVER_IP:-未知}:443  sni=${REALITY_SNI:-未知}"
-    panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-未知}:443  path=${XHTTP_PATH:-未知}"
-  panel_row "IPv6 直连" "$(if [[ -n "${SERVER_IP6:-}" ]]; then style_text "${C_GREEN}" "[${SERVER_IP6}]"; else printf '未启用'; fi)"
-  panel_row "XHTTP H3" "$(if h3_enabled; then style_text "${C_GREEN}" "已启用"; else printf '未启用'; fi)"
+    panel_row "REALITY" "$(short_value "${SERVER_IP:-未知}" 24 12):443"
+    panel_row "XHTTP CDN" "$(short_value "${XHTTP_DOMAIN:-未知}" 24 12):443"
+    panel_row "IPv6 直连" "$(if [[ -n "${SERVER_IP6:-}" ]]; then printf '已配置'; else printf '未启用'; fi)"
+    panel_row "XHTTP H3" "$(h3_intent_text)"
   else
     panel_row "安装状态" "$(style_text "${C_YELLOW}" "未安装")  脚本 v${SCRIPT_VERSION}"
   fi
   panel_row "服务" "xray $(service_badge "${xray_state}")   haproxy $(service_badge "${haproxy_state}")   nginx $(service_badge "${nginx_state}")"
-  panel_row "监听 :443" "$(listening_port_text 443)"
+  panel_row "监听 :443 (TCP)" "$(short_value "$(listening_port_text 443)" 20 8)"
   panel_row "WARP 分流" "$(bool_badge "${ENABLE_WARP:-no}")  规则=$(warp_rule_count_text)"
-  panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")  cc=$(net_current_cc)  qdisc=$(net_default_qdisc)"
-  panel_row "完整体检" "菜单 4 / xtun status / xtun diagnose"
+  if pending_operation_present; then
+    panel_row "上次动作" "$(style_text "${C_YELLOW}" "未完成：$(short_value "$(pending_operation_text)" 14 8)")"
+  fi
+  panel_row "完整体检" "查看状态与诊断 / xtun status"
   divider
 }
 
@@ -50,6 +52,7 @@ show_dashboard() {
   local version_line=""
 
   load_dashboard_context
+  h3_refresh_decision
 
   xray_state="$(service_active_state 'xray.service')"
   haproxy_state="$(service_active_state 'haproxy.service')"
@@ -73,8 +76,9 @@ show_dashboard() {
     panel_row "证书模式" "$(pretty_cert_mode)"
     panel_row "REALITY" "${SERVER_IP:-未知}:443  sni=${REALITY_SNI:-未知}"
     panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-未知}:443  path=${XHTTP_PATH:-未知}"
-  panel_row "IPv6 直连" "$(if [[ -n "${SERVER_IP6:-}" ]]; then style_text "${C_GREEN}" "[${SERVER_IP6}]"; else printf '未启用'; fi)"
-  panel_row "XHTTP H3" "$(if h3_enabled; then style_text "${C_GREEN}" "已启用"; else printf '未启用'; fi)"
+    panel_row "IPv6 直连" "$(if [[ -n "${SERVER_IP6:-}" ]]; then style_text "${C_GREEN}" "[${SERVER_IP6}]"; else printf '未启用'; fi)"
+    panel_row "XHTTP H3 选择" "$(h3_intent_text)"
+    panel_row "H3 本地条件" "${H3_REASON}"
     panel_row "节点前缀" "${NODE_LABEL_PREFIX:-未知}"
     panel_row "REALITY UUID" "$(short_value "${REALITY_UUID:-未知}")"
     panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-未知}")"
@@ -83,6 +87,13 @@ show_dashboard() {
     panel_row "二维码目录" "${QR_OUTPUT_DIR}"
   else
     panel_row "安装状态" "$(style_text "${C_YELLOW}" "未安装")"
+  fi
+
+  # 未完成操作清单只报告、不自行恢复：查看入口不写系统（D12），
+  # 处理它的是下一次明确的维护动作（apply-config / 重装）。
+  if pending_operation_present; then
+    panel_row "上次动作" "$(style_text "${C_YELLOW}" "未完成：$(pending_operation_text)")"
+    panel_row "处理方式" "检查现场后运行 xtun recover"
   fi
 
   divider
@@ -106,11 +117,12 @@ show_dashboard() {
 
   divider
   printf '%b%s%b\n' "${C_BOLD}" "运行探测" "${C_RESET}"
-  panel_row "监听 :443" "$(listening_port_text 443)"
-  panel_row "监听 :2443" "$(listening_port_text 2443)"
-  panel_row "监听 :${REALITY_FALLBACK_PORT}" "$(listening_port_text "${REALITY_FALLBACK_PORT}")"
-  panel_row "监听 :8001" "$(listening_port_text 8001)"
-  panel_row "监听 :8443" "$(listening_port_text 8443)"
+  panel_row "监听 :443 (TCP)" "$(listening_port_text 443)"
+  panel_row "监听 :2443 (TCP)" "$(listening_port_text 2443)"
+  panel_row "监听 :${REALITY_FALLBACK_PORT} (TCP)" "$(listening_port_text "${REALITY_FALLBACK_PORT}")"
+  panel_row "监听 :8001 (TCP)" "$(listening_port_text 8001)"
+  panel_row "监听 :8443 (TCP)" "$(listening_port_text 8443)"
+  panel_row "QUIC :443 (UDP)" "$(quic_port_text)"
   panel_row "拥塞控制 / qdisc" "$(net_current_cc) / $(net_default_qdisc)"
   panel_row "Xray 自检" "$(xray_config_check_text)"
   panel_row "Nginx 自检" "$(nginx_config_check_text)"

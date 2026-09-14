@@ -42,6 +42,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash tests/smoke.sh
 
+      - name: Run installation PTY boundaries
+        if: ${{ !cancelled() }}
+        run: python3 tests/install-boundary.py
+
+      - name: Run task menu PTY boundaries
+        if: ${{ !cancelled() }}
+        run: python3 tests/task-menu-boundary.py
+
   # 真机冒烟：debian:13 systemd 容器里完整跑一遍 install + diagnose。
   # 沙箱用例永远碰不到 systemd / apt / 真实 haproxy / nginx，这一层只有真机跑得出来。
   # 容器必须以 /sbin/init 起（systemd 才是 PID 1），install 再通过 docker exec 进去跑；

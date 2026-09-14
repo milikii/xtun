@@ -13,16 +13,17 @@ write_generated_file_atomically() {
   local target_dir=""
 
   target_dir="$(dirname "${target_path}")"
-  mkdir -p "${target_dir}"
-  tmp_file="$(mktemp "${target_dir}/.$(basename "${target_path}").tmp.XXXXXX")"
+  backup_path "${target_path}" || return 1
+  [[ ! -d "${target_path}" ]] || return 1
+  mkdir -p "${target_dir}" || return 1
+  tmp_file="$(mktemp "${target_dir}/.$(basename "${target_path}").tmp.XXXXXX")" || return 1
 
   if ! "${producer_fn}" > "${tmp_file}"; then
     rm -f "${tmp_file}"
     return 1
   fi
 
-  backup_path "${target_path}" || { rm -f "${tmp_file}"; return 1; }
-  mv -f "${tmp_file}" "${target_path}"
+  mv -fT -- "${tmp_file}" "${target_path}" || { rm -f "${tmp_file}"; return 1; }
 }
 
 # ------------------------------
@@ -104,11 +105,16 @@ render_user_block() {
 }
 
 xray_log_json() {
-  jq -cn '{
-    loglevel: "warning",
-    access: "/var/log/xray/access.log",
-    error: "/var/log/xray/error.log"
-  }'
+  # 单引号里的 ${...} 不会被展开：日志路径必须按变量传进 jq，写进 JSON 的
+  # 才是真实路径而不是字面量。
+  jq -cn \
+    --arg access_path "${XRAY_LOG_DIR}/access.log" \
+    --arg error_path "${XRAY_LOG_DIR}/error.log" \
+    '{
+      loglevel: "warning",
+      access: $access_path,
+      error: $error_path
+    }'
 }
 
 xray_sniffing_json() {
@@ -440,7 +446,7 @@ write_xray_config() {
   ensure_warp_credentials || return 1
   write_generated_file_atomically "${XRAY_CONFIG_FILE}" xray_config_text || return 1
 
-  ensure_managed_permissions
+  ensure_managed_permissions config
 }
 
 xray_config_text() {
@@ -628,39 +634,14 @@ $(render_user_block nginx-http "${NGINX_MAIN_CONFIG}" "    ")
 EOF
 }
 
-# Debian 打包的默认主配置，卸载时找不到备份就写回它。
-nginx_main_config_debian_default_text() {
-  cat <<'EOF'
-user www-data;
-worker_processes auto;
-pid /run/nginx.pid;
-include /etc/nginx/modules-enabled/*.conf;
-
-events {
-	worker_connections 768;
-}
-
-http {
-	sendfile on;
-	tcp_nopush on;
-	types_hash_max_size 2048;
-	include /etc/nginx/mime.types;
-	default_type application/octet-stream;
-	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
-	ssl_prefer_server_ciphers on;
-	access_log /var/log/nginx/access.log;
-	gzip on;
-	include /etc/nginx/conf.d/*.conf;
-	include /etc/nginx/sites-enabled/*;
-}
-EOF
-}
-
 write_nginx_main_config() {
   if [[ "${NGINX_MAIN_MANAGED:-no}" != "yes" ]]; then
     return 0
   fi
 
+  # 接管别人的主配置之前先留下原件：这份文件属于 nginx 软件包或用户自己，
+  # 一旦被我们整体重写，没有原件就再也回不去了。
+  record_takeover_original "${NGINX_MAIN_CONFIG}" || return 1
   write_generated_file_atomically "${NGINX_MAIN_CONFIG}" nginx_main_config_text
 }
 
@@ -782,5 +763,6 @@ EOF
 }
 
 write_haproxy_config() {
+  record_takeover_original "${HAPROXY_CONFIG}" || return 1
   write_generated_file_atomically "${HAPROXY_CONFIG}" haproxy_config_text
 }

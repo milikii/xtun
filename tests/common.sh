@@ -87,6 +87,10 @@ sandbox_managed_paths() {
   NET_SYSCTL_CONF="${root}/etc/sysctl.d/98-xtun-net.conf"
   NET_HELPER_PATH="${root}/usr/local/sbin/xtun-net-optimize.sh"
   NET_SERVICE_FILE="${root}/etc/systemd/system/${NET_SERVICE_NAME}"
+  XRAY_LOG_DIR="${root}/var/log/xray"
+  XRAY_STATE_DIR="${root}/var/lib/xray"
+  # 「服务是否存在」也要沙箱化：真实单元文件一直存在，用例会把宿主机当沙箱用。
+  SYSTEMD_UNIT_DIRS=("${root}/etc/systemd/system")
   ACME_HOME="${root}/root/.acme.sh"
   ACME_SH_BIN="${ACME_HOME}/acme.sh"
   ACME_RELOAD_HELPER="${root}/usr/local/sbin/xtun-cert-reload.sh"
@@ -94,6 +98,8 @@ sandbox_managed_paths() {
   OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
   OUTPUT_FILE="${root}/root/xtun-output.md"
   BACKUP_ROOT="${root}/root/xtun-backups"
+  ORIGINALS_ROOT="${root}/var/lib/xtun/originals"
+  PENDING_OP_FILE="${root}/var/lib/xtun/pending-op.tsv"
   INSTALL_DRAFT_FILE="${root}/root/.xtun-install-draft.env"
   SCRIPT_LOCK_FILE="${root}/run/xtun.lock"
   LEGACY_PATH_ROOT="${root}"
@@ -122,6 +128,8 @@ prepare_workspace() {
 }
 
 reset_feature_defaults() {
+  H3_INTENT=off
+  H3_DECISION=off
   XHTTP_ECH_CONFIG_LIST="${DEFAULT_XHTTP_ECH_CONFIG_LIST}"
   XHTTP_ECH_FORCE_QUERY="${DEFAULT_XHTTP_ECH_FORCE_QUERY}"
   XHTTP_ECH_ENABLED=""
@@ -140,12 +148,49 @@ reset_feature_defaults() {
   SERVER_IP6=""
 }
 
+stub_h3_capability_ready() {
+  H3_INTENT=on
+  nginx() { :; }
+  nginx_v3_capable() { return 0; }
+  certificate_capability_report() { printf 'ready|fixture'; }
+  h3_udp_ownership_state() { printf absent; }
+  h3_enabled() { [[ "${H3_DECISION:-off}" == enabled ]]; }
+  h3_refresh_decision
+}
+
 stub_side_effects() {
+  ensure_xray_user() { :; }
   ensure_managed_permissions() { :; }
   backup_path() { :; }
   # H3 是否可用依赖宿主机 nginx 编译选项，默认按不可用处理；
   # 需要 H3 的用例自己覆盖 h3_enabled。
   h3_enabled() { return 1; }
+  # 这套用例跑在真机上，而且很多用例会走「重启服务」的代码路径。
+  # 默认把 systemctl 换成桩：任何用例都不许真的动宿主机的 systemd。
+  # 需要特定行为的用例自己覆盖 systemctl / service_active_state。
+  systemctl() {
+    case "${1:-}" in
+      show)
+        if [[ "$*" == *'LoadState'* ]]; then
+          printf 'LoadState=not-found\nActiveState=inactive\nUnitFileState=\n'
+        fi
+        return 0
+        ;;
+      is-active)
+        return 1
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  }
+}
+
+# 需要「服务都在跑」这条成功路径的用例用这个：把服务存在与状态都置成 active。
+sandbox_stub_services_active() {
+  service_exists() { return 0; }
+  service_active_state() { printf 'active'; }
+  generation_service_snapshot() { printf 'active\tenabled\n'; }
 }
 
 set_test_warp_credentials() {
@@ -223,6 +268,21 @@ assert_false_silently() {
   fi
   if [[ -n "${stderr}" ]]; then
     printf '[fail] %s 期望静默返回假，却输出了：%s\n' "$*" "${stderr}" >&2
+    return 1
+  fi
+}
+
+# `! cmd` 不会触发 errexit，用作断言时失败会静默通过；这里显式检查退出码。
+assert_command_succeeds() {
+  if ! "$@"; then
+    printf '[fail] 期望成功但失败：%s\n' "$*" >&2
+    return 1
+  fi
+}
+
+assert_command_fails() {
+  if "$@"; then
+    printf '[fail] 期望失败但成功：%s\n' "$*" >&2
     return 1
   fi
 }

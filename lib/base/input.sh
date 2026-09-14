@@ -17,29 +17,44 @@ usage() {
   ${command_name} install [参数]
   ${command_name} update-script
   ${command_name} upgrade [--xray-version vX.Y.Z]
+  ${command_name} recover [--yes]
   ${command_name} check-sni [域名] [--target host:port] [--timeout N]
   ${command_name} change-uuid [参数]
   ${command_name} change-sni [参数]
   ${command_name} change-path [参数]
+  ${command_name} change-h3 [--enable-h3 | --disable-h3] [--non-interactive]
   ${command_name} change-warp [参数]
   ${command_name} change-warp-rules [参数]
   ${command_name} change-cert-mode [参数]
   ${command_name} renew-cert [参数]
   ${command_name} uninstall [--yes] [--purge]
-  ${command_name} show-links [--qr] [--summary]
+  ${command_name} show-links [--qr] [--summary] [--node N]
   ${command_name} diagnose
   ${command_name} status [--raw]
   ${command_name} restart
   ${command_name} repair-perms
   ${command_name} apply-net-opt [--bbr-kernel joey|none]
-  ${command_name} apply-config [--manage-nginx-main]
+  ${command_name} apply-config [--manage-nginx-main] [--no-manage-nginx-main]
   ${command_name} version
   ${command_name} help
 
+未完成操作恢复:
+  recover                    查看未完成动作，确认后按持久清单恢复文件及服务状态。
+  recover --yes              非交互恢复；已提交的动作只完成清理，不重复回退。
+  status / diagnose          只报告未完成动作，不自动恢复；恢复前阻止新的修改。
+
 安装参数:
+  --task VALUE                安装任务：fresh（全新安装）、resume（恢复失败安装的草稿）、
+                              rebuild（按当前安装重建，沿用凭据）、rotate（明确轮换凭据）。
+  --resume-draft              等价于 --task resume；显式恢复已保存的安装草稿。
+  --rebuild-current           等价于 --task rebuild；沿用当前安装的 UUID/密钥/路径重建。
+  --rotate-credentials        等价于 --task rotate；只重新生成 UUID/短ID/路径/REALITY 密钥。
+  --discard-draft             丢弃未完成的安装草稿；不能与 --task resume 同时使用。
   --xray-version VALUE        显式指定 Xray-core tag；默认追踪最新官方已发布版本（包含 pre-release）。
   --non-interactive           非交互运行；缺少必要参数时直接失败。
   --server-ip VALUE           REALITY 直连节点的公网 IP 或域名。
+  --server-ip6 VALUE          REALITY 直连节点的 IPv6；留空表示不做双栈。
+  --no-ipv6                   明确不启用 IPv6 直连（无值开关，与 --server-ip6 互斥）。
   --node-label-prefix VALUE   导出节点名称前缀，例如 HKG 或 SJC。
   --reality-uuid VALUE        指定 REALITY 节点 UUID。
   --reality-sni VALUE         REALITY 可见 SNI，同时用于 HAProxy 分流。
@@ -73,14 +88,22 @@ usage() {
   --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
   --enable-warp               启用选择性 WARP 出站。
   --disable-warp              禁用 WARP 出站。
-  --enable-net-opt            启用 Joey BBRv3 内核 + fq/RPS 网络优化。
+  --enable-net-opt            启用 sysctl/fq/RPS 网络优化；第三方内核由 --bbr-kernel 单独选择。
   --disable-net-opt           禁用网络优化。
-  --bbr-kernel joey|none      是否安装 Joey BBRv3 第三方内核（默认 joey）；none 只做 sysctl/helper。
+  --enable-h3                 显式开启 H3；检查 nginx 模块、公共信任证书及 UDP 443 归属。
+  --disable-h3                显式关闭 H3（新装默认）。
+  --bbr-kernel joey|none      是否安装 Joey BBRv3 第三方内核（新装默认 none）；none 只做 sysctl/helper。
   --manage-nginx-main         接管 /etc/nginx/nginx.conf（worker_connections / fd 限额）。
   --no-manage-nginx-main      不接管 nginx 主配置。
   --skip-sni-check            跳过 Reality 目标域名预检。
   --block-cn                  拦截回国流量（geoip:cn / geosite:cn）。
   --no-block-cn               不拦截回国流量（默认）。
+  新装默认全部关闭：IPv6、WARP、网络优化、第三方内核、nginx 主配置接管、
+  H3、ECH、xpadding、Block CN；XHTTP VLESS Encryption 保持开启。
+  旧托管 H3 保留选择并标待验证；existing / ACME 是来源，不代表公共信任。
+  显式开启条件不足会失败，不接管外来 UDP 服务；本地通过不等于公网通过。
+  自动凭据（UUID/短ID/路径）在基础问答里不再逐个发问，只在确认页的
+  advanced 入口或对应参数里改。
   --warp-private-key VALUE    WARP WireGuard 私钥；仅支持 @文件路径或环境变量 WARP_PRIVATE_KEY。
   --warp-profile VALUE        导入 wgcf profile.conf；仅支持 @文件路径或环境变量 WARP_PROFILE。
   --warp-address-v4 VALUE     WARP WireGuard IPv4 内网地址。
@@ -98,8 +121,8 @@ usage() {
   --xhttp-only                只轮换 XHTTP UUID。
 
 check-sni 参数:
-  --target VALUE              覆盖探测目标 host:port（默认 SNI:443）。
-  --timeout VALUE             每次探测超时秒数，默认 10。
+  --target VALUE              覆盖探测目标 host:port；默认用已保存的 REALITY_TARGET，显式域名时用该域名:443。
+  --timeout VALUE             每次探测的超时秒数，必须是正整数，默认 10。
   --server-ip VALUE           本机公网 IP，用于回环判定；默认自动读取。
 
 变更 SNI 参数:
@@ -169,13 +192,25 @@ check-sni 参数:
   diagnose                    一次性输出服务、端口、配置与 TLS 信息。
 
 脚本维护命令:
+  修改与维护会先预览并确认；自动化使用 --non-interactive（维护也接受 --yes）。
   update-script               下载并更新脚本自身的持久化 bundle 与管理命令。
   apply-net-opt               重新应用网络优化；--bbr-kernel joey|none 可切换内核策略并写回状态。
-  apply-config                按当前状态重新生成托管配置；--manage-nginx-main 可开启 nginx 主配置接管。
+  apply-config                按当前状态重新生成托管配置；--manage-nginx-main 开启 nginx 主配置接管，
+                              --no-manage-nginx-main 在找到首次原件时还原并停止接管。
+
+取值参数都支持 --opt value 与 --opt=value 两种写法；无值开关不接受 = 值。
+方向相反的开关同时给出会报冲突，不按「最后一个覆盖前一个」处理。
 
 链接参数:
-  --qr                        额外输出每条分享链接的终端二维码（qrencode 由安装器安装）。
-  --summary                   只显示链接文件、节点清单和获取完整内容 / 二维码的命令。
+  --node N                    仅获取编号 N（1–9）的已生成节点；编号不会重排。
+  --qr                        直接显示节点名和终端二维码；过大时指向已有 PNG。
+  --summary                   显示节点清单、文档与 PNG 路径；不能与 --qr 同用。
+  查看不会生成文件或应用服务配置；未启用的节点会明确报错。
+
+交互:
+  :back                       返回上一可编辑字段，保留其它输入。
+  :cancel                     取消当前动作（CLI 退出 130）；菜单 0 返回或退出。
+  Ctrl-D / EOF                取消未完成输入并结束会话，不采用默认值继续。
 
 示例:
   ${command_name}
@@ -190,6 +225,10 @@ check-sni 参数:
   ${command_name} change-sni --reality-sni www.stanford.edu
   ${command_name} change-path --xhttp-path /assets/v3
   ${command_name} change-warp --disable-warp
+  ${command_name} change-path --xhttp-path=/assets/v3
+  ${command_name} change-h3 --enable-h3
+  ${command_name} show-links --node 1
+  ${command_name} show-links --qr --node 3
   ${command_name} change-warp-rules --add-domain chat.openai.com
   ${command_name} change-cert-mode --cert-mode self-signed
   ${command_name} renew-cert
@@ -204,6 +243,134 @@ check-sni 参数:
 EOF
 }
 
+# ------------------------------
+# 交互输入的取消边界
+# read 失败（EOF / Ctrl-D / 管道读完）不能当成「用户按了回车」：
+# 后者会用默认值继续执行，前者必须中止当前动作。
+#
+# 读取目标用带前缀的内部名字，最后再用 printf -v 落到调用者给的变量上：
+# 直接用 "${var_name}" 当 read 的目标虽然也能跑，但同一个名字在调用链里
+# 一旦也是局部变量，动态作用域就会把它写进那一层，调用者拿到的还是旧值。
+# ------------------------------
+input_end_of_stream() {
+  printf '\n' >&2
+  warn "输入已结束，已取消当前操作。"
+  if [[ "${IN_MAIN_MENU:-0}" == 1 ]]; then exit 131; fi
+  exit 1
+}
+
+input_cancel_action() {
+  warn "已取消当前操作。"
+  exit 130
+}
+
+declare -ga INPUT_FIELD_NAMES=() INPUT_FIELD_PROMPTS=() INPUT_FIELD_SECRET=() INPUT_FIELD_VALIDATORS=()
+
+input_validate_edited_field() {
+  local name="${1}" validator="${2:-}" normalized=""
+  if [[ -n "${validator}" ]]; then "${validator}" || return 1; fi
+  case "${name}" in
+    SERVER_IP) ensure_server_ip_format ;;
+    SERVER_IP6) ensure_server_ip6_format ;;
+    REALITY_SNI) ensure_reality_sni_format ;;
+    REALITY_TARGET) ensure_reality_target_format ;;
+    XHTTP_DOMAIN) ensure_xhttp_domain_format ;;
+    XHTTP_PATH) ensure_xhttp_path_format ;;
+    CERT_MODE)
+      case "${CERT_MODE}" in 1) CERT_MODE=self-signed ;; 2) CERT_MODE=existing ;; 3) CERT_MODE=acme-dns-cf ;; esac
+      CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")" || return 1
+      ;;
+    ENABLE_WARP|ENABLE_NET_OPT|NGINX_MAIN_MANAGED|ROUTE_BLOCK_CN|XHTTP_ECH_ENABLED|XHTTP_XPADDING_ENABLED)
+      normalized="$(normalize_yes_no_value "${name}" "${!name}")" || return 1
+      printf -v "${name}" '%s' "${normalized}"
+      ;;
+    NET_BBR_KERNEL)
+      NET_BBR_KERNEL="$(normalize_net_bbr_kernel_value "${NET_BBR_KERNEL}")" || return 1
+      ;;
+  esac
+}
+
+input_remember_field() {
+  local name="${1}" index="${#INPUT_FIELD_NAMES[@]}"
+  # 临时回答变量的动态作用域会结束；仅登记跨问答保留的字段。
+  [[ "${name}" =~ ^[A-Z][A-Z0-9_]*$ ]] || return 0
+  if (( index > 0 )) && [[ "${INPUT_FIELD_NAMES[index-1]}" == "${name}" ]]; then index=$((index - 1)); fi
+  INPUT_FIELD_NAMES[index]="${name}"
+  INPUT_FIELD_PROMPTS[index]="${2}"
+  INPUT_FIELD_SECRET[index]="${3:-no}"
+  INPUT_FIELD_VALIDATORS[index]="${INPUT_FIELD_VALIDATOR:-}"
+}
+
+input_edit_previous_fields() {
+  local skip="${1:-}" index=$((${#INPUT_FIELD_NAMES[@]} - 1)) last=0
+  local field="" prompt="" value="" previous="" message="" validator=""
+  local INPUT_BACK_HANDLED=yes
+  if (( index >= 0 )) && [[ "${INPUT_FIELD_NAMES[index]}" == "${skip}" ]]; then index=$((index - 1)); fi
+  last=${index}
+  if (( index < 0 )); then warn "已经是第一个可编辑字段；可输入 :cancel 取消。"; return 0; fi
+  while (( index <= last )); do
+    field="${INPUT_FIELD_NAMES[index]}"
+    previous="${!field:-}"
+    prompt="返回编辑：${INPUT_FIELD_PROMPTS[index]}"
+    if [[ "${INPUT_FIELD_SECRET[index]}" == yes ]]; then
+      read_secret_or_cancel value "${prompt} [已填写，回车沿用]: " || return $?
+      printf '\n'
+    else
+      read_line_or_cancel value "${prompt} [${previous}]: " || return $?
+    fi
+    if [[ "${value}" == :back ]]; then
+      if (( index > 0 )); then index=$((index - 1)); else warn "已经是第一个可编辑字段。"; fi
+      continue
+    fi
+    printf -v "${field}" '%s' "${value:-${previous}}"
+    validator="${INPUT_FIELD_VALIDATORS[index]}"
+    if ! message="$(input_validate_edited_field "${field}" "${validator}" 2>&1)"; then
+      printf -v "${field}" '%s' "${previous}"
+      warn "输入不合法：${message}"
+      continue
+    fi
+    input_validate_edited_field "${field}" "${validator}" || return 1
+    index=$((index + 1))
+  done
+}
+
+# Debian 12 的 Bash 5.2.15 在 read -p 刚打印提示时收到信号，可能一直等输入，
+# 延后 trap。把提示和 read 分开，确保这个窗口内也立即执行取消/恢复。
+print_input_prompt() {
+  [[ ! -t 0 ]] || printf '%s' "${1}" >&2
+}
+
+read_line_or_cancel() {
+  local var_name="${1}"
+  local prompt_text="${2}"
+  local xtun_read_value=""
+
+  while true; do
+    print_input_prompt "${prompt_text}" || return 1
+    read -r xtun_read_value || input_end_of_stream
+    [[ "${xtun_read_value}" != :cancel ]] || input_cancel_action
+    if [[ "${xtun_read_value}" == :back && "${INPUT_BACK_HANDLED:-no}" != yes ]]; then
+      input_edit_previous_fields || return 1
+      continue
+    fi
+    break
+  done
+
+  printf -v "${var_name}" '%s' "${xtun_read_value}"
+}
+
+read_secret_or_cancel() {
+  local var_name="${1}"
+  local prompt_text="${2}"
+  local xtun_read_value=""
+
+  print_input_prompt "${prompt_text}" || return 1
+  read -r -s xtun_read_value || input_end_of_stream
+  [[ "${xtun_read_value}" != :cancel ]] || input_cancel_action
+
+  printf -v "${var_name}" '%s' "${xtun_read_value}"
+}
+
 prompt_with_default() {
   local var_name="${1}"
   local prompt_text="${2}"
@@ -211,6 +378,7 @@ prompt_with_default() {
   local current_value=""
   local effective_default=""
   local answer=""
+  local INPUT_BACK_HANDLED=yes
 
   current_value="${!var_name:-}"
 
@@ -225,15 +393,20 @@ prompt_with_default() {
     die "缺少必填参数：${var_name}。"
   fi
 
-  effective_default="${current_value:-${default_value}}"
-  if [[ -n "${effective_default}" ]]; then
-    read -r -p "${prompt_text} [${effective_default}]: " answer
-    answer="${answer:-${effective_default}}"
-  else
-    read -r -p "${prompt_text}: " answer
-  fi
+  while true; do
+    effective_default="${!var_name:-${default_value}}"
+    if [[ -n "${effective_default}" ]]; then
+      read_line_or_cancel answer "${prompt_text} [${effective_default}]: " || return $?
+      answer="${answer:-${effective_default}}"
+    else
+      read_line_or_cancel answer "${prompt_text}: " || return $?
+    fi
+    [[ "${answer}" == :back ]] || break
+    input_edit_previous_fields "${var_name}" || return 1
+  done
 
   printf -v "${var_name}" '%s' "${answer}"
+  input_remember_field "${var_name}" "${prompt_text}" no || return $?
 }
 
 option_secret_env_name() {
@@ -335,16 +508,22 @@ prompt_secret() {
     die "缺少必填密钥参数：${var_name}。"
   fi
 
-  if [[ -n "${current_value}" ]]; then
-    read -r -s -p "${prompt_text} [已填写，直接回车沿用]: " answer
-    answer="${answer:-${current_value}}"
-  else
-    read -r -s -p "${prompt_text}: " answer
-  fi
+  while true; do
+    if [[ -n "${current_value}" ]]; then
+      read_secret_or_cancel answer "${prompt_text} [已填写，直接回车沿用]: " || return $?
+      answer="${answer:-${current_value}}"
+    else
+      read_secret_or_cancel answer "${prompt_text}: " || return $?
+    fi
+    [[ "${answer}" == :back ]] || break
+    printf '\n'
+    input_edit_previous_fields "${var_name}" || return 1
+  done
   printf '\n'
   printf -v "${var_name}" '%s' "${answer}"
   # 手工粘贴的令牌很容易带上一个尾随空格，和 @文件路径 那条路是同一个坑。
   sanitize_indirect_value "${var_name}"
+  input_remember_field "${var_name}" "${prompt_text}" yes || return $?
 }
 
 prompt_multiline_value() {
@@ -364,7 +543,7 @@ prompt_multiline_value() {
   fi
 
   if [[ -n "${current_value}" ]]; then
-    read -r -p "${prompt_text} [已填写，回车沿用，输入 edit 重新粘贴]: " answer
+    read_line_or_cancel answer "${prompt_text} [已填写，回车沿用，输入 edit 重新粘贴]: " || return $?
     if [[ -z "${answer}" ]]; then
       return
     fi
@@ -380,11 +559,22 @@ prompt_multiline_value() {
     # 和 "EOF" 比不相等，循环就永远等不到结束标记，一路读到 stdin 关闭，
     # 于是这段内容里凭空多一行字面的 EOF——粘进来的 PEM 当场作废。
     line="${line//$'\r'/}"
+    [[ "${line}" != :cancel ]] || input_cancel_action
+    if [[ "${line}" == :back ]]; then
+      input_edit_previous_fields "${var_name}" || return 1
+      current_value=""
+      printf '%s\n' "请重新粘贴当前字段内容，以 EOF 结束。"
+      continue
+    fi
     if [[ "${line}" == "EOF" ]]; then
       break
     fi
     current_value+="${line}"$'\n'
   done
+
+  if [[ "${line:-}" != "EOF" ]]; then
+    input_end_of_stream
+  fi
 
   current_value="${current_value%$'\n'}"
   [[ -n "${current_value}" ]] || die "${var_name} 内容不能为空。"
@@ -411,7 +601,14 @@ prompt_yes_no() {
   fi
 
   effective_default="${current_value:-${default_value}}"
-  read -r -p "${prompt_text} [${effective_default}]: " answer
-  answer="${answer:-${effective_default}}"
+  while true; do
+    read_line_or_cancel answer "${prompt_text} [${effective_default}]: " || return $?
+    answer="${answer:-${effective_default}}"
+    case "${answer,,}" in
+      y|yes|n|no|on|off|1|0|true|false) break ;;
+      *) warn '请输入 y 或 n。' ;;
+    esac
+  done
   printf -v "${var_name}" '%s' "${answer}"
+  input_remember_field "${var_name}" "${prompt_text}" no || return $?
 }

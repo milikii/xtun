@@ -149,7 +149,6 @@ build_xhttp_split_h3_extra_json() {
     --argjson sc_min_posts_interval_ms "${DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS}" \
     --arg address "${SERVER_IP}" \
     --arg server_name "${XHTTP_DOMAIN}" \
-    --arg alpn "$(effective_tls_alpn)" \
     --arg fingerprint "$(effective_fingerprint)" \
     --arg path "${XHTTP_PATH}" \
     --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
@@ -164,9 +163,9 @@ build_xhttp_split_h3_extra_json() {
         port: 443,
         network: "xhttp",
         security: "tls",
-        alpn: ["h3"],
         tlsSettings: {
           serverName: $server_name,
+          alpn: ["h3"],
           allowInsecure: false,
           fingerprint: $fingerprint
         },
@@ -730,6 +729,11 @@ output_runtime_summary_block() {
 - 链接输出文件: ${OUTPUT_FILE}
 - 二维码目录: ${QR_OUTPUT_DIR}
 
+## XHTTP H3
+- 选择: $(h3_intent_text)
+- 本地检查: ${H3_REASON:-未验证}
+- 公网 UDP / 客户端路径: 未验证，需使用真实客户端检查。
+
 ## WARP
 - 已启用: ${ENABLE_WARP}
 - 出站模式: wireguard（Xray 内置，无守护进程）
@@ -831,38 +835,70 @@ EOF
 
 write_output_file() {
   write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
-  chmod 0644 "${OUTPUT_FILE}"
+  chmod 0600 "${OUTPUT_FILE}" || return 1
   write_link_qr_pngs
 }
 
-# 二维码 PNG 是输出文件的派生物：任何一步失败只 warn，不让 install / apply-config 回滚。
+# 二维码 PNG 是这一代的交付物：先在 staging 目录里整批画完，全部成功才换上去。
+# 半套新二维码、或者「跑着新配置却留着上一代二维码」都是不能提交的状态（D12/H14）。
 # 目录整体重建：链接变了（换 UUID / SNI / 路径 / 域名、IPv6 或 H3 开关变化）旧图必须消失。
 write_link_qr_pngs() {
-  local idx="" label="" uri="" target="" tmp_file=""
+  local stage_dir=""
 
   if ! have_qrencode; then
-    warn "未安装 qrencode，跳过二维码 PNG；apt-get install -y qrencode 后运行 xtun apply-config 即可补齐。"
-    return 0
-  fi
-  if ! backup_path "${QR_OUTPUT_DIR}"; then
-    warn "二维码目录备份失败，本次跳过 PNG 生成：${QR_OUTPUT_DIR}"
-    return 0
-  fi
-  rm -rf "${QR_OUTPUT_DIR}"
-  if ! install -d -m 0700 "${QR_OUTPUT_DIR}"; then
-    warn "无法创建二维码目录，已跳过：${QR_OUTPUT_DIR}"
+    # 没有 qrencode 就画不出这一代的图。留着上一代的二维码比没有更糟：
+    # 用户会扫到已经失效的链接，还以为是最新的。
+    warn "未安装 qrencode，跳过二维码 PNG；为避免留下上一代的二维码，已清空 ${QR_OUTPUT_DIR}（装好后运行 xtun apply-config 可补齐）。"
+    backup_path "${QR_OUTPUT_DIR}" || return 1
+    rm -rf "${QR_OUTPUT_DIR}" || return 1
     return 0
   fi
 
+  mkdir -p "$(dirname "${QR_OUTPUT_DIR}")" || return 1
+  stage_dir="$(mktemp -d "${QR_OUTPUT_DIR}.staging.XXXXXX")" || {
+    warn "无法创建二维码暂存目录：${QR_OUTPUT_DIR}.staging.*"
+    return 1
+  }
+  if ! render_link_qr_pngs_into "${stage_dir}"; then
+    rm -rf "${stage_dir}"
+    warn "二维码 PNG 生成失败，本次变更不提交。"
+    return 1
+  fi
+  if ! backup_path "${QR_OUTPUT_DIR}"; then
+    rm -rf "${stage_dir}"
+    return 1
+  fi
+  if ! rm -rf "${QR_OUTPUT_DIR}"; then
+    rm -rf "${stage_dir}"
+    return 1
+  fi
+  if ! mv "${stage_dir}" "${QR_OUTPUT_DIR}"; then
+    rm -rf "${stage_dir}"
+    return 1
+  fi
+  chmod 0700 "${QR_OUTPUT_DIR}" || return 1
+}
+
+render_link_qr_pngs_into() {
+  local target_dir="${1}"
+  local idx="" label="" uri="" target="" tmp_file=""
+
+  chmod 0700 "${target_dir}" || return 1
   while IFS=$'\t' read -r idx label uri; do
-    target="${QR_OUTPUT_DIR}/$(printf '%02d-%s.png' "${idx}" "${label}")"
-    tmp_file="$(mktemp "${QR_OUTPUT_DIR}/.qr.XXXXXX")"
-    if qrencode -o "${tmp_file}" -l L -s 6 -m 2 "${uri}" 2>/dev/null; then
-      mv -f "${tmp_file}" "${target}"
-      chmod 0600 "${target}"
-    else
+    [[ -n "${label}" ]] || continue
+    target="${target_dir}/$(printf '%02d-%s.png' "${idx}" "${label}")"
+    tmp_file="$(mktemp "${target_dir}/.qr.XXXXXX")" || return 1
+    if ! qrencode -o "${tmp_file}" -l L -s 6 -m 2 "${uri}" 2>/dev/null; then
       rm -f "${tmp_file}"
-      warn "二维码 PNG 生成失败，已跳过：${label}"
+      warn "二维码 PNG 生成失败：${label}"
+      return 1
     fi
+    if ! mv -f "${tmp_file}" "${target}"; then
+      rm -f "${tmp_file}"
+      return 1
+    fi
+    chmod 0600 "${target}" || return 1
   done < <(node_link_entries)
+
+  return 0
 }

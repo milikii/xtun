@@ -152,31 +152,68 @@ xray_version_line() {
   fi
 }
 
-listening_port_text() {
+# 端口监听快照：一次 ss 采集同时给出「判定用状态」和「展示用文案」，
+# 深诊断对同一端口复用这一份结果，不重复探测（D07/H21）。
+# 输出 <state>|<text>，state ∈ unknown|listening|absent。
+port_listening_snapshot() {
   local port="${1}"
-  local listeners=""
+  local lines=""
+  local addresses=""
+  local owners=""
+  local text=""
 
   if ! command -v ss >/dev/null 2>&1; then
-    printf '未探测'
-    return
+    printf 'unknown|未探测（缺少 ss）'
+    return 0
   fi
 
-  listeners="$(ss -ltnH "( sport = :${port} )" 2>/dev/null | awk '{print $4}' | sort -u | paste -sd, -)"
-  if [[ -n "${listeners}" ]]; then
-    printf '运行中 (%s)' "${listeners}"
-  else
-    printf '未监听'
+  lines="$(ss -ltnpH "( sport = :${port} )" 2>/dev/null || true)"
+  if [[ -z "${lines}" ]]; then
+    printf 'absent|TCP 未监听'
+    return 0
   fi
+
+  addresses="$(printf '%s\n' "${lines}" | awk '{print $4}' | sort -u | paste -sd, -)"
+  owners="$(printf '%s\n' "${lines}" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | sort -u | paste -sd, -)"
+  text="TCP 运行中 (${addresses})"
+  if [[ -n "${owners}" ]]; then
+    text="TCP 运行中 (${addresses} · ${owners})"
+  fi
+  printf 'listening|%s' "${text}"
+}
+
+# 面板与诊断里的端口必须写明 TCP/UDP，只写「运行中」说不清是哪一层（H21）。
+listening_port_text() {
+  local snapshot=""
+
+  snapshot="$(port_listening_snapshot "${1}")"
+  printf '%s' "${snapshot#*|}"
 }
 
 is_port_listening() {
-  local port="${1}"
+  local snapshot=""
 
-  if ! command -v ss >/dev/null 2>&1; then
-    return 1
-  fi
+  snapshot="$(port_listening_snapshot "${1}")"
+  [[ "${snapshot}" == "listening|"* ]]
+}
 
-  ss -ltnH "( sport = :${port} )" 2>/dev/null | grep -q .
+# 443 的 IPv6 双栈检查同样要写明协议层：只写「运行中」看不出是 TCP 还是 UDP（H21/D09）。
+# 只知道 TCP 这一层；UDP 由 QUIC 行单独报告。
+ipv6_listen_text() {
+  local snapshot_state="${1:-}"
+  local snapshot_text="${2:-}"
+
+  case "${snapshot_state}" in
+    unknown) printf '无法确认（缺少 ss）' ;;
+    listening)
+      if [[ "${snapshot_text}" == *"[::]"* || "${snapshot_text}" == *"*:"* ]]; then
+        printf 'TCP 运行中'
+      else
+        printf 'TCP 未监听（仅 IPv4）'
+      fi
+      ;;
+    *) printf 'TCP 未监听' ;;
+  esac
 }
 
 cert_expiry_text() {
@@ -527,22 +564,94 @@ nginx_v3_capable() {
   nginx -V 2>&1 | grep -q -- '-with-http_v3_module\|http_v3_module'
 }
 
-# H3 直连下行的启用条件：模块在 + 证书模式客户端能校验（自签名不行）。
-# 两者任一不满足整段功能自动关闭，h3_disabled_reason 给出原因。
-h3_disabled_reason() {
-  if ! nginx_v3_capable; then
-    printf '当前 nginx 未编译 http_v3 模块（Debian 13 自带；Debian 12 / Ubuntu 24.04 需 nginx.org 官方源）'
-    return
-  fi
-  case "${CERT_MODE:-}" in
-    existing|acme-dns-cf) return ;;
-    self-signed) printf '证书为自签名，客户端无法校验 H3（需 existing / acme-dns-cf 模式）' ;;
-    *) printf '证书模式未就绪' ;;
+# 用户选择与本次只读检查的结果分离。生成 nginx、Alt-Svc、URI/PNG 复用
+# 同一次 H3_DECISION；条件失效时拒绝整次变更，不能暗中删掉旧 H3。
+h3_intent_text() {
+  case "${H3_INTENT:-off}" in
+    on) printf '显式开启' ;;
+    off) printf '关闭' ;;
+    legacy-on) printf '旧托管配置已开启，待能力验证' ;;
+    *) printf '旧安装意图不明，需显式选择' ;;
   esac
 }
 
+h3_disabled_reason() {
+  printf '%s' "${H3_REASON:-未执行本次能力检查}"
+}
+
 h3_enabled() {
-  [[ -z "$(h3_disabled_reason)" ]]
+  [[ "${H3_DECISION:-off}" == "enabled" ]]
+}
+
+# 同名 nginx 进程也可能属于别的实例；必须同时有托管 H3 配置与服务 cgroup。
+h3_nginx_listener_is_managed() {
+  local listener="${1}" cgroup="" pid="" pids=""
+  [[ "$(managed_h3_config_state)" == "on" ]] || return 1
+  cgroup="$(systemctl show nginx.service -p ControlGroup --value 2>/dev/null)" || return 1
+  [[ -n "${cgroup}" && "${cgroup}" != / ]] || return 1
+  pids="$(grep -oE 'pid=[0-9]+' <<< "${listener}")" || return 1
+  while IFS= read -r pid; do
+    pid="${pid#pid=}"
+    awk -F: -v group="${cgroup}" '$3 == group || index($3, group "/") == 1 {found=1} END {exit !found}' \
+      "/proc/${pid}/cgroup" 2>/dev/null || return 1
+  done <<< "${pids}"
+}
+
+h3_udp_ownership_state() {
+  local listeners="" line="" names=""
+  if ! command -v ss >/dev/null 2>&1; then printf 'unknown'; return; fi
+  if ! listeners="$(ss -lunpH '( sport = :443 )' 2>/dev/null)"; then printf 'unknown'; return; fi
+  if [[ -z "${listeners}" ]]; then printf 'absent'; return; fi
+  while IFS= read -r line; do
+    [[ "${line}" == *users:* ]] || { printf 'unconfirmed'; return; }
+    names="$(grep -oE '"[^"]+"' <<< "${line}" | sort -u)"
+    [[ "${names}" == '"nginx"' ]] || { printf 'foreign'; return; }
+    h3_nginx_listener_is_managed "${line}" || { printf 'foreign'; return; }
+  done <<< "${listeners}"
+  printf 'ok'
+}
+
+h3_refresh_decision() {
+  local cert="${1:-${TLS_CERT_FILE}}" key="${2:-${TLS_KEY_FILE}}" report=""
+  H3_DECISION="off"
+  H3_MODULE_STATE="unverified"
+  H3_CERT_STATE="unverified"
+  H3_UDP_STATE="unknown"
+  H3_REASON="用户选择关闭；未检查可选 H3 条件"
+  case "${H3_INTENT:-off}" in
+    off) return 0 ;;
+    on|legacy-on) ;;
+    *) H3_DECISION="blocked"; H3_REASON="旧安装的 H3 意图无法确认；请显式开启或关闭"; return 0 ;;
+  esac
+  H3_DECISION="blocked"
+  if command -v nginx >/dev/null 2>&1; then
+    if nginx_v3_capable; then H3_MODULE_STATE="ready"; else H3_MODULE_STATE="unsupported"; fi
+  fi
+  report="$(certificate_capability_report "${cert}" "${key}" "${XHTTP_DOMAIN:-}")"
+  H3_CERT_STATE="${report%%|*}"
+  H3_UDP_STATE="$(h3_udp_ownership_state)"
+  if [[ "${H3_MODULE_STATE}" != "ready" ]]; then
+    H3_REASON="当前 nginx 的 http_v3 模块不可用或未验证"
+  elif [[ "${H3_CERT_STATE}" != "ready" ]]; then
+    H3_REASON="${report#*|}"
+  elif [[ "${H3_UDP_STATE}" != "absent" && "${H3_UDP_STATE}" != "ok" ]]; then
+    H3_REASON="UDP 443 不能使用：$(quic_port_text_for_state "${H3_UDP_STATE}")"
+  else
+    H3_DECISION="enabled"
+    H3_REASON="本地条件通过；公网 UDP 与客户端 H3 路径未验证"
+  fi
+}
+
+h3_prepare_generation() {
+  h3_refresh_decision "$@"
+  [[ "${H3_DECISION}" != "blocked" ]] || {
+    warn "H3 选择未应用：${H3_REASON}。保留现有配置，请修复条件或显式关闭 H3。"
+    return 1
+  }
+}
+
+h3_status_text() {
+  printf '%s；%s' "$(h3_intent_text)" "${H3_REASON:-能力未验证}"
 }
 
 have_qrencode() {
@@ -550,37 +659,33 @@ have_qrencode() {
 }
 
 # UDP 443（QUIC）监听探测
-quic_port_listening() {
-  [[ "$(quic_port_text)" == "运行中" ]]
+# UDP 443 的采集与展示同样分开：判定用状态，展示用文案。
+# state ∈ na（H3 未启用）|unknown（缺少 ss）|absent|ok|unconfirmed|foreign。
+quic_port_state() {
+  if ! h3_enabled; then
+    printf 'na'
+    return 0
+  fi
+  h3_udp_ownership_state
+}
+
+quic_port_text_for_state() {
+  case "${1}" in
+    na) printf '不检查（H3 未启用）' ;;
+    unknown) printf 'UDP 未探测（缺少 ss）' ;;
+    absent) printf 'UDP 未监听' ;;
+    ok) printf 'UDP 运行中（nginx）' ;;
+    unconfirmed) printf 'UDP 有监听，无法确认归属（需要 root）' ;;
+    *) printf 'UDP 有监听，但不是 nginx' ;;
+  esac
 }
 
 quic_port_text() {
-  local listeners=""
+  quic_port_text_for_state "$(quic_port_state)"
+}
 
-  if ! command -v ss >/dev/null 2>&1; then
-    printf '未探测'
-    return
-  fi
-  if ! h3_enabled; then
-    printf '不检查（H3 未启用）'
-    return
-  fi
-
-  listeners="$(ss -lunpH '( sport = :443 )' 2>/dev/null)"
-  if grep -Fq 'users:(("nginx"' <<< "${listeners}"; then
-    printf '运行中'
-    return
-  fi
-  if [[ -z "${listeners}" ]]; then
-    printf '未监听'
-    return
-  fi
-  if ! grep -q 'users:' <<< "${listeners}"; then
-    printf '有 UDP 监听，无法确认归属（需要 root）'
-    return
-  fi
-
-  printf '有 UDP 监听，但不是 nginx'
+quic_port_listening() {
+  [[ "$(quic_port_state)" == "ok" ]]
 }
 
 check_badge() {
@@ -717,24 +822,61 @@ haproxy_config_check_text() {
   check_badge "$(haproxy_config_check_state)"
 }
 
+# 本地 TLS 探测预算：握手挂住时深诊断不能无限等（H21）。
+: "${XTUN_LOCAL_TLS_PROBE_TIMEOUT:=5}"
+
+# state ∈ unknown（缺 openssl）|na（没有 XHTTP 域名）|ok|untrusted|fail。
+# 「握手成功但证书不受系统信任」是自签/Origin CA 的预期结果，必须和「连不上」
+# 分开报告，也不能把未验证渲染成绿色已就绪（H18/D09）。
 local_tls_probe_state() {
+  local budget="${XTUN_LOCAL_TLS_PROBE_TIMEOUT}"
+  local output=""
+
   if ! command -v openssl >/dev/null 2>&1; then
     printf 'unknown'
-    return
+    return 0
   fi
-
   if [[ -z "${XHTTP_DOMAIN:-}" ]]; then
-    printf 'unknown'
-    return
+    printf 'na'
+    return 0
   fi
 
-  if echo | openssl s_client -connect 127.0.0.1:443 -servername "${XHTTP_DOMAIN}" >/dev/null 2>&1; then
-    printf 'ok'
-  else
+  output="$(timeout "${budget}" openssl s_client \
+    -connect 127.0.0.1:443 \
+    -servername "${XHTTP_DOMAIN}" \
+    </dev/null 2>&1 || true)"
+
+  if ! printf '%s' "${output}" | grep -q 'CONNECTED('; then
     printf 'fail'
+    return 0
   fi
+  if printf '%s' "${output}" | grep -q 'Verify return code: 0 (ok)'; then
+    printf 'ok'
+    return 0
+  fi
+  printf 'untrusted'
+}
+
+local_tls_probe_text_for_state() {
+  case "${1}" in
+    ok) style_text "${C_GREEN}" "通过（证书受系统信任）" ;;
+    untrusted) style_text "${C_YELLOW}" "握手成功，证书不受系统信任（自签/自管证书属预期）" ;;
+    fail) style_text "${C_RED}" "失败（127.0.0.1:443 握手不成功）" ;;
+    na) style_text "${C_YELLOW}" "不适用（未配置 XHTTP 域名）" ;;
+    *) style_text "${C_YELLOW}" "未探测（缺少 openssl）" ;;
+  esac
 }
 
 local_tls_probe_text() {
-  check_badge "$(local_tls_probe_state)"
+  local_tls_probe_text_for_state "$(local_tls_probe_state)"
+}
+
+# 证书用途只说明这张证书拿来干什么，不代表客户端一定信任（H18）。
+certificate_usage_text() {
+  case "${CERT_MODE:-}" in
+    self-signed) printf 'self-signed（自签；Reality 回落伪装用，客户端按公钥校验）' ;;
+    acme-dns-cf) printf 'acme-dns-cf（公网 CA 签发；本地与外部客户端都应受系统信任）' ;;
+    existing) printf 'existing（用户提供 PEM：公网 CA / Origin CA / 自签都可能）' ;;
+    *) printf '未知（%s）' "${CERT_MODE:-未记录}" ;;
+  esac
 }

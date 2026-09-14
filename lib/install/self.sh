@@ -139,8 +139,8 @@ update_script_cmd() {
   local tmp_dir=""
   local bundle_root=""
 
+  parse_command_without_options update-script "$@"
   need_root
-  start_backup_session
   previous_version="$(installed_script_version)"
 
   tmp_dir="$(mktemp -d)"
@@ -157,17 +157,29 @@ update_script_cmd() {
     [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
     return 0
   fi
-
+  local confirmation_status=0
+  (confirm_maintenance_action "更新脚本：${previous_version} → ${current_version}" \
+    "${SELF_INSTALL_DIR}、${SELF_COMMAND_PATH}" "不应用服务配置，不中断连接" \
+    "失败恢复本次 bundle 与入口") || confirmation_status=$?
+  if [[ "${confirmation_status}" -ne 0 ]]; then
+    cleanup_script_bundle_tmp_dir "${tmp_dir}"
+    return "${confirmation_status}"
+  fi
+  if ! start_backup_session || ! begin_generation_paths "脚本 bundle 更新" -- "${SELF_INSTALL_DIR}" "${SELF_COMMAND_PATH}"; then
+    cleanup_script_bundle_tmp_dir "${tmp_dir}"
+    return 1
+  fi
+  # 下载时不持有锁，获得锁后再次核对现场。
+  previous_version="$(installed_script_version)"
   log_step "安装脚本 bundle。"
   if ! install_bundle_root_to_self "${bundle_root}"; then
-    warn "脚本 bundle 安装失败，正在回滚持久化脚本文件。"
-    restore_backup_path "${SELF_INSTALL_DIR}" || true
-    restore_backup_path "${SELF_COMMAND_PATH}" || true
     cleanup_script_bundle_tmp_dir "${tmp_dir}"
+    generation_failed "脚本 bundle 安装失败"
     return 1
   fi
 
   cleanup_script_bundle_tmp_dir "${tmp_dir}"
+  generation_commit || return 1
   log_success "脚本 bundle 已更新。"
   log "备份目录：${BACKUP_DIR}"
   [[ -n "${previous_version}" ]] && log "更新前版本：${previous_version}"
@@ -184,9 +196,9 @@ reload_updated_script_if_needed() {
   [[ -n "${current_version}" ]] || return 0
   SCRIPT_VERSION="${current_version}"
 
-  if [[ "${IN_MAIN_MENU:-0}" == "1" && -x "${SELF_COMMAND_PATH}" ]]; then
-    log "已更新到 ${current_version}，正在重新载入脚本。"
-    exec "${SELF_COMMAND_PATH}"
+  if [[ "${IN_MAIN_MENU:-0}" == "1" ]]; then
+    log "已更新到 ${current_version}。请退出并重新打开菜单以载入新版本。"
+    return 0
   fi
 
   log "已更新到 ${current_version}。当前进程仍使用旧代码路径时，请重新运行脚本以完整载入新版本。"

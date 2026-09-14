@@ -73,7 +73,7 @@ run_change_helper_case() {
   CF_DNS_ACCOUNT_ID="old-account"
   cert_request[cf_dns_account_id]=""
   cert_request["$(request_value_presence_key "cf_dns_account_id")"]="1"
-  apply_request_overrides cert_request "cf_dns_account_id:CF_DNS_ACCOUNT_ID"
+  apply_request_overrides cert_request "cf_dns_account_id|CF_DNS_ACCOUNT_ID"
   [[ -z "${CF_DNS_ACCOUNT_ID}" ]]
 
   CERT_MODE="existing"
@@ -240,17 +240,22 @@ run_change_command_case() {
 
 run_change_warp_enable_rollback_case() {
   local rolled_back=0
+  local applied=0
   local status=0
+  local NON_INTERACTIVE=1
 
   parse_change_warp_args() {
     local -n request_ref="${1}"
     request_ref[target_mode]="enable"
   }
   ensure_debian_family() { :; }
-  begin_managed_change() { :; }
+  need_root() { :; }
+  load_current_install_context() { ENABLE_WARP="no"; }
+  open_change_session() { :; }
   apply_warp_change_request() { :; }
   prompt_warp_settings() { :; }
   apply_managed_runtime_update() {
+    applied=$((applied + 1))
     return 1
   }
   rollback_optional_component_state() {
@@ -258,12 +263,14 @@ run_change_warp_enable_rollback_case() {
   }
 
   set +e
-  change_warp_cmd --enable-warp >/dev/null 2>&1
+  change_warp_cmd --enable-warp --non-interactive >/dev/null 2>&1
   status=$?
   set -e
 
   [[ "${status}" -ne 0 ]]
-  [[ "${rolled_back}" -eq 1 ]]
+  [[ "${applied}" -eq 1 ]]
+  # 托管应用已经负责同代回退，旧 helper 不能再停掉既有网络优化服务。
+  [[ "${rolled_back}" -eq 0 ]]
   load_functions
 }
 
@@ -393,63 +400,77 @@ run_change_cert_mode_failure_case() {
 }
 
 run_upgrade_command_case() {
-  local logged=""
-  local restored=()
-  local restarted=0
-  local status=0
   local workdir=""
+  local logged=""
+  local systemctl_calls=""
+  local status=0
 
+  # 这条用例要跑真实的 start_backup_session / backup_path：快照 + manifest
+  # 就是同代回退唯一的证据来源（D11），不能换成空操作。
+  load_functions
   workdir="$(mktemp -d)"
-
-  need_root() { :; }
-  ensure_debian_family() { :; }
-  start_backup_session() { BACKUP_DIR="/tmp/upgrade-backup"; }
-  backup_path() { :; }
-  install_xray() { :; }
-  ensure_xray_bind_capability() { :; }
-  validate_configs() { return 1; }
-  restore_backup_path() {
-    restored+=("${1}")
-  }
-  systemctl() {
-    restarted=$((restarted + 1))
-  }
-  log() {
-    logged+="${1}"$'\n'
-  }
-  log_step() {
-    logged+="STEP:${1}"$'\n'
-  }
-  log_success() {
-    logged+="OK:${1}"$'\n'
-  }
-  warn() {
-    logged+="WARN:${1}"$'\n'
-  }
-  XRAY_BIN="${workdir}/xray"
+  generation_case_setup "${workdir}"
+  BACKUP_ROOT="${workdir}/backups"
+  XRAY_BIN="${workdir}/xray-core"
   XRAY_ASSET_DIR="${workdir}/xray-assets"
   printf '#!/usr/bin/env bash\n' > "${XRAY_BIN}"
   chmod 0755 "${XRAY_BIN}"
   mkdir -p "${XRAY_ASSET_DIR}"
+  printf 'old-geoip\n' > "${XRAY_ASSET_DIR}/geoip.dat"
+
+  need_root() { :; }
+  ensure_debian_family() { :; }
+  install_xray() {
+    printf 'new-core\n' > "${XRAY_BIN}"
+    printf 'new-geoip\n' > "${XRAY_ASSET_DIR}/geoip.dat"
+  }
+  ensure_xray_bind_capability() { :; }
+  validate_configs() { return 1; }
+  systemctl() { systemctl_calls+="$*"$'\n'; generation_mock_systemctl "$@"; }
+  log() { logged+="${1}"$'\n'; }
+  log_step() { logged+="STEP:${1}"$'\n'; }
+  log_success() { logged+="OK:${1}"$'\n'; }
+  warn() { logged+="WARN:${1}"$'\n'; }
 
   set +e
-  upgrade_cmd
+  upgrade_cmd --non-interactive
   status=$?
   set -e
+
   [[ "${status}" -ne 0 ]]
-  [[ "${restored[*]}" == "${XRAY_BIN} ${XRAY_ASSET_DIR}" ]]
-  [[ "${restarted}" -eq 0 ]]
+  # 校验失败：核心文件与资源目录都回到升级前，xray 一次都没重启。
+  [[ "$(cat "${XRAY_BIN}")" == '#!/usr/bin/env bash' ]]
+  [[ "$(cat "${XRAY_ASSET_DIR}/geoip.dat")" == "old-geoip" ]]
+  # 回退本身要做一次 daemon-reload（还原的 unit 文件才作数），那不是重启；
+  # 这里按「动作」断言而不是按 systemctl 被调用的次数。
+  [[ "${systemctl_calls}" != *"restart"* ]]
+  [[ -n "${BACKUP_DIR}" && -f "${BACKUP_DIR}/manifest.tsv" ]]
   printf '%s' "${logged}" | grep -q 'STEP:升级 Xray 核心。'
-  printf '%s' "${logged}" | grep -q 'WARN:升级后的配置校验失败，正在回滚 Xray 核心文件。'
+  printf '%s' "${logged}" | grep -q 'WARN:升级后的配置校验失败'
+  printf '%s' "${logged}" | grep -q '已回退到操作前的文件'
+  # 失败的动作不允许消耗备份保留名额：成功标记不该落下。
+  [[ ! -e "${BACKUP_DIR}/completed" ]]
+
+  load_functions
 }
 
 run_diagnose_command_case() {
   local output=""
   local status=0
   local probe_file=""
+  local counts_file=""
+  local state_file=""
+  local state_before=""
+  local state_after=""
 
   probe_file="$(mktemp)"
+  counts_file="$(mktemp)"
   printf '0' > "${probe_file}"
+  : > "${counts_file}"
+
+  count_call() {
+    printf '%s\n' "${1}" >> "${counts_file}"
+  }
 
   load_dashboard_context() { :; }
   service_active_state() {
@@ -462,12 +483,20 @@ run_diagnose_command_case() {
         ;;
     esac
   }
-  listening_port_text() { printf '运行中'; }
-  is_port_listening() { return 0; }
-  xray_config_check_state() { printf 'ok'; }
-  nginx_config_check_state() { printf 'ok'; }
-  haproxy_config_check_state() { printf 'ok'; }
-  local_tls_probe_state() { printf 'ok'; }
+  # 一次采集：每个慢探测/端口只允许被问一次，展示与判定复用同一份结果（H21）。
+  port_listening_snapshot() {
+    count_call "port:${1}"
+    printf 'listening|TCP 运行中 (*:%s · test)' "${1}"
+  }
+  xray_config_check_state() { count_call "xray-config"; printf 'ok'; }
+  nginx_config_check_state() { count_call "nginx-config"; printf 'ok'; }
+  haproxy_config_check_state() { count_call "haproxy-config"; printf 'ok'; }
+  local_tls_probe_state() { count_call "tls"; printf 'ok'; }
+  quic_port_state() { count_call "quic"; printf 'ok'; }
+  # 诊断不允许借机写 state 或执行 repair/apply。
+  begin_mutation() { count_call "begin-mutation"; }
+  write_state_kv() { count_call "write-state"; }
+  write_state_file() { count_call "write-state-file"; }
   xray_config_check_text() { printf '通过'; }
   nginx_config_check_text() { printf '通过'; }
   nginx_worker_connections_text() { printf '768（偏低）'; }
@@ -488,25 +517,102 @@ run_diagnose_command_case() {
   latest_health_history_text() { printf 'latest history'; }
 
   ENABLE_WARP="yes"
+  CERT_MODE="self-signed"
   set_test_warp_credentials
+
+  state_file="${STATE_FILE:-}"
+  state_file="$(mktemp)"
+  STATE_FILE="${state_file}"
+  printf 'STATE_VERSION=%s\n' "${STATE_VERSION_CURRENT}" > "${state_file}"
+  state_before="$(cat "${state_file}")"
 
   output="$(diagnose_cmd)"
   printf '%s' "${output}" | grep -q 'Xray 诊断'
-  printf '%s' "${output}" | grep -q '监听 443: 运行中'
+  printf '%s' "${output}" | grep -Fq '监听 443: TCP 运行中 (*:443 · test)'
+  printf '%s' "${output}" | grep -Fq '监听 [::]:443: TCP 运行中'
   printf '%s' "${output}" | grep -q 'Nginx worker_connections: 768（偏低）'
+  # 证书用途、本地探测、外部/客户端验证必须分开写（D09/H18）
+  printf '%s' "${output}" | grep -q '证书用途: self-signed'
+  printf '%s' "${output}" | grep -q '本地 TLS 探测: 通过（证书受系统信任）'
+  printf '%s' "${output}" | grep -q '外部可达: 未验证'
+  printf '%s' "${output}" | grep -q '客户端兼容: 未验证'
   # 只是提示，不该把 diagnose 判成失败。
   printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
   printf '%s' "${output}" | grep -q 'WARP 出站: wireguard · 172.16.0.2'
   printf '%s' "${output}" | grep -q 'WARP 规则数: 4'
-  printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
   if printf '%s' "${output}" | grep -q 'WARP 出口 IP'; then
     return 1
   fi
   [[ "$(cat "${probe_file}")" == "0" ]]
 
+  [[ "$(grep -c '^port:443$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^port:2443$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^port:8001$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^port:8443$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^xray-config$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^nginx-config$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^haproxy-config$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^tls$' "${counts_file}")" -eq 1 ]]
+  [[ "$(grep -c '^quic$' "${counts_file}")" -eq 1 ]]
+
+  # 诊断是只读动作：不写 state、不执行 repair/apply。
+  state_after="$(cat "${state_file}")"
+  [[ "${state_before}" == "${state_after}" ]]
+  for item in begin-mutation write-state write-state-file; do
+    [[ "$(grep -c "^${item}$" "${counts_file}")" -eq 0 ]]
+  done
+
   output="$(diagnose_cmd --warp-probe)"
   printf '%s' "${output}" | grep -q 'WARP 出口 IP: 203.0.113.99'
   [[ "$(cat "${probe_file}")" == "1" ]]
+
+  # 自签 / Origin CA：握手成功但证书不受系统信任是预期，不该判失败（H18）
+  local_tls_probe_state() { printf 'untrusted'; }
+  CERT_MODE="self-signed"
+  output="$(diagnose_cmd 2>&1)"
+  printf '%s' "${output}" | grep -q '握手成功，证书不受系统信任'
+  printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
+
+  # 公网 CA 模式下不受信任才是故障
+  CERT_MODE="acme-dns-cf"
+  set +e
+  output="$(diagnose_cmd 2>&1)"
+  status=$?
+  set -e
+  [[ "${status}" -ne 0 ]]
+  printf '%s' "${output}" | grep -q 'ACME 证书应受系统信任'
+  CERT_MODE="self-signed"
+
+  # 没装 ss：端口状态是「无法确认」，不能报成「未监听」这种确定结论
+  local_tls_probe_state() { printf 'ok'; }
+  port_listening_snapshot() { printf 'unknown|未探测（缺少 ss）'; }
+  set +e
+  output="$(diagnose_cmd 2>&1)"
+  status=$?
+  set -e
+  [[ "${status}" -ne 0 ]]
+  printf '%s' "${output}" | grep -q '443 无法确认（缺少 ss）'
+  printf '%s' "${output}" | grep -Fq '监听 [::]:443: 无法确认（缺少 ss）'
+  port_listening_snapshot() {
+    count_call "port:${1}"
+    printf 'listening|TCP 运行中 (*:%s · test)' "${1}"
+  }
+
+  # 只听 IPv4 时 IPv6 行不能报成「运行中」（H21/D09）
+  port_listening_snapshot() {
+    count_call "port:${1}"
+    if [[ "${1}" == "443" ]]; then
+      printf 'listening|TCP 运行中 (127.0.0.1:443 · test)'
+      return 0
+    fi
+    printf 'listening|TCP 运行中 (*:%s · test)' "${1}"
+  }
+  output="$(diagnose_cmd 2>&1)"
+  printf '%s' "${output}" | grep -Fq '监听 [::]:443: TCP 未监听（仅 IPv4）'
+  port_listening_snapshot() {
+    count_call "port:${1}"
+    printf 'listening|TCP 运行中 (*:%s · test)' "${1}"
+  }
 
   service_active_state() { printf 'failed'; }
   printf '0' > "${probe_file}"

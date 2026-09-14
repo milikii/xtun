@@ -5,9 +5,27 @@
 # 负责最小核心工具与基础模块装配
 # ------------------------------
 
+# ------------------------------
+# 变更边界
+# 只有真正要改东西的动作才开操作日志、才抢脚本锁：
+# 帮助、未知参数、缺值、EOF 和只读查看都停在解析阶段，
+# 不能因为「看一眼」就留下锁文件、备份目录或 /var/log/xtun 记录。
+# ------------------------------
+begin_mutation() {
+  acquire_script_lock || return 1
+  if pending_operation_present; then
+    warn "存在未完成操作：$(pending_operation_text)。请先运行 xtun recover。"
+    return 1
+  fi
+  OPERATION_LOG_ENABLED=1
+  # 变更中途的 Ctrl-C / TERM 要走回退边界（D04/D12），不是直接消失。
+  install_mutation_traps
+}
+
 append_operation_log() {
   local line="${1}"
 
+  [[ "${OPERATION_LOG_ENABLED:-0}" -eq 1 ]] || return 0
   if mkdir -p "${OP_LOG_DIR}" 2>/dev/null; then
     printf '%s\n' "${line}" >> "${OP_LOG_FILE}" 2>/dev/null || true
   fi
@@ -127,7 +145,9 @@ release_script_lock() {
     SCRIPT_LOCK_DIR=""
   else
     flock -u 9 2>/dev/null || true
-    exec 9>&- 2>/dev/null || true
+    # exec 无命令时会永久保留重定向；只在关闭锁描述符时屏蔽错误，
+    # 不能把后续菜单动作和恢复报告的 stderr 一并丢到 /dev/null。
+    { exec 9>&-; } 2>/dev/null || true
   fi
 
   SCRIPT_LOCK_HELD=0

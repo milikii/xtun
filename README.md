@@ -2,7 +2,9 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`1.1.0`
+当前代码声明版本：`1.1.0`。
+
+推进状态见 [当前计划](docs/PLAN.md) 与 [批次 B 报告](docs/REPORT-2026-09-14-BATCH-B.md)。任务菜单、维护预览、单节点取用和 H3 显式意图已实现；入口与恢复的前序证据见 [接手报告](docs/REPORT-2026-09-14-W04R-W05R.md)。提交到 `main` 是测试候选，正式发布仍需强制断电、完整真人、三端、生命周期与观察验收。
 
 ## 能安装什么
 
@@ -38,7 +40,6 @@
 - 非 Debian / Ubuntu 系统
 - 无 root 权限环境
 - 已经有复杂 nginx 站点，并且不希望脚本接管 nginx/haproxy/xray 配置
-- 不希望脚本安装第三方 Joey BBRv3 内核包的场景
 
 ## 快速开始
 
@@ -52,8 +53,11 @@ bash xtun.sh
 不带参数时会进入菜单。第一次安装通常选择：
 
 ```text
-1. 安装或重装
+1. 安装 / 恢复草稿（先选任务）
 ```
+
+菜单和 CLI 走同一条路径：已经装过（或上次安装失败留下草稿）时，先明确这次的动作——
+`全新安装`、`恢复一次失败的安装`、`按当前状态重建`、`轮换凭据`——再进入问答。
 
 安装完成后会生成管理命令：
 
@@ -69,13 +73,15 @@ xtun
 xtun upgrade --xray-version vX.Y.Z
 ```
 
-CI 当前用 `v26.9.9` 作为可复现基线；`latest-check` 工作流单独验证默认追新路径。
+仓库 CI 用 `v26.9.9` 作为可复现基线；`latest-check` 单独检查默认追新的版本解析、下载及候选命令。它尚未验证五类节点的真实传输，不能据此认定所有客户端兼容。
 
 后续维护都可以直接运行 `xtun`，不用再进入仓库目录。
 
-菜单顶部只画一块精简面板（服务状态、监听 443、WARP 开关），不跑配置自检和 TLS 握手，所以翻菜单不会卡。需要完整体检时走菜单 `4`、`xtun status` 或 `xtun diagnose`。
+安装后的主菜单按六组组织：`1 获取节点`、`2 查看状态与诊断`、`3 修改节点`、`4 升级与维护`、`5 网络与可选功能`、`6 恢复与卸载`。安装任务位于 `4 → 7`。菜单顶部只显示精简状态，不执行配置自检或 TLS 握手；完整体检使用 `2`、`xtun status` 或 `xtun diagnose`。
 
-停在菜单提示符上不会占住脚本锁，另一个终端里的 `xtun` 仍然可以正常执行变更；锁只在具体的写命令执行期间持有。
+任务菜单输入 `0` 返回主菜单；填写字段时用 `:back` 返回编辑、`:cancel` 取消本次动作。输入错误就地重填；动作失败或 Ctrl-C 后可以继续使用菜单，EOF 结束会话。TERM 会等待当前动作清理或恢复后退出。
+
+主菜单和安装/卸载的最终确认前只读取、预览，不开启持久锁、日志或备份，不隐式保存草稿。确认后取得锁并重新检查现场；期间发生变化时原确认失效，需要重新查看预览。
 
 ## 安装前准备
 
@@ -100,6 +106,14 @@ CI 当前用 `v26.9.9` 作为可复现基线；`latest-check` 工作流单独验
 ## 非交互安装示例
 
 推荐把敏感值放进文件或环境变量，不要直接写进 shell history。
+
+非交互模式同样要先确定任务：全新安装 `--task fresh`，恢复草稿 `--task resume`
+（等价 `--resume-draft`），按当前状态重建 `--task rebuild`（等价 `--rebuild-current`），
+轮换凭据 `--task rotate`（等价 `--rotate-credentials`）。有未完成的安装草稿时，
+非交互入口必须显式选任务，不会静默加载上次输入；想丢掉草稿重新开始用
+`--discard-draft`。全新安装的可选高影响项（IPv6、WARP、网络优化、第三方内核、
+接管 nginx 主配置、回国拦截、H3、ECH、xpadding）默认全部关闭，需要时在确认页的
+`advanced` 入口或命令行显式打开；VLESS Encryption 默认开启。
 
 使用已有证书并启用 WARP（默认自动注册免费 WARP，无需任何密钥）：
 
@@ -194,7 +208,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | 5 | 上行 XHTTP + REALITY ｜ 下行 XHTTP + TLS + CDN | 反向分离，备用 |
 | 6 | REALITY-V6（有 IPv6 时） | 节点 1 的 IPv6 版 |
 | 7 | XHTTP-SPLIT-CDN-REALITY-V6（有 IPv6 时） | 节点 4 的 IPv6 下行 |
-| - | XHTTP-TLS-H3 / XHTTP-SPLIT-CDN-H3（H3 可用时） | H3 直连下行 |
+| 8 / 9 | XHTTP-TLS-H3 / XHTTP-SPLIT-CDN-H3（显式启用且本地条件通过） | H3 直连 / CDN 上行与 H3 直连下行 |
 
 ### 命令表
 
@@ -203,11 +217,13 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `install [参数]` | 安装或重装 |
 | `update-script` | 更新脚本本体 |
 | `upgrade [--xray-version vX.Y.Z]` | 升级 Xray 核心；默认追踪最新已发布版本 |
-| `check-sni [域名]` | Reality 目标域名 12 项预检 |
+| `recover [--yes]` | 按持久清单恢复未完成操作；已提交的操作只完成清理 |
+| `check-sni [域名] [--target host:port] [--timeout N]` | Reality 目标域名预检；默认探测已保存的 `REALITY_TARGET`（显式域名时用该域名:443），有公布出来的等待上界 |
 | `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
 | `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
+| `change-h3 [--enable-h3\|--disable-h3]` | 显式选择 H3；启用前校验证书、模块和 UDP 归属 |
 | `change-cert-mode` / `renew-cert` | 换证书模式 / 续期证书 |
-| `show-links [--qr]` | 查看节点链接；`--qr` 追加每条链接的终端二维码 |
+| `show-links [--node N] [--qr\|--summary]` | 全文、单节点、摘要或二维码；查看不重写产物 |
 | `diagnose [--warp-probe] [--net]` | 一次性诊断 / 网络栈体检 |
 | `status [--raw]` | 状态面板 / 原始 systemctl 输出 |
 | `restart` / `repair-perms` | 重启服务 / 抢修文件权限 |
@@ -260,7 +276,7 @@ xtun status --raw
 
 ### IPv6 双栈
 
-安装时脚本会探测本机全局单播 IPv6（`ip -6 route get 2606:4700:4700::1111`，只认 `2000::/3`），问到「REALITY 直连节点 IPv6」时直接给默认值；留空（或 `--no-ipv6`）跳过。
+新装默认关闭 IPv6：基础问答不再探测本机地址、也不占一次问答，需要双栈时在确认页输入 `advanced`，或在命令行给 `--server-ip6`（检测只认全局单播 `2000::/3`）。已保存的选择（state、草稿、`--server-ip6`）照旧保留，重建不会因为改了默认值自动关掉已开的双栈。
 
 有 IPv6 时：
 
@@ -272,14 +288,22 @@ xtun status --raw
 
 ### XHTTP H3 直连下行
 
-满足以下两个条件时自动启用（`xtun status` 面板可见）：
+新装默认关闭。安装时通过 `--enable-h3` 或高级设置显式开启；已安装环境使用：
 
-1. nginx 编译含 `http_v3` 模块（Debian 13 的 1.26 自带；Debian 12 / Ubuntu 24.04 需 nginx.org 官方源）
-2. 证书模式为 `existing` / `acme-dns-cf`（客户端要能校验证书，自签名不行）
+```bash
+xtun change-h3 --enable-h3
+xtun change-h3 --disable-h3
+```
 
-任一不满足时整段功能自动关闭，`xtun diagnose` 会给出原因。
+开启需要同时通过三项本地检查：
 
-启用后：nginx 直接在公网 UDP 443 监听 QUIC（`listen 443 quic reuseport`，有 IPv6 再加 `[::]:443`），TLS 在 nginx 终结，并下发 `Alt-Svc: h3=":443"`。链接追加 `XHTTP-TLS-H3`（H3 直连）与 `XHTTP-SPLIT-CDN-H3`（上行 CDN h2、下行 H3 直连），这两条对应输出文件的节点 8 / 9。防火墙需放行 UDP 443；`xtun diagnose` 会探测 QUIC 监听并在缺失时报出。
+1. 实际 nginx 二进制包含 `http_v3` 模块。
+2. 证书与私钥匹配，DNS SAN 覆盖 XHTTP 域名，有效期和服务器用途正确，完整链通过发行版 Mozilla 公共根验证。Origin CA、自签、私有 CA、缺中间链或未知信任不能放行。
+3. UDP 443 空闲，或全部监听属于已有托管 H3 配置及 `nginx.service` 的进程；外来或无法确认的监听会阻止开启。
+
+证书模式只表示来源，不代替上述检查。缺依赖或条件不满足时明确失败，不停止外来 UDP 服务。旧 state 没有 H3 字段时，从完整的托管配置识别 `legacy-on` 或 `off`；证据不完整则标为 `unknown`，要求显式选择，不能用新默认删除旧配置。查看状态不写回迁移结果。
+
+nginx 的 QUIC 监听、`Alt-Svc`、节点 8/9 和输出说明使用同一次判定。节点 9 的下行 ALPN 已置于 `downloadSettings.tlsSettings.alpn=["h3"]`，外层 CDN 仍走 H2。本地检查通过不代表公网 UDP、客户端信任库或真实 H3 传输通过。节点 7 的 IPv6 split 路径问题和其它参数工作仍见 [参数契约](docs/PARAMETERS.md)。
 
 ### 一次性诊断
 
@@ -305,16 +329,18 @@ xtun diagnose
 
 ```bash
 xtun show-links
-xtun show-links --qr
+xtun show-links --summary
+xtun show-links --node 3
+xtun show-links --qr --node 3
 ```
 
-`show-links` 属于查看类命令：只读打印输出文件，不重写任何托管文件。加 `--qr` 在末尾逐条打印每个分享链接的终端二维码（ANSI，按节点名标注）。
+`show-links` 只读取已提交的输出文件；无参数打印全文，`--node N` 直接显示该节点链接和 PNG 位置。`--summary` 显示节点清单与文件位置。`--qr` 直接显示节点名称和 UTF8 二维码，不先输出全文；不能与 `--summary` 同用。编号只能是存在且启用的 1–9。
 
-上下行分离节点的链接有 1100–1700 字符，终端里画出来是 137×137 个字符块，手机对着终端扫成功率很低——这几条建议改用 PNG：
+二维码超过当前终端尺寸时只提示取用已有 PNG；默认尺寸为 80×24。缺 qrencode 时也可取用已有 PNG；编码器和 PNG 都不可用则返回非零。查看不会生成文件或重启服务。
 
 - PNG 目录在 `/root/xtun-qr/`（`0700`），每条节点一张，文件名「位次-节点名.png」（`01-…` 到 `09-…`），随链接一起重新生成
 - 取回本地：`scp root@<本机 IP>:/root/xtun-qr/'*.png' .`
-- `qrencode` 由安装器安装；已装节点缺它时 `apt-get install -y qrencode && xtun apply-config` 即可补齐 PNG
+- `qrencode` 由安装器安装；独立补齐缺失 PNG 与 NAS JSON 导出属于 W11.2/11.3，尚未交付。`apply-config` 会重建托管配置并应用服务，不属于查看或独立二维码重建
 
 ### 常用变更
 
@@ -326,11 +352,11 @@ xtun change-uuid --reality-only
 xtun change-uuid --xhttp-only
 ```
 
-这些 `change-*` 命令会走现有校验、重启、回滚流程。应用失败时会回滚最近一次托管变更。
+这些命令先展示字段差异、受影响节点、文件、服务动作与连接中断范围，再确认应用。UUID/path 等同值修改不创建备份、不重启服务。自动化脚本可显式添加 `--non-interactive`（或 `--yes`）；安装、恢复和卸载各自的确认参数见 `xtun help`。
 
-回滚只还原托管的配置文件。`/var/log/xtun` 下的操作日志不进回滚清单——它本来就不进备份，排障时恰恰要看这份现场记录。
+应用失败时按同代清单恢复文件、state、节点产物、权限和服务状态；恢复不完整会保留 pending，并提示 `xtun recover`。已提交的操作只补收尾，不反向回滚。日志内容、软件包、系统用户、实时网络参数、内核与外部注册分别保留或报告，不宣称已自动还原。
 
-参数支持 `--opt value` 和 `--opt=value` 两种写法，例如 `xtun change-sni --reality-sni=reality.example.com`。
+取值参数支持 `--opt value` 和 `--opt=value` 两种写法，例如 `xtun change-sni --reality-sni=reality.example.com`。无值开关（如 `--no-ipv6`）不接受 `= 值`；缺值、空值和未知项都会在动作开始前失败；方向相反的开关（`--enable-warp` / `--disable-warp`）同时给出会报冲突，不按“最后一个覆盖前一个”处理。敏感值（私钥、Token、profile）仍然只接受 `@文件路径` 或对应环境变量。
 
 ### 服务维护
 
@@ -429,7 +455,7 @@ xtun apply-config
 LimitNOFILE=1048576
 ```
 
-`worker_connections` 只能写在 `/etc/nginx/nginx.conf` 的 `events` 块里。xtun 接管主配置时（新装默认接管，`apply-config --manage-nginx-main` 可补开）直接写 `worker_connections 65535` + `multi_accept`；未接管的旧节点，`diagnose` 会报当前值并提示运行 `apply-config --manage-nginx-main` 由 xtun 接管，或手工在 `events` 块里调大。
+`worker_connections` 只能写在 `/etc/nginx/nginx.conf` 的 `events` 块里。新装默认不接管；明确选择接管或运行 `xtun apply-config --manage-nginx-main` 后，模板写入 `worker_connections 65535` + `multi_accept`。未接管时，`diagnose` 会报告当前值并给出接管或手工调整的建议；旧安装保留已保存的选择。
 
 ### 卸载
 
@@ -445,9 +471,9 @@ xtun uninstall --yes
 xtun uninstall --purge --yes
 ```
 
-`--purge` 会尝试卸载 `haproxy`、`nginx`、`jq`、`uuid-runtime`、`qrencode`，并清理 `/root/.acme.sh`、`/var/log/xtun` 等路径。旧版本装过 `cloudflare-warp`、带过核心巡检 timer，或用过 1.0.0 的 `/var/www/xtun-sub` 订阅目录的机器，卸载时会一并清掉遗留的 APT 源、keyring、`/var/lib/cloudflare-warp`、巡检单元和订阅目录。
+`--purge` 按安装归属记录尝试卸载脚本安装的软件包，预先存在或归属不明的共享包保留。ACME 流程移除本节点域名的证书，保留共享 `acme.sh` 本体和其它域名；旧 WARP 等资源按归属处理。结果分别列出删除、保留和未能确认项。
 
-不带 `--yes` 时会要求二次确认：先回答 `y` 确认停止服务并删除托管文件，再输入 `purge` 才会同时卸载软件包。`--purge` / `--yes` 语义不变。
+不带 `--yes` 时先回答 `y` 确认卸载；同时指定 `--purge` 时，再输入 `purge` 确认软件包清理。共享 HAProxy 的配置删除/reload 失败仍有已知遗留，见 [W02-R](docs/PLAN-UX-RELIABILITY.md#w02-r)；当前结果不能作为所有共享服务均已完整清理的证明。
 
 ## WARP 出站
 
@@ -643,7 +669,7 @@ bash xtun.sh install --non-interactive \
 
 ## 网络优化
 
-如果启用网络优化，脚本会先按当前架构集成第三方项目 `byJoey/Actions-bbr-v3` 提供的 Joey BBRv3 内核包：
+新装默认关闭网络优化，内核策略为 `none`。明确启用网络优化后会应用 sysctl/qdisc/helper；只有另外选择 `joey`，才会按架构使用第三方项目 `byJoey/Actions-bbr-v3` 的 Joey BBRv3 内核包：
 
 - `x86_64 / amd64` 使用上游 `x86_64-*` release
 - `aarch64 / arm64` 使用上游 `arm64-*` release
@@ -653,9 +679,10 @@ bash xtun.sh install --non-interactive \
 
 执行时机：
 
-- 交互式安装时会询问“是否启用网络优化”，默认是 `y`
+- 交互式安装在确认页输入 `advanced` 后进入网络优化选项；新装默认 `n`，基础安装不额外询问
 - 非交互安装时传入 `--enable-net-opt` 会自动执行；传入 `--disable-net-opt` 会跳过
-- 启用网络优化后还会问一次“是否安装 Joey BBRv3 第三方内核”，默认 `y`；不想装第三方内核用 `--bbr-kernel none`（只写 sysctl / helper / service，不改内核）
+- 高级项启用网络优化后可选择 Joey 内核，新装默认 `n` / `none`；`--bbr-kernel none` 只写 sysctl / helper / service，明确选择 `--bbr-kernel joey` 才安装第三方内核
+- 重建或恢复草稿保留已保存的网络优化/内核选择；新默认不会覆盖旧选择
 - 已安装过旧版网络优化的机器，更新脚本后可直接运行 `xtun apply-net-opt` 重新应用；`--bbr-kernel joey|none` 可切换内核策略并写回状态
 - 当前网络优化只面向 Debian / Ubuntu 系，并要求当前机器架构能匹配上面的 `amd64` 或 `arm64`
 - 如果当前已经运行 Joey BBRv3，脚本只会刷新 sysctl、helper 和 systemd 服务，不会重复安装内核
@@ -697,13 +724,15 @@ xtun diagnose --net
 
 ### nginx 主配置接管
 
-`worker_connections` / `worker_rlimit_nofile` 只能写在 `/etc/nginx/nginx.conf`。新装默认接管（交互问一次，默认 `y`；`--no-manage-nginx-main` 可关闭）。从旧版本升级的节点默认不接管，确认后用下面命令开启：
+`worker_connections` / `worker_rlimit_nofile` 只能写在 `/etc/nginx/nginx.conf`。新装默认不接管；可在 `advanced` 中明确选择，或使用 `--manage-nginx-main`。旧安装保留已保存的选择，没有接管记录时不因升级自动接管。已安装节点需要开启时运行：
 
 ```bash
 xtun apply-config --manage-nginx-main
 ```
 
-接管模板：`worker_rlimit_nofile 1048576`、`worker_connections 65535` + `multi_accept`，并保留两个用户块（`xtun-user:nginx-main` / `xtun-user:nginx-http`），手工调优写在标记之间就能活过每次重写。卸载时若备份目录里有接管前的 `nginx.conf` 会自动还原，否则写回发行版默认模板。Ubuntu 24.04 的 nginx 1.24 不认独立的 `http2 on;` 指令，脚本会自动退回 `listen ... ssl http2;` 老语法。
+接管模板：`worker_rlimit_nofile 1048576`、`worker_connections 65535` + `multi_accept`，并保留两个用户块（`xtun-user:nginx-main` / `xtun-user:nginx-http`），手工调优写在标记之间就能活过每次重写。首次接管前会把 `/etc/nginx/nginx.conf` 的原件存到 `/var/lib/xtun/originals/`（不与可轮转的事务备份混放）。
+
+卸载或 `xtun apply-config --no-manage-nginx-main` 时按「首次原件 → 旧备份里最早的一份 → 保留当前文件并报告」的顺序处理；**找不到可信原件时不会写回发行版默认模板**，而是保留当前文件并在报告里列为「未能确认」。想停止接管又确认过当前文件可以丢弃时，也可以自己先备份再手工替换。Ubuntu 24.04 的 nginx 1.24 不认独立的 `http2 on;` 指令，脚本会自动退回 `listen ... ssl http2;` 老语法。
 
 相关文件：
 
@@ -727,21 +756,40 @@ xtun apply-config --manage-nginx-main
 
 ## 故障处理
 
+### 有未完成操作时恢复
+
+`status`、`diagnose` 只报告未完成操作；新的修改会被阻止。先处理报告中的失败原因，再运行：
+
+```bash
+xtun recover
+xtun recover --yes    # 已明确决定按清单恢复时
+```
+
+若安装尚未写入管理命令，使用同一候选目录的 `bash xtun.sh recover`。恢复会核对保存的文件和服务状态；已提交但收尾中断的操作只补清理。恢复成功不代表原修改成功，需要重新发起原任务。清单损坏或恢复失败时保留现场，不手工删除 pending 绕过检查。
+
+恢复不会卸载已安装的软件包、删除新增系统用户或清空运行日志。实时 sysctl、qdisc、RPS/XPS、内核与外部注册须单独核对，不能仅凭文件恢复就认定已还原。
+
 ### 交互安装失败后继续
 
-交互安装时，脚本会把已填写的值保存到：
+交互安装时，脚本会把已确认过的选择保存到：
 
 ```bash
 /root/.xtun-install-draft.env
 ```
 
-如果中途在预检、下载、证书、WARP 或配置校验阶段失败，再次执行：
+草稿带 schema、任务类型、来源和更新时间，权限 `0600`。外部证书/WARP 等敏感输入沿用间接引用（例如 `@/path`）；安装生成的身份和密钥保存在私有草稿中，以便重试时保持一致。
+
+如果中途在依赖准备、下载、证书、WARP 或配置校验阶段失败，先按提示处理未完成操作；确认恢复完成后再次执行并选择任务：
 
 ```bash
-bash xtun.sh
+bash xtun.sh            # 菜单里选「1. 安装 / 恢复草稿 / 重建」
+bash xtun.sh install --task resume --non-interactive   # 非交互恢复
 ```
 
-脚本会带回上次已填写的值。安装成功后 draft 文件会自动删除。
+恢复沿用草稿里的身份与选择；想丢掉草稿从零开始，菜单里选「丢弃草稿并重新安装」，
+或 `xtun.sh install --task fresh --discard-draft`。安装成功后 draft 文件会自动删除。
+
+节点资料 `/root/xtun-output.md` 和 PNG 为 `0600`，PNG 目录为 `0700`。失败结果会说明停在哪个安装阶段、哪些软件包保留，以及草稿和文件/服务是否已恢复。
 
 ### Xray 或 443 不正常
 

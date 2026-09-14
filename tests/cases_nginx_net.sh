@@ -280,7 +280,7 @@ run_h3_nginx_listen_case() {
   TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
   CERT_MODE="existing"
   nginx_version_at_least() { return 0; }
-  h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }
+  stub_h3_capability_ready
 
   # 条件满足：quic 监听 + Alt-Svc
   nginx_v3_capable() { return 0; }
@@ -297,6 +297,7 @@ run_h3_nginx_listen_case() {
   # 条件不满足：整段关闭
   SERVER_IP6=""
   nginx_v3_capable() { return 1; }
+  h3_refresh_decision
   write_nginx_config
   assert_absent 'quic reuseport' "${NGINX_CONFIG_FILE}"
   assert_absent 'Alt-Svc' "${NGINX_CONFIG_FILE}"
@@ -305,6 +306,8 @@ run_h3_nginx_listen_case() {
   # 自签名证书同样关闭
   nginx_v3_capable() { return 0; }
   CERT_MODE="self-signed"
+  certificate_capability_report() { printf 'self-signed|fixture'; }
+  h3_refresh_decision
   [[ -n "$(h3_disabled_reason)" ]]
   write_nginx_config
   assert_absent 'quic reuseport' "${NGINX_CONFIG_FILE}"
@@ -336,8 +339,7 @@ run_h3_links_case() {
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
   CERT_MODE="existing"
-  nginx_v3_capable() { return 0; }
-  h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }
+  stub_h3_capability_ready
 
   # 5 + 2 条 H3 链接
   [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 7 ]]
@@ -352,6 +354,7 @@ run_h3_links_case() {
 
   # 模块缺失时回到 5 条
   nginx_v3_capable() { return 1; }
+  h3_refresh_decision
   [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 5 ]]
 
   rm -rf "${workdir}"

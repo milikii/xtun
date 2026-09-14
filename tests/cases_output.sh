@@ -53,6 +53,10 @@ run_warp_enabled_case() {
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.peers[0].endpoint == "'"${DEFAULT_WARP_ENDPOINT}"'"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingObfsMode == true' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingHeader == "Referer"' "${XRAY_CONFIG_FILE}" >/dev/null
+  # 日志路径必须是展开后的真实路径：单引号里写 ${XRAY_LOG_DIR} 会原样落进 JSON，
+  # xray 启动时找不到 access.log 就会整个起不来。
+  jq -e --arg p "${XRAY_LOG_DIR}/access.log" '.log.access == $p' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e --arg p "${XRAY_LOG_DIR}/error.log" '.log.error == $p' "${XRAY_CONFIG_FILE}" >/dev/null
   bash -n "${STATE_FILE}"
 
   # shellcheck disable=SC1090
@@ -280,7 +284,7 @@ run_service_config_helper_case() {
   assert_contains 'server nginx_cdn 127.0.0.1:8443 check' "${HAPROXY_CONFIG}"
   XRAY_LOGROTATE_FILE="${workdir}/xray-logrotate"
   write_xray_logrotate_config
-  assert_contains '/var/log/xray/access.log /var/log/xray/error.log /var/log/xtun/operations.log {' "${XRAY_LOGROTATE_FILE}"
+  assert_contains "${XRAY_LOG_DIR}/access.log ${XRAY_LOG_DIR}/error.log /var/log/xtun/operations.log {" "${XRAY_LOGROTATE_FILE}"
   assert_contains 'rotate 7' "${XRAY_LOGROTATE_FILE}"
 }
 
@@ -433,6 +437,7 @@ run_fallback_site_deploy_case() {
 
 run_xray_config_escape_case() {
   local workdir=""
+  local status=0
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
@@ -441,7 +446,7 @@ run_xray_config_escape_case() {
   SERVER_IP="203.0.113.13"
   REALITY_UUID="66666666-6666-6666-6666-666666666666"
   REALITY_SNI="reality4.example.com"
-  REALITY_TARGET='mirror"host.example.com:443'
+  REALITY_TARGET="mirror.example.com:443"
   REALITY_SHORT_ID="mnop3456"
   REALITY_PRIVATE_KEY='private"key'
   XHTTP_UUID="77777777-7777-7777-7777-777777777777"
@@ -454,10 +459,21 @@ run_xray_config_escape_case() {
   write_xray_config
 
   jq -e '.inbounds[] | select(.tag == "reality-vision") | .streamSettings.realitySettings.target == "127.0.0.1:2444"' "${XRAY_CONFIG_FILE}" >/dev/null
-  jq -e '.inbounds[] | select(.tag == "reality-fallback") | .settings.address == "mirror\"host.example.com"' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.inbounds[] | select(.tag == "reality-fallback") | .settings.address == "mirror.example.com"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "reality-vision") | .streamSettings.realitySettings.privateKey == "private\"key"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.path == "/assets/\"quoted\""' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .settings.decryption == "enc\"value"' "${XRAY_CONFIG_FILE}" >/dev/null
+
+  # 目标地址里的引号不再是被转义的问题，而是在生成之前就被拒绝的非法输入。
+  # 以前 is_ipv4 的 END 分支恒返回 0，这类值会被当成「合法地址」写进配置。
+  set +e
+  (
+    REALITY_TARGET='mirror"host.example.com:443'
+    write_xray_config
+  ) >/dev/null 2>&1
+  status=$?
+  set -e
+  [[ "${status}" -ne 0 ]]
 }
 
 run_generated_file_atomic_failure_case() {
@@ -774,11 +790,54 @@ run_node_link_entries_case() {
   load_functions
 }
 
+run_output_write_failure_case() {
+  local workdir=""
+  local status=0
+
+  load_functions
+  stub_side_effects
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  output_file_text() { printf 'private-node-material\n'; }
+  write_link_qr_pngs() { touch "${workdir}/qr-written"; }
+  chmod() {
+    [[ "${!#}" != "${OUTPUT_FILE}" ]] || return 1
+    command chmod "$@"
+  }
+  write_output_file || status=$?
+  [[ "${status}" -ne 0 && ! -e "${workdir}/qr-written" ]]
+  unset -f chmod
+
+  # 缺 qrencode 时清理旧二维码也必须成功，否则会提交新配置配旧二维码。
+  load_functions
+  stub_side_effects
+  prepare_workspace "${workdir}"
+  mkdir -p "${QR_OUTPUT_DIR}"
+  printf old > "${QR_OUTPUT_DIR}/old.png"
+  have_qrencode() { return 1; }
+  backup_path() { return 1; }
+  status=0
+  write_link_qr_pngs 2>/dev/null || status=$?
+  [[ "${status}" -ne 0 && -f "${QR_OUTPUT_DIR}/old.png" ]]
+  backup_path() { :; }
+  rm() {
+    [[ "${!#}" != "${QR_OUTPUT_DIR}" ]] || return 1
+    command rm "$@"
+  }
+  status=0
+  write_link_qr_pngs 2>/dev/null || status=$?
+  [[ "${status}" -ne 0 && -f "${QR_OUTPUT_DIR}/old.png" ]]
+  unset -f rm
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_link_qr_png_case() {
   local workdir=""
   local png_dir=""
   local png_count=0
   local png_file=""
+  local status=0
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
@@ -827,6 +886,7 @@ run_link_qr_png_case() {
   [[ "$(stat -c '%a' "${QR_OUTPUT_DIR}/01-HKG-REALITY.png")" == "600" ]]
   [[ ! -e "${QR_OUTPUT_DIR}/stale.png" ]]
   [[ -f "${OUTPUT_FILE}" ]]
+  [[ "$(stat -c '%a' "${OUTPUT_FILE}")" == "600" ]]
 
   # qrencode 缺失：不建目录、不失败，stderr 提示 qrencode
   load_functions
@@ -854,7 +914,8 @@ run_link_qr_png_case() {
   [[ ! -e "${QR_OUTPUT_DIR}" ]]
   printf '%s' "${err}" | grep -q 'qrencode'
 
-  # qrencode 单条失败：目录在但为空，stderr 提示生成失败
+  # qrencode 单条失败：整批作废，这一代二维码不提交，上一代原样留着。
+  # 半套新图或者「新配置配旧图」都是不能提交的状态（D12/H14）。
   load_functions
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
@@ -875,10 +936,21 @@ run_link_qr_png_case() {
   have_qrencode() { return 0; }
   qrencode() { return 1; }
 
+  QR_OUTPUT_DIR="${workdir}/root/xtun-qr"
+  mkdir -p "${QR_OUTPUT_DIR}"
+  printf 'old-png' > "${QR_OUTPUT_DIR}/01-HKG-REALITY.png"
+
+  set +e
   err="$(write_output_file 2>&1 >/dev/null)"
+  status=$?
+  set -e
+
+  [[ "${status}" -ne 0 ]]
   [[ -f "${OUTPUT_FILE}" ]]
-  [[ -d "${QR_OUTPUT_DIR}" ]]
-  [[ -z "$(ls -A "${QR_OUTPUT_DIR}")" ]]
+  # 上一代二维码还在，而且没被动过
+  [[ "$(cat "${QR_OUTPUT_DIR}/01-HKG-REALITY.png")" == "old-png" ]]
+  # 暂存目录不能留下：失败现场只该是备份目录里的那份
+  [[ -z "$(find "$(dirname "${QR_OUTPUT_DIR}")" -maxdepth 1 -name '*.staging.*' -print -quit)" ]]
   printf '%s' "${err}" | grep -q '生成失败'
 
   load_functions
@@ -904,8 +976,7 @@ run_h3_output_blocks_case() {
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
   CERT_MODE="existing"
-  nginx_v3_capable() { return 0; }
-  h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }
+  stub_h3_capability_ready
 
   write_output_file
 

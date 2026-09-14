@@ -33,7 +33,7 @@ resolve_change_value() {
   fi
 
   printf -v "${var_name}" '%s' ""
-  prompt_with_default "${var_name}" "${prompt_text}" "${default_value}"
+  prompt_with_default "${var_name}" "${prompt_text}" "${default_value}" || return $?
 }
 
 resolve_cert_mode_change_targets() {
@@ -49,7 +49,7 @@ resolve_cert_mode_change_targets() {
     CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")" || exit 1
   else
     CERT_MODE=""
-    prompt_cert_mode_selection "新的证书模式序号" "${old_cert_mode}"
+    prompt_cert_mode_selection "新的证书模式序号" "${old_cert_mode}" || return $?
   fi
   resolve_change_value XHTTP_DOMAIN "XHTTP CDN 域名" "${old_xhttp_domain}" "${xhttp_domain_overridden}" "${new_xhttp_domain}"
 }
@@ -61,9 +61,14 @@ apply_request_literal_spec() {
   local spec_option=""
   local request_key=""
   local request_value=""
+  local conflict_group=""
 
-  IFS=':' read -r spec_option request_key request_value <<< "${spec}"
+  IFS='|' read -r spec_option request_key request_value conflict_group <<< "${spec}"
+  reject_flag_assignment "${spec_option}" "${option}"
   [[ "${option}" == "${spec_option}" ]] || return 1
+  # 写同一个键的无值开关天然互斥：--enable-warp 与 --disable-warp 同时给出就是冲突，
+  # 不管谁先谁后。以前后一个会静默覆盖前一个。
+  record_arg_group "${conflict_group:-${request_key}}" "${spec_option}"
   request_ref["${request_key}"]="${request_value}"
   return 0
 }
@@ -77,11 +82,10 @@ apply_request_value_spec() {
   local override_key=""
 
   shift 3
-  IFS=':' read -r spec_option request_key override_key <<< "${spec}"
-  [[ "${option}" == "${spec_option}" ]] || return 1
-  require_option_value "${option}" "$@"
-  enforce_indirect_option_value "${option}" "${1}"
-  request_ref["${request_key}"]="${1}"
+  IFS='|' read -r spec_option request_key override_key <<< "${spec}"
+  [[ "${option}" == "${spec_option}" || "${option}" == "${spec_option}="* ]] || return 1
+  option_take_value "${spec_option}" "${option}" "$@"
+  request_ref["${request_key}"]="${OPTION_VALUE}"
   if [[ -z "${override_key}" ]]; then
     override_key="$(request_value_presence_key "${request_key}")"
   fi
@@ -99,6 +103,8 @@ parse_request_args_by_specs() {
   local spec=""
 
   shift 4
+  # 一次解析就是一次动作：互斥记录必须从零开始，不能被上一次动作污染。
+  reset_arg_groups
   while [[ $# -gt 0 ]]; do
     if handle_change_common_arg "${1}"; then
       shift
@@ -116,7 +122,7 @@ parse_request_args_by_specs() {
     if [[ "${consumed}" -eq 0 ]]; then
       for spec in "${value_specs_ref[@]}"; do
         if apply_request_value_spec "${request_name}" "${1}" "${spec}" "${@:2}"; then
-          consumed=2
+          consumed="${OPTION_ARGS_CONSUMED}"
           break
         fi
       done
@@ -136,7 +142,7 @@ apply_request_overrides() {
 
   shift
   for spec in "$@"; do
-    IFS=':' read -r request_key target_var override_key <<< "${spec}"
+    IFS='|' read -r request_key target_var override_key <<< "${spec}"
     if [[ -z "${override_key}" ]]; then
       override_key="$(request_value_presence_key "${request_key}")"
     fi
@@ -163,18 +169,18 @@ init_change_warp_request() {
 parse_change_warp_args() {
   local request_name="${1}"
   local literal_specs=(
-    "--enable-warp:target_mode:enable"
-    "--disable-warp:target_mode:disable"
+    "--enable-warp|target_mode|enable"
+    "--disable-warp|target_mode|disable"
   )
   local value_specs=(
-    "--warp-private-key:warp_private_key"
-    "--warp-profile:warp_profile_source"
-    "--warp-address-v4:warp_address_v4"
-    "--warp-address-v6:warp_address_v6"
-    "--warp-peer-public-key:warp_peer_public_key"
-    "--warp-endpoint:warp_endpoint"
-    "--warp-reserved:warp_reserved"
-    "--warp-mtu:warp_mtu"
+    "--warp-private-key|warp_private_key"
+    "--warp-profile|warp_profile_source"
+    "--warp-address-v4|warp_address_v4"
+    "--warp-address-v6|warp_address_v6"
+    "--warp-peer-public-key|warp_peer_public_key"
+    "--warp-endpoint|warp_endpoint"
+    "--warp-reserved|warp_reserved"
+    "--warp-mtu|warp_mtu"
   )
 
   parse_request_args_by_specs "${request_name}" literal_specs value_specs "未知的 change-warp 参数：" "${@:2}"
@@ -184,14 +190,14 @@ apply_warp_change_request() {
   local request_name="${1}"
 
   apply_request_overrides "${request_name}" \
-    "warp_private_key:WARP_PRIVATE_KEY" \
-    "warp_profile_source:WARP_PROFILE_SOURCE" \
-    "warp_address_v4:WARP_ADDRESS_V4" \
-    "warp_address_v6:WARP_ADDRESS_V6" \
-    "warp_peer_public_key:WARP_PEER_PUBLIC_KEY" \
-    "warp_endpoint:WARP_ENDPOINT" \
-    "warp_reserved:WARP_RESERVED" \
-    "warp_mtu:WARP_MTU"
+    "warp_private_key|WARP_PRIVATE_KEY" \
+    "warp_profile_source|WARP_PROFILE_SOURCE" \
+    "warp_address_v4|WARP_ADDRESS_V4" \
+    "warp_address_v6|WARP_ADDRESS_V6" \
+    "warp_peer_public_key|WARP_PEER_PUBLIC_KEY" \
+    "warp_endpoint|WARP_ENDPOINT" \
+    "warp_reserved|WARP_RESERVED" \
+    "warp_mtu|WARP_MTU"
 }
 
 init_change_uuid_request() {
@@ -208,12 +214,12 @@ init_change_uuid_request() {
 parse_change_uuid_args() {
   local request_name="${1}"
   local literal_specs=(
-    "--reality-only:rotate_xhttp:0"
-    "--xhttp-only:rotate_reality:0"
+    "--reality-only|rotate_xhttp|0"
+    "--xhttp-only|rotate_reality|0"
   )
   local value_specs=(
-    "--reality-uuid:reality_uuid"
-    "--xhttp-uuid:xhttp_uuid"
+    "--reality-uuid|reality_uuid"
+    "--xhttp-uuid|xhttp_uuid"
   )
 
   parse_request_args_by_specs "${request_name}" literal_specs value_specs "未知的 change-uuid 参数：" "${@:2}"
@@ -227,7 +233,7 @@ resolve_change_warp_target_mode() {
       die "change-warp 在非交互模式下必须显式传入 --enable-warp 或 --disable-warp。"
     fi
 
-    read -r -p "请选择 WARP 操作 [enable/disable] [${ENABLE_WARP:-yes}]: " requested_mode
+    read_line_or_cancel requested_mode "请选择 WARP 操作 [enable/disable] [${ENABLE_WARP:-yes}]: " || return $?
     requested_mode="${requested_mode:-${ENABLE_WARP:-yes}}"
   fi
 
@@ -258,17 +264,17 @@ parse_change_cert_mode_args() {
   local request_name="${1}"
   local literal_specs=()
   local value_specs=(
-    "--cert-mode:cert_mode:cert_mode_overridden"
-    "--xhttp-domain:xhttp_domain:xhttp_domain_overridden"
-    "--cert-file:cert_source_file"
-    "--key-file:key_source_file"
-    "--cert-pem:cert_source_pem"
-    "--key-pem:key_source_pem"
-    "--acme-email:acme_email"
-    "--acme-ca:acme_ca"
-    "--cf-dns-token:cf_dns_token"
-    "--cf-dns-account-id:cf_dns_account_id"
-    "--cf-dns-zone-id:cf_dns_zone_id"
+    "--cert-mode|cert_mode|cert_mode_overridden"
+    "--xhttp-domain|xhttp_domain|xhttp_domain_overridden"
+    "--cert-file|cert_source_file"
+    "--key-file|key_source_file"
+    "--cert-pem|cert_source_pem"
+    "--key-pem|key_source_pem"
+    "--acme-email|acme_email"
+    "--acme-ca|acme_ca"
+    "--cf-dns-token|cf_dns_token"
+    "--cf-dns-account-id|cf_dns_account_id"
+    "--cf-dns-zone-id|cf_dns_zone_id"
   )
 
   parse_request_args_by_specs "${request_name}" literal_specs value_specs "未知的 change-cert-mode 参数：" "${@:2}"
@@ -288,13 +294,13 @@ apply_cert_mode_change_request() {
     "${request_ref[cert_mode]}" \
     "${request_ref[xhttp_domain]}"
   apply_request_overrides "${request_name}" \
-    "cert_source_file:CERT_SOURCE_FILE" \
-    "key_source_file:KEY_SOURCE_FILE" \
-    "cert_source_pem:CERT_SOURCE_PEM" \
-    "key_source_pem:KEY_SOURCE_PEM" \
-    "acme_email:ACME_EMAIL" \
-    "acme_ca:ACME_CA" \
-    "cf_dns_token:CF_DNS_TOKEN" \
-    "cf_dns_account_id:CF_DNS_ACCOUNT_ID" \
-    "cf_dns_zone_id:CF_DNS_ZONE_ID"
+    "cert_source_file|CERT_SOURCE_FILE" \
+    "key_source_file|KEY_SOURCE_FILE" \
+    "cert_source_pem|CERT_SOURCE_PEM" \
+    "key_source_pem|KEY_SOURCE_PEM" \
+    "acme_email|ACME_EMAIL" \
+    "acme_ca|ACME_CA" \
+    "cf_dns_token|CF_DNS_TOKEN" \
+    "cf_dns_account_id|CF_DNS_ACCOUNT_ID" \
+    "cf_dns_zone_id|CF_DNS_ZONE_ID"
 }

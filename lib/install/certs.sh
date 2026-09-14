@@ -5,6 +5,87 @@
 # 负责证书输入、签发、校验与清理
 # ------------------------------
 
+# 使用发行版随 ca-certificates 提供的 Mozilla 根，不接受管理员另外导入的
+# /usr/local/share/ca-certificates（Origin CA / 私有 CA 不等于客户端公共信任）。
+certificate_public_trust_roots() {
+  local root="" found=0
+  for root in /usr/share/ca-certificates/mozilla/*.crt; do
+    [[ -r "${root}" ]] || continue
+    cat "${root}" || return 1
+    found=1
+  done
+  [[ "${found}" -eq 1 ]]
+}
+
+# 只读，输出 state|原因；不写临时证书、不加载私有信任、不联网补中间链。
+# ready 只证明本机按公共根校验通过，不代表每个客户端的信任库或公网路径通过。
+certificate_capability_report() {
+  local cert="${1}" key="${2}" hostname="${3}"
+  local cert_key="" private_key="" san="" subject="" issuer="" result="" roots=""
+  if ! command -v openssl >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; then
+    printf 'unverified|缺少 openssl/sha256sum，证书能力未验证'
+    return
+  fi
+  if [[ ! -r "${cert}" || ! -r "${key}" || -z "${hostname}" ]]; then
+    printf 'unverified|证书、私钥或域名尚未就绪'
+    return
+  fi
+  if ! cert_key="$(openssl x509 -in "${cert}" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum)" \
+    || ! private_key="$(openssl pkey -in "${key}" -passin pass: -pubout -outform DER 2>/dev/null | sha256sum)"; then
+    printf 'invalid|证书或私钥无法解析（不支持交互解密私钥）'
+    return
+  fi
+  if [[ "${cert_key}" != "${private_key}" ]]; then
+    printf 'mismatch|证书与私钥不匹配'
+    return
+  fi
+  san="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null)" || {
+    printf 'unverified|当前 openssl 无法读取证书 SAN'; return;
+  }
+  if [[ "${san}" != *DNS:* ]]; then
+    printf 'hostname|证书缺少 DNS subjectAltName'
+    return
+  fi
+  # 先只以叶证书作信任锚核对名称、时间及服务器用途，再单独核对公共信任链。
+  if ! result="$(openssl verify -trusted "${cert}" -partial_chain -purpose sslserver \
+      -verify_hostname "${hostname}" "${cert}" 2>&1)"; then
+    case "${result}" in
+      *'error 62 '*) printf 'hostname|证书 SAN 不匹配 XHTTP 域名' ;;
+      *'error 10 '*) printf 'expired|证书或证书链已经过期' ;;
+      *'error 9 '*) printf 'not-yet-valid|证书或证书链尚未生效' ;;
+      *'error 26 '*) printf 'purpose|证书不适用于 TLS 服务器认证' ;;
+      *) printf 'invalid|证书名称、有效期或用途校验失败' ;;
+    esac
+    return
+  fi
+  subject="$(openssl x509 -in "${cert}" -noout -subject -nameopt RFC2253 2>/dev/null)"
+  issuer="$(openssl x509 -in "${cert}" -noout -issuer -nameopt RFC2253 2>/dev/null)"
+  if [[ "${issuer,,}" == *cloudflare*origin* || "${subject,,}" == *cloudflare*origin* ]]; then
+    printf 'origin-ca|Cloudflare Origin CA 仅用于回源，不是终端直连公共信任证书'
+    return
+  fi
+  if [[ "${subject#subject=}" == "${issuer#issuer=}" ]]; then
+    printf 'self-signed|自签证书不能证明客户端公共信任'
+    return
+  fi
+  if ! roots="$(certificate_public_trust_roots)" || [[ -z "${roots}" ]]; then
+    printf 'unverified|没有可用的发行版 Mozilla 公共根，信任未验证'
+    return
+  fi
+  if ! result="$(openssl verify -trusted <(printf '%s\n' "${roots}") -untrusted "${cert}" \
+      -purpose sslserver -verify_hostname "${hostname}" "${cert}" 2>&1)"; then
+    case "${result}" in
+      *'error 10 '*) printf 'expired|证书链已经过期' ;;
+      *'error 9 '*) printf 'not-yet-valid|证书链尚未生效' ;;
+      *'error 20 '*|*'error 21 '*|*'error 19 '*|*'error 18 '*)
+        printf 'untrusted|证书链不受公共根信任（缺中间证书、私有 CA 或未知信任）' ;;
+      *) printf 'unverified|公共信任链校验失败，未证明客户端信任' ;;
+    esac
+    return
+  fi
+  printf 'ready|密钥、SAN、有效期、服务器用途及公共信任链检查通过'
+}
+
 clear_existing_cert_inputs() {
   CERT_SOURCE_FILE=""
   KEY_SOURCE_FILE=""
@@ -22,17 +103,17 @@ clear_acme_dns_cf_settings() {
 
 prompt_optional_cloudflare_scope() {
   if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-    read -r -p "Cloudflare Account ID（可选）: " CF_DNS_ACCOUNT_ID
+    read_line_or_cancel CF_DNS_ACCOUNT_ID "Cloudflare Account ID（可选）: " || return $?
   fi
   if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-    read -r -p "Cloudflare DNS API 使用的 Zone ID（可选）: " CF_DNS_ZONE_ID
+    read_line_or_cancel CF_DNS_ZONE_ID "Cloudflare DNS API 使用的 Zone ID（可选）: " || return $?
   fi
 }
 
 prompt_acme_dns_cf_inputs() {
-  prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}"
-  prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
-  prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌"
+  prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}" || return $?
+  prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}" || return $?
+  prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌" || return $?
   prompt_optional_cloudflare_scope
 }
 
@@ -61,27 +142,70 @@ prepare_existing_cert_inputs() {
     die "existing 模式下，请提供 --cert-file/--key-file，或 --cert-pem/--key-pem。"
   fi
 
-  read -r -p "证书输入方式 [path/pem] [path]，也可以直接输入证书文件路径: " first_input
-  input_mode="${first_input:-path}"
+  # 一次输入同时承担「选输入方式」和「给证书路径」：这条路是首次安装最常见的，
+  # 多问一次「path 还是 pem」就多占一次必要输入（D06 的 8 次上限）。
+  # 私钥路径默认跟证书同一个目录，回车即可。
+  prompt_with_default CERT_SOURCE_FILE "证书文件路径（输入 pem 改为粘贴 PEM）" "${TLS_CERT_FILE}" || return $?
+  first_input="${CERT_SOURCE_FILE}"
 
-  case "${input_mode}" in
-    path|'')
-      prompt_with_default CERT_SOURCE_FILE "现有证书文件路径" ""
-      prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" ""
+  case "${first_input}" in
+    '')
+      CERT_SOURCE_FILE="${TLS_CERT_FILE}"
+      prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" "${TLS_KEY_FILE}" || return $?
       ;;
     pem)
-      prompt_multiline_value CERT_SOURCE_PEM "请输入证书 PEM 内容"
-      prompt_multiline_value KEY_SOURCE_PEM "请输入私钥 PEM 内容"
+      CERT_SOURCE_FILE=""
+      prompt_multiline_value CERT_SOURCE_PEM "请输入证书 PEM 内容" || return $?
+      prompt_multiline_value KEY_SOURCE_PEM "请输入私钥 PEM 内容" || return $?
       ;;
     *)
-      if [[ -f "${input_mode}" || "${input_mode}" == /* || "${input_mode}" == ./* || "${input_mode}" == ../* ]]; then
-        CERT_SOURCE_FILE="${input_mode}"
-        prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" ""
+      if [[ -f "${first_input}" || "${first_input}" == /* || "${first_input}" == ./* || "${first_input}" == ../* ]]; then
+        CERT_SOURCE_FILE="${first_input}"
+        prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" "${TLS_KEY_FILE}" || return $?
       else
         die "证书输入方式只能是 path、pem，或者直接输入证书文件路径。"
       fi
       ;;
   esac
+}
+
+# 只读检查：existing 模式下证书/私钥必须存在且可读。
+# 缺文件要在这里（确认前）就说清楚，不能等写完托管配置才发现（D07）。
+# 原因用返回字符串的方式给出来（不 die），这样问答阶段可以在命令替换里取到它，
+# 而 die 的版本留给预检和 validate。
+cert_input_files_readonly_reason() {
+  case "${CERT_MODE:-}" in
+    existing) ;;
+    *) return 0 ;;
+  esac
+
+  if [[ -n "${CERT_SOURCE_PEM}" || -n "${KEY_SOURCE_PEM}" ]]; then
+    [[ -n "${CERT_SOURCE_PEM}" && -n "${KEY_SOURCE_PEM}" ]] \
+      || printf 'existing 模式下，证书 PEM 内容和私钥 PEM 内容必须同时提供。'
+    return 0
+  fi
+
+  if [[ -z "${CERT_SOURCE_FILE}" ]]; then
+    printf 'existing 模式必须提供证书文件路径。'
+  elif [[ -z "${KEY_SOURCE_FILE}" ]]; then
+    printf 'existing 模式必须提供私钥文件路径。'
+  elif [[ ! -f "${CERT_SOURCE_FILE}" ]]; then
+    printf '证书文件不存在：%s' "${CERT_SOURCE_FILE}"
+  elif [[ ! -r "${CERT_SOURCE_FILE}" ]]; then
+    printf '证书文件不可读：%s' "${CERT_SOURCE_FILE}"
+  elif [[ ! -f "${KEY_SOURCE_FILE}" ]]; then
+    printf '私钥文件不存在：%s' "${KEY_SOURCE_FILE}"
+  elif [[ ! -r "${KEY_SOURCE_FILE}" ]]; then
+    printf '私钥文件不可读：%s' "${KEY_SOURCE_FILE}"
+  fi
+  return 0
+}
+
+cert_input_files_readonly_check() {
+  local reason=""
+
+  reason="$(cert_input_files_readonly_reason)"
+  [[ -z "${reason}" ]] || die "${reason}"
 }
 
 prompt_cert_mode_inputs() {
@@ -317,6 +441,7 @@ stage_and_promote_tls_assets() {
   # 是磁盘上那份旧证书，它当然是好的，于是「换证书失败」会被报成换证书成功。
   [[ -f "${stage_cert_file}" && -f "${stage_key_file}" ]] || return 1
   validate_tls_assets_with_paths "${stage_cert_file}" "${stage_key_file}" || return 1
+  h3_prepare_generation "${stage_cert_file}" "${stage_key_file}" || return 1
   promote_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
 }
 
@@ -345,7 +470,7 @@ write_tls_assets() {
   cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"
   [[ "${status}" -eq 0 ]] || return "${status}"
 
-  ensure_managed_permissions || return 1
+  ensure_managed_permissions tls || return 1
   validate_tls_assets
 }
 

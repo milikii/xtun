@@ -8,11 +8,34 @@
 
 # 探测层 ----------------------------------------------------------------
 
+# 探测预算：只接受正整数秒。0 / 00 / 负数 / 文本都表示「没有上界」，一律拒绝；
+# 前导零按数值规范化（010 -> 10），判定层拿到的总是规范形式（D07）。
+sni_normalize_timeout() {
+  local raw="${1-}"
+  local normalized=""
+
+  [[ "${raw}" =~ ^[0-9]+$ ]] || return 1
+  normalized="$(printf '%s' "${raw}" | sed 's/^0*//')"
+  [[ -n "${normalized}" ]] || return 1
+  printf '%s' "${normalized}"
+}
+
+# 退出码是判定层要用的原始原因：0 有输出 / 2 无记录 / 124 超预算 / 3 无法探测。
+# getent 自己没有超时参数，不包一层的话一次挂住的解析能让整个预检无限等待（D07/H08）。
 sni_probe_dns() {
   local host="${1}"
+  local timeout="${2:-10}"
+  local output=""
+  local status=0
 
-  command -v getent >/dev/null 2>&1 || return 1
-  getent ahostsv4 "${host}" 2>/dev/null | awk '{print $1}' | sort -u
+  command -v getent >/dev/null 2>&1 || return 3
+  output="$(timeout "${timeout}" getent ahostsv4 "${host}" 2>/dev/null | awk '{print $1}' | sort -u)" || status=$?
+  printf '%s' "${output}"
+  case "${status}" in
+    0) return 0 ;;
+    124|137) return 124 ;;
+    *) return 2 ;;
+  esac
 }
 
 sni_probe_tls() {
@@ -96,6 +119,35 @@ sni_judge_line() {
   printf '%s|%s|%s\n' "${level}" "${name}" "${detail}"
 }
 
+sni_redirect_is_relative() {
+  local url="${1}"
+
+  [[ -n "${url}" ]] || return 1
+  case "${url}" in
+    //*) return 1 ;;
+    *://*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# 取出重定向目标里真正的主机名（去 scheme、userinfo、端口、路径/查询/锚点）。
+# 相对引用没有主机名，返回空串，调用方按「仍在本主机」处理（D09）。
+sni_redirect_host() {
+  local url="${1}"
+  local rest=""
+
+  case "${url}" in
+    //*) rest="${url#//}" ;;
+    *://*) rest="${url#*://}" ;;
+    *) return 0 ;;
+  esac
+
+  rest="${rest%%[/?#]*}"
+  rest="${rest##*@}"
+  rest="${rest%%:*}"
+  printf '%s' "${rest}"
+}
+
 sni_judge_hostname() {
   local sni="${1}"
 
@@ -112,12 +164,21 @@ sni_judge_dns() {
   local target_host="${2}"
   local dns_output="${3}"
   local server_ip="${4}"
+  local probe_status="${5:-0}"
+  local fail_detail=""
   local ip=""
   local private_count=0
   local total=0
 
+  # 探测失败的原因要照原样说：超预算和「没有 A 记录」是两回事（D09）。
+  case "${probe_status}" in
+    124) fail_detail="解析 ${target_host} 超出探测预算（上游 DNS 无响应）" ;;
+    3) fail_detail="本机没有 getent，无法解析 ${target_host}" ;;
+    *) fail_detail="${target_host} 无 A 记录" ;;
+  esac
+
   if [[ -z "${dns_output}" ]]; then
-    sni_judge_line FAIL "DNS 解析" "${target_host} 无 A 记录"
+    sni_judge_line FAIL "DNS 解析" "${fail_detail}"
     return
   fi
 
@@ -212,11 +273,14 @@ sni_judge_cert() {
     sni_judge_line FAIL "证书到期" "无法读取证书有效期"
   fi
 
-  # 第 9 项：目标是否在 CDN 后（偷到的是边缘握手，可用但不理想）
-  if printf '%s' "${issuer_line}" | grep -Eiq 'cloudflare|google trust|fastly|akamai|amazon|lets encrypt'; then
-    sni_judge_line WARN "CDN 前置" "证书由 CDN/公共 CA 边缘签发，Reality 偷的是边缘握手"
+  # 第 9 项：目标是否在 CDN 后
+  # 签发者只能证明证书链是谁签的，不能证明站点是否在 CDN 后：CDN 品牌的 CA 同样
+  # 服务直接回源的站点，公共 CA 也大量签在被 CDN 代理的域名上。这里只陈述事实并把
+  # 结论标成未验证，不再用 CA 品牌冒充 CDN 证据（D09/H18）。
+  if [[ -n "${issuer_line}" ]]; then
+    sni_judge_line NA "CDN 前置" "未验证：签发者「${issuer_line}」只说明证书链来源，不能证明站点在 CDN 后"
   else
-    sni_judge_line PASS "CDN 前置" "否"
+    sni_judge_line NA "CDN 前置" "未验证：未读到签发者；CA 品牌不能证明站点在 CDN 后"
   fi
 }
 
@@ -251,14 +315,22 @@ sni_judge_http() {
   server_header="${rest#"$time_appconnect" }"
 
   # 第 10 项：HTTP 跳转
+  # 相对跳转（/path、path、//host/path）都是站点内的跳转，不能按跨主机判掉；
+  # 只有真正落到别的主机名的跳转才是 FAIL（D09）。
   if [[ "${code}" == "000" || -z "${code}" ]]; then
     sni_judge_line FAIL "HTTP 跳转" "HTTP 请求失败（可能被反爬或不可达）"
   elif [[ "${code}" =~ ^3[0-9][0-9]$ ]]; then
-    redirect_host="$(printf '%s' "${redirect_url}" | sed -E 's|^[a-zA-Z]+://([^/]+).*|\1|')"
-    if [[ "${redirect_host}" == "${sni}" || -z "${redirect_host}" ]]; then
-      sni_judge_line WARN "HTTP 跳转" "${code} -> ${redirect_url}（同主机跳转）"
+    if [[ -z "${redirect_url}" ]]; then
+      sni_judge_line WARN "HTTP 跳转" "${code}（没有可解析的 Location）"
+    elif sni_redirect_is_relative "${redirect_url}"; then
+      sni_judge_line WARN "HTTP 跳转" "${code} -> ${redirect_url}（相对跳转，仍在本主机）"
     else
-      sni_judge_line FAIL "HTTP 跳转" "${code} -> ${redirect_url}（跨主机跳转，请直接使用 ${redirect_host}）"
+      redirect_host="$(sni_redirect_host "${redirect_url}")"
+      if [[ -z "${redirect_host}" || "${redirect_host,,}" == "${sni,,}" ]]; then
+        sni_judge_line WARN "HTTP 跳转" "${code} -> ${redirect_url}（同主机跳转）"
+      else
+        sni_judge_line FAIL "HTTP 跳转" "${code} -> ${redirect_url}（跨主机跳转，请直接使用 ${redirect_host}）"
+      fi
     fi
   elif [[ "${code}" =~ ^2[0-9][0-9]$ ]]; then
     sni_judge_line PASS "HTTP 跳转" "${code}，无跳转"
@@ -292,6 +364,15 @@ sni_judge_http() {
 
 # 聚合 ------------------------------------------------------------------
 
+# 探测预算时钟：date 不可用或被桩掉时按 0 处理，展示层的算术不能因此炸掉。
+sni_now_epoch() {
+  local now=""
+
+  now="$(date '+%s' 2>/dev/null || true)"
+  [[ "${now}" =~ ^[0-9]+$ ]] || now=0
+  printf '%s' "${now}"
+}
+
 run_sni_checks() {
   local sni="${1}"
   local target="${2}"
@@ -302,22 +383,44 @@ run_sni_checks() {
   local cert_output=""
   local http_output=""
   local target_host="${target%:*}"
+  local stage_count=4
+  local dns_status=0
+  local stage_start=0
+  local round_start=0
   local line=""
   local level=""
   local name=""
   local detail=""
   local fails=0
   local warns=0
+  local unverified=0
+  local budget=$((stage_count * timeout))
 
+  round_start="$(sni_now_epoch)"
   printf '%s\n' "Reality 目标域名预检: ${sni}  (target ${target})"
+  printf '%s\n' "等待上界: ${stage_count} 个探针 × ${timeout}s = ${budget}s，每个探针只跑一次并同时供展示与判定使用"
 
-  dns_output="$(sni_probe_dns "${target_host}")" || dns_output=""
+  # 一次采集：四个探针各跑一次，结果既用于判定也用于展示，不再重复慢探测（D07/H21）。
+  stage_start="$(sni_now_epoch)"
+  printf '[1/%s] DNS 解析（预算 %ss）… ' "${stage_count}" "${timeout}"
+  dns_status=0
+  dns_output="$(sni_probe_dns "${target_host}" "${timeout}")" || dns_status=$?
+  printf '完成 %ss\n' "$(( $(sni_now_epoch) - stage_start ))"
 
+  stage_start="$(sni_now_epoch)"
+  printf '[2/%s] TLS 1.3 握手（预算 %ss）… ' "${stage_count}" "${timeout}"
   tls_output="$(sni_probe_tls "${target}" "${sni}" "${timeout}")" || tls_output=""
+  printf '完成 %ss\n' "$(( $(sni_now_epoch) - stage_start ))"
 
+  stage_start="$(sni_now_epoch)"
+  printf '[3/%s] 证书读取（预算 %ss）… ' "${stage_count}" "${timeout}"
   cert_output="$(sni_probe_cert "${target}" "${sni}" "${timeout}")" || cert_output=""
+  printf '完成 %ss\n' "$(( $(sni_now_epoch) - stage_start ))"
 
+  stage_start="$(sni_now_epoch)"
+  printf '[4/%s] HTTP 探测（预算 %ss）… ' "${stage_count}" "${timeout}"
   http_output="$(sni_probe_http "${sni}" "${target}" "${timeout}")" || http_output=""
+  printf '完成 %ss\n' "$(( $(sni_now_epoch) - stage_start ))"
 
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
@@ -331,6 +434,10 @@ run_sni_checks() {
         warns=$((warns + 1))
         printf '%s %s %s\n' "$(style_text "${C_YELLOW}" "WARN")" "$(printf '%-14s' "${name}")" "${detail}"
         ;;
+      NA)
+        unverified=$((unverified + 1))
+        printf '%s %s %s\n' "$(style_text "${C_CYAN}" "未验证")" "$(printf '%-14s' "${name}")" "${detail}"
+        ;;
       *)
         fails=$((fails + 1))
         printf '%s %s %s\n' "$(style_text "${C_RED}" "FAIL")" "$(printf '%-14s' "${name}")" "${detail}"
@@ -338,18 +445,19 @@ run_sni_checks() {
     esac
   done <<EOF
 $(sni_judge_hostname "${sni}")
-$(sni_judge_dns "${sni}" "${target_host}" "${dns_output}" "${server_ip}")
+$(sni_judge_dns "${sni}" "${target_host}" "${dns_output}" "${server_ip}" "${dns_status}")
 $(sni_judge_tls "${tls_output}")
 $(sni_judge_cert "${sni}" "${cert_output}" "$(date '+%s')")
 $(sni_judge_http "${sni}" "${http_output}")
 EOF
 
   if [[ "${fails}" -gt 0 ]]; then
-    printf '%s\n' "结论: 不通过（${fails} FAIL, ${warns} WARN）；安装时可用 --skip-sni-check 强行跳过"
+    printf '%s\n' "结论: 不通过（${fails} FAIL, ${warns} WARN, ${unverified} 未验证）；本轮等待上界 ${budget}s，实际 $(( $(sni_now_epoch) - round_start ))s"
+    printf '%s\n' "安装时可用 --skip-sni-check 强行跳过（跳过不等于通过）。"
     return 2
   fi
 
-  printf '%s\n' "结论: 通过（0 FAIL, ${warns} WARN）"
+  printf '%s\n' "结论: 通过（0 FAIL, ${warns} WARN, ${unverified} 未验证）；本轮等待上界 ${budget}s，实际 $(( $(sni_now_epoch) - round_start ))s"
   return 0
 }
 
@@ -357,24 +465,30 @@ sni_check_cmd() {
   local sni=""
   local target=""
   local timeout="10"
-  local server_ip="${SERVER_IP:-}"
+  local server_ip=""
+  local sni_given=0
+  local target_given=0
+  local server_ip_given=0
+  local normalized=""
 
   while [[ $# -gt 0 ]]; do
     case "${1}" in
-      --target)
-        [[ $# -ge 2 ]] || die "参数 --target 需要值。"
-        target="${2}"
-        shift 2
+      --target|--target=*)
+        option_take_value "--target" "${1}" "${@:2}"
+        target="${OPTION_VALUE}"
+        target_given=1
+        shift "${OPTION_ARGS_CONSUMED}"
         ;;
-      --timeout)
-        [[ $# -ge 2 ]] || die "参数 --timeout 需要值。"
-        timeout="${2}"
-        shift 2
+      --timeout|--timeout=*)
+        option_take_value "--timeout" "${1}" "${@:2}"
+        timeout="${OPTION_VALUE}"
+        shift "${OPTION_ARGS_CONSUMED}"
         ;;
-      --server-ip)
-        [[ $# -ge 2 ]] || die "参数 --server-ip 需要值。"
-        server_ip="${2}"
-        shift 2
+      --server-ip|--server-ip=*)
+        option_take_value "--server-ip" "${1}" "${@:2}"
+        server_ip="${OPTION_VALUE}"
+        server_ip_given=1
+        shift "${OPTION_ARGS_CONSUMED}"
         ;;
       --help|-h|help)
         usage
@@ -386,32 +500,50 @@ sni_check_cmd() {
       *)
         [[ -z "${sni}" ]] || die "只能指定一个域名。"
         sni="${1}"
+        sni_given=1
         shift
         ;;
     esac
   done
 
-  [[ "${timeout}" =~ ^[0-9]+$ ]] || die "--timeout 必须是正整数：${timeout}"
+  # 0 / 00 / 负数 / 文本都等于「没有上界」，一律拒绝；前导零规范化（D07）。
+  normalized="$(sni_normalize_timeout "${timeout}")" \
+    || die "--timeout 必须是正整数秒（0 表示无上界，不接受）：${timeout}"
+  timeout="${normalized}"
 
-  if [[ -z "${sni}" ]]; then
+  # 有任意一项要走默认值，就先读已保存的安装上下文；只读，不写 state。
+  if [[ "${sni_given}" -eq 0 || "${target_given}" -eq 0 || "${server_ip_given}" -eq 0 ]]; then
     load_existing_state
-    [[ -f "${XRAY_CONFIG_FILE}" ]] && load_config_runtime_context
+    if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
+      load_config_runtime_context
+    fi
+  fi
+
+  if [[ "${sni_given}" -eq 0 ]]; then
     sni="${REALITY_SNI:-}"
   fi
   [[ -n "${sni}" ]] || die "请指定要检查的域名。"
-  [[ -n "${target}" ]] || target="${sni:+$(default_reality_target_for_sni "${sni}")}"
-  [[ -n "${target}" ]] || die "请指定要检查的域名。"
-  if [[ -z "${target}" || "${target}" == "${sni}:443" ]]; then
-    target="$(default_reality_target_for_sni "${sni}")"
+
+  # target 解析（D09/H08）：显式 --target 优先；显式域名用该域名自己的默认目标，
+  # 不带入旧节点的 target；菜单入口（无参数）才用保存的 REALITY_TARGET，
+  # 只有确实没有 target 时才回退 SNI:443。
+  if [[ "${target_given}" -eq 0 ]]; then
+    if [[ "${sni_given}" -eq 1 ]]; then
+      target="$(default_reality_target_for_sni "${sni}")"
+    else
+      target="${REALITY_TARGET:-$(default_reality_target_for_sni "${sni}")}"
+    fi
   fi
-  # 菜单入口没有参数：域名取当前安装的 REALITY_SNI
-  if [[ -z "${server_ip}" && -f "${XRAY_CONFIG_FILE}" ]]; then
-    load_existing_state
-    load_config_runtime_context
+  [[ -n "${target}" ]] || die "请指定要检查的域名。"
+  validate_hostport_value "REALITY 目标地址" "${target}"
+
+  # CLI 显式给出的 server-ip 不被 state 覆盖（D09）。
+  if [[ "${server_ip_given}" -eq 0 ]]; then
     server_ip="${SERVER_IP:-}"
   fi
-  [[ -n "${server_ip}" ]] || server_ip="${SERVER_IP:-}"
 
+  # 域名/目标/本机地址三者一起进探测层：HTTP 与 TLS/证书用同一目标，
+  # 逻辑 SNI/Host 保持为被检查的域名（D09）。
   run_sni_checks "${sni}" "${target}" "${server_ip}" "${timeout}"
 }
 
@@ -423,7 +555,8 @@ preflight_check_reality_sni() {
   local target="${REALITY_TARGET:-$(default_reality_target_for_sni "${REALITY_SNI}")}"
 
   if [[ "${SKIP_SNI_CHECK:-0}" == "1" ]]; then
-    warn "已按要求跳过 Reality 目标域名预检。"
+    SNI_PREFLIGHT_SKIPPED=1
+    warn "已按要求跳过 Reality 目标域名预检；结论是未验证，不因跳过而变成通过。"
     return 0
   fi
 
@@ -441,16 +574,17 @@ preflight_check_reality_sni() {
       die "预检失败：Reality 目标域名连续 ${rounds} 轮不满足要求。"
     fi
 
-    read -r -p "重新输入 SNI (r) / 忽略继续 (i) / 退出 (q) [r]: " answer
+    read_line_or_cancel answer "重新输入 SNI (r) / 忽略继续 (i) / 退出 (q) [r]: " || return $?
     answer="${answer:-r}"
     case "${answer}" in
       r|R)
-        prompt_with_default REALITY_SNI "REALITY 可见 SNI" ""
-        prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "$(default_reality_target_for_sni "${REALITY_SNI}")"
+        prompt_with_default REALITY_SNI "REALITY 可见 SNI" "" || return $?
+        prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "$(default_reality_target_for_sni "${REALITY_SNI}")" || return $?
         target="${REALITY_TARGET}"
         ;;
       i|I)
-        warn "已忽略预检失败，继续安装。"
+        SNI_PREFLIGHT_IGNORED=1
+        warn "已忽略本次预检失败并继续安装；结论仍是不通过，可用 xtun check-sni 复检。"
         return 0
         ;;
       q|Q)

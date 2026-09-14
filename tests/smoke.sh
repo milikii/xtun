@@ -5,11 +5,17 @@ set -Eeuo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_output.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_state_runtime.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_generation.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_generation_reentry.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_change.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_cli_and_install.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_versions.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_sni.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_nginx_net.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_ownership.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_contract.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_install_wizard.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_batch_b.sh"
 
 # 失败现场：哪条命令、在哪个函数的哪一行挂的。用例跑在子 shell 里，变量传不回来，
 # 所以走一个临时文件。
@@ -76,6 +82,8 @@ REAL_MANAGED_CANARY=(
   /etc/haproxy/haproxy.cfg
   /etc/nginx/conf.d/xtun.conf
   /etc/ssl/xtun
+  /var/log/xray
+  /var/lib/xray
   /etc/logrotate.d/xtun
   /var/www/xtun-fallback
   /root/xtun-qr
@@ -164,11 +172,14 @@ main() {
     run_state_file_decode_case
     run_runtime_context_reset_case
     run_backup_path_without_session_case
-    run_begin_managed_change_resolves_xray_user_case
+    run_begin_managed_change_defers_user_mutation_case
     run_usage_case
     run_show_links_without_state_case
     run_show_links_summary_case
     run_quic_port_text_case
+    run_port_listening_snapshot_case
+    run_ipv6_listen_text_case
+    run_local_tls_probe_state_case
     run_install_prompt_early_validation_case
     run_render_output_file_qr_case
     run_single_file_bootstrap_case
@@ -193,6 +204,26 @@ main() {
     run_install_xray_checksum_failure_case
     run_install_packages_failure_case
     run_install_draft_case
+    run_install_task_selection_case
+    run_install_new_defaults_case
+    run_install_wizard_input_budget_case
+    run_install_identity_stability_case
+    run_install_generated_identity_reentry_case
+    run_install_draft_schema_case
+    run_install_dependency_stage_case
+    run_install_confirmation_boundary_case
+    run_install_lock_recheck_case
+    run_uninstall_confirmation_boundary_case
+    run_install_resource_ownership_case
+    run_install_preflight_port_case
+    run_install_invalid_value_refill_case
+    run_install_cert_path_refill_case
+    run_install_rebuild_cert_source_case
+    run_install_rebuild_explicit_input_case
+    run_install_rotate_path_case
+    run_install_summary_width_case
+    run_install_cli_menu_parity_case
+    run_install_menu_task_dispatch_case
     run_service_config_helper_case
     run_fallback_site_deploy_case
     run_user_block_preserve_case
@@ -218,6 +249,33 @@ main() {
     run_tls_issue_failure_not_reported_ok_case
     run_tls_stage_trap_scope_case
     run_xray_only_update_write_failure_case
+    run_generation_restore_verified_case
+    run_generation_pending_persistence_case
+    run_generation_marker_failure_case
+    run_generation_inactive_service_restore_case
+    run_generation_daemon_reload_failure_case
+    run_generation_created_service_restore_case
+    run_generation_recovery_failed_case
+    run_generation_path_restore_rules_case
+    run_generation_products_rollback_case
+    run_backup_directory_symlink_case
+    run_generation_callsite_prewrite_failure_case
+    run_generation_extension_rename_failure_case
+    run_generation_metadata_corruption_case
+    run_generation_stop_failure_retry_case
+    run_generation_commit_cleanup_reentry_case
+    run_generation_pending_blocks_new_mutation_case
+    run_generation_permission_scope_case
+    run_generation_log_permissions_reentry_case
+    run_install_draft_cleanup_commit_case
+    run_install_invalid_cert_parse_case
+    run_install_preserves_existing_proxy_binaries_case
+    run_generation_sigkill_reentry_case
+    run_generation_exit_signal_recovery_case
+    run_pending_operation_marker_case
+    run_mutation_interrupt_handler_case
+    run_service_unit_name_case
+    run_same_value_change_noop_case
     run_restart_optional_service_case
     run_change_helper_case
     run_install_parse_case
@@ -248,7 +306,16 @@ main() {
     run_diagnose_command_case
     run_missing_option_value_case
     run_dispatch_case
+    run_readonly_and_error_boundary_case
+    run_dispatch_help_matrix_case
+    run_input_eof_cancel_case
+    run_main_menu_eof_case
+    run_menu_pty_case
+    run_bootstrap_readonly_no_persist_case
+    run_bootstrap_temp_and_installed_entry_case
+    run_interrupt_signal_case
     run_script_lock_scope_case
+    run_script_lock_stderr_case
     run_script_lock_stale_dir_case
     run_install_flow_case
     run_sni_judge_tls_case
@@ -257,6 +324,9 @@ main() {
     run_sni_judge_dns_case
     run_sni_probe_http_target_case
     run_sni_check_cmd_case
+    run_sni_timeout_validation_case
+    run_sni_check_target_resolution_case
+    run_sni_bounded_probe_case
     run_install_preflight_sni_case
     run_reality_fallback_inbound_case
     run_routing_block_rules_case
@@ -265,6 +335,7 @@ main() {
     run_output_no_subscription_block_case
     run_node_link_entries_case
     run_link_qr_png_case
+    run_output_write_failure_case
     run_h3_output_blocks_case
     run_output_qr_block_case
     run_nginx_main_config_case
@@ -275,6 +346,38 @@ main() {
     run_haproxy_bind_v4v6_case
     run_h3_nginx_listen_case
     run_h3_links_case
+    run_backup_first_snapshot_case
+    run_backup_missing_path_first_record_case
+    run_backup_manifest_failure_case
+    run_backup_restore_evidence_case
+    run_shared_haproxy_uninstall_failure_case
+    run_backup_session_rotation_case
+    run_backup_manifest_case
+    run_takeover_metadata_failure_case
+    run_package_origin_metadata_failure_case
+    run_nginx_original_restore_case
+    run_uninstall_ownership_case
+    run_install_no_ipv6_case
+    run_switch_conflict_case
+    run_address_validation_case
+    run_cert_mode_roundtrip_case
+    run_fix_command_dispatch_case
+    run_option_assignment_case
+    run_candidate_validation_call_context_case
+    run_candidate_work_dir_case
+    run_release_version_context_scope_case
+    run_install_xray_requested_version_case
+    run_version_context_action_boundary_case
+    run_batch_b_node_readonly_case
+    run_batch_b_qr_size_case
+    run_batch_b_navigation_case
+    run_batch_b_menu_reentry_case
+    run_batch_b_preview_noop_case
+    run_batch_b_h3_intent_case
+    run_batch_b_certificate_capability_case
+    run_batch_b_h3_matrix_case
+    run_batch_b_udp_ownership_case
+    run_batch_b_h3_enable_rejection_case
   )
 
   load_functions

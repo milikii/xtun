@@ -70,28 +70,132 @@ EOF
 }
 
 run_quic_port_text_case() {
+  h3_nginx_listener_is_managed() { return 0; }
   h3_enabled() { return 1; }
   ss() {
     printf '%s\n' 'UNCONN 0 0 0.0.0.0:443 0.0.0.0:* users:(("hysterity",pid=1,fd=3))'
   }
   [[ "$(quic_port_text)" == "不检查（H3 未启用）" ]]
+  [[ "$(quic_port_state)" == "na" ]]
 
   h3_enabled() { return 0; }
-  [[ "$(quic_port_text)" == "有 UDP 监听，但不是 nginx" ]]
+  [[ "$(quic_port_text)" == "UDP 有监听，但不是 nginx" ]]
+  [[ "$(quic_port_state)" == "foreign" ]]
 
   ss() {
     printf '%s\n' 'UNCONN 0 0 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=1,fd=6))'
   }
-  [[ "$(quic_port_text)" == "运行中" ]]
+  [[ "$(quic_port_text)" == "UDP 运行中（nginx）" ]]
+  [[ "$(quic_port_state)" == "ok" ]]
   quic_port_listening
 
   ss() {
     printf '%s\n' 'UNCONN 0 0 0.0.0.0:443 0.0.0.0:*'
   }
-  [[ "$(quic_port_text)" == "有 UDP 监听，无法确认归属（需要 root）" ]]
+  [[ "$(quic_port_text)" == "UDP 有监听，无法确认归属（需要 root）" ]]
+  [[ "$(quic_port_state)" == "unconfirmed" ]]
+
+  ss() { :; }
+  [[ "$(quic_port_text)" == "UDP 未监听" ]]
+  [[ "$(quic_port_state)" == "absent" ]]
+  if quic_port_listening; then
+    return 1
+  fi
 
   unset -f ss
+  unset -f h3_nginx_listener_is_managed
   h3_enabled() { return 1; }
+}
+
+# 面板与诊断的端口行必须写明 TCP，并能给出监听归属（H21/D09）。
+run_port_listening_snapshot_case() {
+  local saved_path=""
+
+  ss() {
+    printf '%s\n' \
+      'LISTEN 0 511 *:443 *:* users:(("haproxy",pid=1,fd=7))' \
+      'LISTEN 0 511 127.0.0.1:443 *:* users:(("nginx",pid=2,fd=9))'
+  }
+  [[ "$(port_listening_snapshot 443)" == "listening|TCP 运行中 (*:443,127.0.0.1:443 · haproxy,nginx)" ]]
+  [[ "$(listening_port_text 443)" == "TCP 运行中 (*:443,127.0.0.1:443 · haproxy,nginx)" ]]
+  is_port_listening 443
+
+  # 读不到进程归属时只报地址，不编造归属
+  ss() { printf '%s\n' 'LISTEN 0 511 *:443 *:*'; }
+  [[ "$(port_listening_snapshot 443)" == "listening|TCP 运行中 (*:443)" ]]
+
+  ss() { :; }
+  [[ "$(port_listening_snapshot 443)" == "absent|TCP 未监听" ]]
+  if is_port_listening 443; then
+    return 1
+  fi
+
+  unset -f ss
+  # 没有 ss：既不能说运行中，也不能说未监听
+  saved_path="${PATH}"
+  # shellcheck disable=SC2123
+  PATH="/nonexistent-xtun-test"
+  [[ "$(port_listening_snapshot 443)" == "unknown|未探测（缺少 ss）" ]]
+  PATH="${saved_path}"
+}
+
+# IPv6 双栈行也不能只写「运行中」：必须写明 TCP，且只听 IPv4 / 读不到时说法要有区别（H21/D09）。
+run_ipv6_listen_text_case() {
+  [[ "$(ipv6_listen_text listening 'TCP 运行中 (*:443 · haproxy)')" == "TCP 运行中" ]]
+  [[ "$(ipv6_listen_text listening 'TCP 运行中 ([::]:443 · haproxy)')" == "TCP 运行中" ]]
+  [[ "$(ipv6_listen_text listening 'TCP 运行中 (127.0.0.1:443 · nginx)')" == "TCP 未监听（仅 IPv4）" ]]
+  [[ "$(ipv6_listen_text absent 'TCP 未监听')" == "TCP 未监听" ]]
+  [[ "$(ipv6_listen_text unknown '未探测（缺少 ss）')" == "无法确认（缺少 ss）" ]]
+  # 不能出现没有协议层的裸「运行中」。
+  if ipv6_listen_text listening 'TCP 运行中 (*:443)' | grep -qx '运行中'; then
+    return 1
+  fi
+}
+
+# 本地 TLS 探测：预算有上界；「握手成功但证书不受信任」与「连不上」分开报告（H18/H21）。
+run_local_tls_probe_state_case() {
+  local workdir=""
+  local saved_path=""
+
+  workdir="$(mktemp -d)"
+  XHTTP_DOMAIN="cdn.example.com"
+
+  timeout() {
+    printf 'timeout %s\n' "${1}" >> "${workdir}/timeout.txt"
+    shift
+    "$@"
+  }
+  openssl() {
+    cat "${workdir}/openssl-out.txt"
+  }
+
+  printf 'CONNECTED(00000003)\nVerify return code: 0 (ok)\n' > "${workdir}/openssl-out.txt"
+  [[ "$(local_tls_probe_state)" == "ok" ]]
+  [[ "$(local_tls_probe_text_for_state ok)" == *"受系统信任"* ]]
+
+  printf 'CONNECTED(00000003)\nVerify return code: 20 (unable to get local issuer certificate)\n' > "${workdir}/openssl-out.txt"
+  [[ "$(local_tls_probe_state)" == "untrusted" ]]
+  [[ "$(local_tls_probe_text_for_state untrusted)" == *"不受系统信任"* ]]
+
+  : > "${workdir}/openssl-out.txt"
+  [[ "$(local_tls_probe_state)" == "fail" ]]
+  [[ "$(local_tls_probe_text_for_state fail)" == *"握手不成功"* ]]
+
+  grep -q '^timeout 5$' "${workdir}/timeout.txt"
+
+  XHTTP_DOMAIN=""
+  [[ "$(local_tls_probe_state)" == "na" ]]
+  XHTTP_DOMAIN="cdn.example.com"
+
+  unset -f timeout openssl
+  # 缺 openssl 时明确报未探测，不假装通过
+  saved_path="${PATH}"
+  # shellcheck disable=SC2123
+  PATH="/nonexistent-xtun-test"
+  [[ "$(local_tls_probe_state)" == "unknown" ]]
+  PATH="${saved_path}"
+
+  rm -rf "${workdir}"
 }
 
 run_install_prompt_early_validation_case() {
@@ -109,8 +213,9 @@ run_install_prompt_early_validation_case() {
   prompt_with_default() {
     printf '%s\n' "${1}" >> "${workdir}/prompts.txt"
     case "${1}" in
-      REALITY_SNI) printf -v "${1}" '%s' '' ;;
-      REALITY_TARGET) printf -v "${1}" '%s' 'www.stanford.edu:443' ;;
+      SERVER_IP) printf -v "${1}" '%s' "${PROMPT_TEST_SERVER_IP:-${3}}" ;;
+      REALITY_SNI) printf -v "${1}" '%s' "${PROMPT_TEST_SNI-}" ;;
+      REALITY_TARGET) printf -v "${1}" '%s' "${PROMPT_TEST_TARGET-}" ;;
       *) printf -v "${1}" '%s' "${3}" ;;
     esac
   }
@@ -119,13 +224,41 @@ run_install_prompt_early_validation_case() {
   prompt_cert_mode_inputs() { :; }
   prompt_warp_settings() { :; }
 
+  # 非法 SNI：就地重填，三次仍然非法才终止；不会先把后面的问答跑完。
+  PROMPT_TEST_SNI=''
+  PROMPT_TEST_TARGET='www.stanford.edu:443'
+  : > "${workdir}/prompts.txt"
   if output="$(prepare_install_inputs 2> "${workdir}/error.txt")"; then
     return 1
   fi
   grep -q 'REALITY SNI 不是合法域名：' "${workdir}/error.txt"
   grep -q '^REALITY_SNI$' "${workdir}/prompts.txt"
+  assert_absent '^REALITY_TARGET$' "${workdir}/prompts.txt"
+  assert_absent '^XHTTP_UUID$' "${workdir}/prompts.txt"
+
+  # 地址非法：在输入位置就挡住，不等到确认页之后的 validate_install_inputs。
+  PROMPT_TEST_SERVER_IP='bad_sni!'
+  PROMPT_TEST_SNI='www.stanford.edu'
+  PROMPT_TEST_TARGET='www.stanford.edu:443'
+  : > "${workdir}/prompts.txt"
+  if output="$(prepare_install_inputs 2> "${workdir}/error.txt")"; then
+    return 1
+  fi
+  grep -q 'REALITY 直连节点地址 不是合法域名：bad_sni!' "${workdir}/error.txt"
+  grep -q '^SERVER_IP$' "${workdir}/prompts.txt"
+  assert_absent '^REALITY_SNI$' "${workdir}/prompts.txt"
+
+  # SNI 合法、target 非法：同样在进入下一步之前终止。
+  PROMPT_TEST_SERVER_IP=''
+  PROMPT_TEST_SNI='www.stanford.edu'
+  PROMPT_TEST_TARGET=''
+  : > "${workdir}/prompts.txt"
+  if output="$(prepare_install_inputs 2> "${workdir}/error.txt")"; then
+    return 1
+  fi
+  grep -q 'REALITY 目标地址 不能为空' "${workdir}/error.txt"
   grep -q '^REALITY_TARGET$' "${workdir}/prompts.txt"
-  ! grep -q '^XHTTP_UUID$' "${workdir}/prompts.txt"
+  assert_absent '^XHTTP_DOMAIN$' "${workdir}/prompts.txt"
 
   rm -rf "${workdir}"
   load_functions
@@ -230,17 +363,18 @@ run_update_script_command_case() {
   local original_log_success_fn=""
   local original_log_fn=""
 
+  load_functions
+  original_log_step_fn="$(capture_function_definition log_step)"
+  original_log_success_fn="$(capture_function_definition log_success)"
+  original_log_fn="$(capture_function_definition log)"
   workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
   SELF_INSTALL_DIR="${workdir}/bundle"
   SELF_COMMAND_PATH="${workdir}/bin/xtun"
   SCRIPT_VERSION="0.4.5"
   original_install_bundle_fn="$(capture_function_definition install_bundle_root_to_self)"
-  original_log_step_fn="$(capture_function_definition log_step)"
-  original_log_success_fn="$(capture_function_definition log_success)"
-  original_log_fn="$(capture_function_definition log)"
 
   need_root() { :; }
-  start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
   bootstrap_resolve_archive_url() {
     printf '%s' "https://example.invalid/xtun.tar.gz"
   }
@@ -262,6 +396,7 @@ run_update_script_command_case() {
     printf 'archive' > "${output_path}"
   }
   tar() {
+    if [[ "${1}" != "-xzf" ]]; then command tar "$@" || return 1; return 0; fi
     local target_dir=""
 
     while [[ $# -gt 0 ]]; do
@@ -293,7 +428,6 @@ EOF
   log() {
     logged+="${1}"$'\n'
   }
-  backup_path() { :; }
   eval "${original_install_bundle_fn/install_bundle_root_to_self/real_install_bundle_root_to_self}"
   install_bundle_root_to_self() {
     installs=$((installs + 1))
@@ -304,8 +438,7 @@ EOF
     logged+="RELOAD:${1}"$'\n'
   }
 
-  update_script_cmd
-
+  update_script_cmd --non-interactive
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
   [[ -f "${SELF_INSTALL_DIR}/static/fallback/index.html" ]]
@@ -320,13 +453,14 @@ EOF
   restore_function_definition "${original_log_step_fn}"
   restore_function_definition "${original_log_success_fn}"
   restore_function_definition "${original_log_fn}"
-  stdout_output="$(update_script_cmd 2>&1)"
+  stdout_output="$(update_script_cmd --non-interactive 2>&1)"
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
   grep -q '下载来源：' <<< "${stdout_output}"
   grep -q '当前已经是最新脚本 bundle。' <<< "${stdout_output}"
 
   tar() {
+    if [[ "${1}" != "-xzf" ]]; then command tar "$@" || return 1; return 0; fi
     local target_dir=""
 
     while [[ $# -gt 0 ]]; do
@@ -350,7 +484,7 @@ EOF
     printf '# helper\n' > "${target_dir}/bundle/lib/base/helpers.sh"
     printf '<!doctype html>\n' > "${target_dir}/bundle/static/fallback/index.html"
   }
-  stdout_output="$(update_script_cmd 2>&1)"
+  stdout_output="$(update_script_cmd --non-interactive 2>&1)"
   grep -q '脚本内容已更新，但版本号保持为 9.9.9。' <<< "${stdout_output}"
 }
 
@@ -390,6 +524,7 @@ set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
+SERVER_IP='203.0.113.13'
 REALITY_SNI='bad"host'
 REALITY_TARGET='www.scu.edu:443'
 XHTTP_DOMAIN='cdn.example.com'
@@ -406,6 +541,7 @@ set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
+SERVER_IP='203.0.113.13'
 REALITY_SNI='reality.example.com'
 REALITY_TARGET='www.scu.edu:bad'
 XHTTP_DOMAIN='cdn.example.com'
@@ -422,6 +558,7 @@ set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
+SERVER_IP='203.0.113.13'
 REALITY_SNI='reality.example.com'
 REALITY_TARGET='www.scu.edu:443'
 XHTTP_DOMAIN='cdn.example.com'
@@ -440,6 +577,7 @@ set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
+SERVER_IP='203.0.113.13'
 REALITY_SNI='reality.example.com'
 REALITY_TARGET='www.scu.edu:443'
 XHTTP_DOMAIN='cdn.example.com'
@@ -456,6 +594,7 @@ set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
+SERVER_IP='203.0.113.13'
 REALITY_SNI='reality.example.com'
 REALITY_TARGET='www.scu.edu:443'
 XHTTP_DOMAIN='cdn.example.com'
@@ -806,7 +945,7 @@ run_install_prepare_preserves_ech_flag_case() {
   need_root() { :; }
   ensure_debian_family() { :; }
   start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
-  run_install_preflight_checks() { :; }
+  install_prepare_and_preflight() { :; }
 
   prepare_install_command --non-interactive --enable-xhttp-ech --enable-xhttp-xpadding
 
@@ -1280,7 +1419,10 @@ run_apply_net_opt_command_case() {
   local logged=""
   local workdir=""
 
+  load_functions
   workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
+  eval "$(declare -f start_backup_session | sed '1s/start_backup_session/case_real_start_backup_session/')"
   ENABLE_NET_OPT="no"
   NET_BBRV3_REBOOT_REQUIRED="stale"
 
@@ -1292,7 +1434,7 @@ run_apply_net_opt_command_case() {
   }
   start_backup_session() {
     calls+="backup"$'\n'
-    BACKUP_DIR="${workdir}/backup"
+    case_real_start_backup_session
   }
   load_current_install_context() {
     calls+="load"$'\n'
@@ -1319,15 +1461,14 @@ run_apply_net_opt_command_case() {
     logged+="${1}"$'\n'
   }
 
-  apply_net_opt_cmd
-
+  apply_net_opt_cmd --non-interactive
   [[ "${ENABLE_NET_OPT}" == "yes" ]]
   [[ "${NET_BBRV3_REBOOT_REQUIRED}" == "no" ]]
-  [[ "${calls}" == $'root\ndebian\nbackup\nload\nnet:yes:no\nstate:yes\n' ]]
+  [[ "${calls}" == $'debian\nroot\nload\nbackup\nnet:yes:no\nstate:yes\n' ]]
   grep -q 'STEP:读取当前托管安装状态。' <<< "${logged}"
   grep -q 'STEP:应用 Joey BBRv3 网络优化。' <<< "${logged}"
   grep -q 'DONE:网络优化已应用。' <<< "${logged}"
-  grep -q "备份目录：${workdir}/backup" <<< "${logged}"
+  grep -q "备份目录：${BACKUP_DIR}" <<< "${logged}"
 
   NET_BBRV3_REBOOT_REQUIRED="yes"
   install_network_optimization() {
@@ -1337,8 +1478,7 @@ run_apply_net_opt_command_case() {
   calls=""
   logged=""
 
-  apply_net_opt_cmd
-
+  apply_net_opt_cmd --non-interactive
   grep -q '请重启 VPS 后加载 Joey BBRv3 内核。' <<< "${logged}"
   load_functions
 }
@@ -1350,14 +1490,17 @@ run_apply_config_command_case() {
   local logged=""
   local workdir=""
 
+  load_functions
   workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
+  eval "$(declare -f start_backup_session | sed '1s/start_backup_session/case_real_start_backup_session/')"
 
   need_root() {
     calls+="root"$'\n'
   }
   start_backup_session() {
     calls+="backup"$'\n'
-    BACKUP_DIR="${workdir}/backup"
+    case_real_start_backup_session
   }
   load_current_install_context() {
     calls+="load"$'\n'
@@ -1367,6 +1510,7 @@ run_apply_config_command_case() {
   }
   apply_managed_files() {
     calls+="apply:${1}"$'\n'
+    generation_commit
   }
   show_links() {
     calls+="links"$'\n'
@@ -1381,13 +1525,12 @@ run_apply_config_command_case() {
     logged+="${1}"$'\n'
   }
 
-  apply_config_cmd
-
+  apply_config_cmd --non-interactive
   # apply:no = 不重签 TLS 资产，只重渲染托管配置
-  [[ "${calls}" == $'root\nbackup\nload\nxray-user\napply:no\n' ]]
+  [[ "${calls}" == $'root\nload\nbackup\nxray-user\napply:no\n' ]]
   grep -q 'STEP:按当前状态重新生成托管配置。' <<< "${logged}"
   grep -q 'DONE:托管配置已按当前状态重新生成。' <<< "${logged}"
-  grep -q "备份目录：${workdir}/backup" <<< "${logged}"
+  grep -q "备份目录：${BACKUP_DIR}" <<< "${logged}"
 
   if (apply_config_cmd --bogus) 2>/dev/null; then
     return 1
@@ -1821,21 +1964,24 @@ EOF
   call_log="${workdir}/qr-calls.log"
   have_qrencode() { return 0; }
   qrencode() {
+    cat >/dev/null
     printf 'qrencode:%s\n' "${2}" >> "${call_log}"
     printf 'ANSI-QR'
   }
 
   output="$(render_output_file_qr 2>&1)"
 
-  printf '%s' "${output}" | grep -q '二维码 (HKG-A):'
-  printf '%s' "${output}" | grep -q '二维码 (HKG-B):'
+  printf '%s' "${output}" | grep -q '节点 1: HKG-A'
+  printf '%s' "${output}" | grep -q '节点 2: HKG-B'
   [[ "$(grep -c 'qrencode:' "${call_log}")" -eq 2 ]]
 
   # 缺 qrencode：只告警，不画
   load_functions
   OUTPUT_FILE="${workdir}/output.md"
   have_qrencode() { return 1; }
-  output="$(render_output_file_qr 2>&1)"
+  local status=0
+  output="$(render_output_file_qr 2>&1)" || status=$?
+  [[ "${status}" == 1 ]]
   printf '%s' "${output}" | grep -q 'qrencode'
 
   load_functions

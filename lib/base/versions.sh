@@ -261,10 +261,39 @@ xray_reset_release_context() {
   XRAY_SELECTED_EXPECTED_SHA256=""
   XRAY_SELECTED_CHECKSUM_SOURCE=""
   XRAY_SELECTED_RESOLVED_AT=""
+  XRAY_CONTEXT_REQUEST=""
+  XRAY_CONTEXT_ARCH=""
 }
 
 xray_release_context_ready() {
   [[ -n "${XRAY_SELECTED_TAG:-}" && -n "${XRAY_SELECTED_COMMIT:-}" && -n "${XRAY_SELECTED_ARCHIVE_URL:-}" ]]
+}
+
+# 版本上下文只属于一次动作（H15）：
+#   * 同请求同架构 → 复用已锁定的选择，不重复打网络；
+#   * 换了请求或架构（菜单里连续动作最常见）→ 重新解析，绝不复用上一次的选择；
+#   * 动作结束由 xray_release_version_context 释放，下一次动作从干净状态开始。
+xray_ensure_release_context() {
+  local request="${1:-}"
+  local arch="${2:-}"
+
+  [[ -n "${request}" ]] || request="${XRAY_VERSION_REQUEST:-latest-published}"
+  if [[ -z "${arch}" ]]; then
+    arch="$(detect_xray_arch)" || return 1
+  fi
+
+  if xray_release_context_ready \
+    && [[ "${XRAY_CONTEXT_REQUEST:-}" == "${request}" ]] \
+    && [[ "${XRAY_CONTEXT_ARCH:-}" == "${arch}" ]]; then
+    return 0
+  fi
+
+  xray_prepare_release_context "${request}" "${arch}"
+}
+
+# 动作结束即释放：锁定的选择不许跨动作存活。
+xray_release_version_context() {
+  xray_reset_release_context
 }
 
 xray_prepare_release_context() {
@@ -338,6 +367,8 @@ xray_prepare_release_context() {
   XRAY_SELECTED_DGST_URL="${digest_url}"
   XRAY_SELECTED_EXPECTED_SHA256="${expected_sha256}"
   XRAY_SELECTED_RESOLVED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  XRAY_CONTEXT_REQUEST="${request}"
+  XRAY_CONTEXT_ARCH="${arch}"
 }
 
 xray_download_release() {
@@ -411,44 +442,90 @@ parse_xhttp_vless_encryption_pair() {
   ' <<<"${output}"
 }
 
-xray_validate_candidate_commands() {
-  local binary_path="${1}"
-  local expected_tag="${2}"
+# x25519 输出必须三个字段都在、且都带值：空值或缺字段的「成功输出」不是候选证据。
+xray_validate_x25519_output() {
+  local output="${1}"
+  local label=""
+  local line=""
+  local value=""
+
+  for label in 'PrivateKey:' 'Password (PublicKey):' 'Hash32:'; do
+    line="$(printf '%s\n' "${output}" | grep -F "${label}" | head -n 1)" || return 1
+    [[ -n "${line}" ]] || return 1
+    value="${line#*"${label}"}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    [[ -n "${value}" ]] || return 1
+    [[ "${value}" =~ ^[A-Za-z0-9_+/=-]+$ ]] || return 1
+  done
+  return 0
+}
+
+# 这个函数在 install / upgrade / 菜单三条路径里都被 `if !` / `||` 调用，
+# 调用方豁免掉的 errexit 会一路传进来：每一步都必须自己传失败，不能靠 set -e（H16）。
+# 函数体是子 shell：候选配置目录在成功、失败、中断三种退场上都会清掉。
+xray_validate_candidate_commands() (
+  local binary_path="${1:-}"
+  local expected_tag="${2:-}"
   local expected_version="${expected_tag#v}"
+  local work_dir=""
+  local config_path=""
   local version_output=""
   local version_line=""
   local key_output=""
   local enc_output=""
   local encryption_pair=""
-  local server_config="${TMPDIR:-/tmp}/xtun-xray-server.json"
-  local client_config="${TMPDIR:-/tmp}/xtun-xray-client.json"
+  local decryption=""
+  local encryption=""
 
+  [[ -n "${binary_path}" ]] || return 1
+  [[ -n "${expected_tag}" ]] || return 1
+  [[ "${expected_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
   [[ -x "${binary_path}" ]] || return 1
+
   version_output="$("${binary_path}" version 2>&1)" || return 1
   version_line="$(printf '%s\n' "${version_output}" | head -n 1)"
   [[ "${version_line}" == "Xray ${expected_version} "* ]] || return 1
 
   key_output="$("${binary_path}" x25519 2>&1)" || return 1
-  printf '%s\n' "${key_output}" | grep -q '^PrivateKey:'
-  printf '%s\n' "${key_output}" | grep -q '^Password (PublicKey):'
-  printf '%s\n' "${key_output}" | grep -q '^Hash32:'
+  xray_validate_x25519_output "${key_output}" || return 1
 
   enc_output="$("${binary_path}" vlessenc 2>&1)" || return 1
   encryption_pair="$(parse_xhttp_vless_encryption_pair "${enc_output}")" || return 1
-  [[ "$(printf '%s' "${encryption_pair}" | cut -f1)" == mlkem768x25519plus.* ]]
-  [[ "$(printf '%s' "${encryption_pair}" | cut -f2)" == mlkem768x25519plus.* ]]
+  decryption="$(printf '%s' "${encryption_pair}" | cut -f1)"
+  encryption="$(printf '%s' "${encryption_pair}" | cut -f2)"
+  [[ "${decryption}" == mlkem768x25519plus.* ]] || return 1
+  [[ "${encryption}" == mlkem768x25519plus.* ]] || return 1
+  [[ "${decryption}" != "${encryption}" ]] || return 1
 
-  printf '%s\n' '{"inbounds":[{"listen":"127.0.0.1","port":18443,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1","port":80}}],"outbounds":[{"protocol":"freedom"}]}' >"${server_config}"
-  printf '%s\n' '{"inbounds":[{"listen":"127.0.0.1","port":10808,"protocol":"socks","settings":{"udp":true}}],"outbounds":[{"protocol":"freedom"}]}' >"${client_config}"
-  "${binary_path}" run -test -config "${server_config}" >/dev/null 2>&1 || return 1
-  "${binary_path}" run -test -config "${client_config}" >/dev/null 2>&1 || return 1
-  rm -f "${server_config}" "${client_config}" || return 1
-}
+  # 候选配置属于这一次操作：目录唯一，不再用 /tmp 下的固定名字。
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/xtun-xray-candidate.XXXXXX")" || return 1
+  trap 'rm -rf "${work_dir}"' EXIT
+
+  config_path="${work_dir}/server.json"
+  printf '%s\n' '{"inbounds":[{"listen":"127.0.0.1","port":18443,"protocol":"dokodemo-door","settings":{"address":"127.0.0.1","port":80}}],"outbounds":[{"protocol":"freedom"}]}' >"${config_path}" || return 1
+  "${binary_path}" run -test -config "${config_path}" >/dev/null 2>&1 || return 1
+
+  config_path="${work_dir}/client.json"
+  printf '%s\n' '{"inbounds":[{"listen":"127.0.0.1","port":10808,"protocol":"socks","settings":{"udp":true}}],"outbounds":[{"protocol":"freedom"}]}' >"${config_path}" || return 1
+  "${binary_path}" run -test -config "${config_path}" >/dev/null 2>&1 || return 1
+
+  # 反向对照：坏配置必须被拒。少了这一步，一个 run -test 恒返回 0 的假核心
+  # 能通过其余全部检查（H16）。
+  config_path="${work_dir}/invalid.json"
+  printf '%s\n' '{"inbounds": this-is-not-json}' >"${config_path}" || return 1
+  if "${binary_path}" run -test -config "${config_path}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
+)
 
 xray_validate_candidate_archive() {
-  local target_dir="${1}"
+  local target_dir="${1:-}"
   local binary_path="${target_dir}/xray/xray"
 
+  [[ -n "${target_dir}" ]] || return 1
   [[ -x "${binary_path}" ]] || return 1
+  [[ -n "${XRAY_SELECTED_TAG:-}" ]] || return 1
   xray_validate_candidate_commands "${binary_path}" "${XRAY_SELECTED_TAG}"
 }

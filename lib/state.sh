@@ -29,6 +29,9 @@ output_field_value() {
 
 state_file_key_allowed() {
   case "${1}" in
+    H3_INTENT)
+      return 0
+      ;;
     STATE_VERSION|XRAY_VERSION_REQUEST|SERVER_IP|SERVER_IP6|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|NET_BBR_KERNEL|WARP_PRIVATE_KEY|WARP_ADDRESS_V4|WARP_ADDRESS_V6|WARP_PEER_PUBLIC_KEY|WARP_ENDPOINT|WARP_RESERVED|WARP_MTU|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|ROUTE_BLOCK_CN|NGINX_MAIN_MANAGED)
       return 0
       ;;
@@ -171,8 +174,11 @@ decode_state_value() {
   decode_simple_shell_word "${raw}"
 }
 
+# 第二个参数是可选的键过滤器函数名：草稿文件用的键集合和 state 不一样
+# （INSTALL_DRAFT_* 只在草稿里出现），不传就按 state 的白名单处理。
 load_shell_kv_file() {
   local file_path="${1}"
+  local key_filter="${2:-}"
   local line=""
   local key=""
   local raw_value=""
@@ -187,7 +193,11 @@ load_shell_kv_file() {
 
     key="${line%%=*}"
     raw_value="${line#*=}"
-    state_file_key_allowed "${key}" || state_file_legacy_key "${key}" || continue
+    if [[ -n "${key_filter}" ]]; then
+      "${key_filter}" "${key}" || continue
+    else
+      state_file_key_allowed "${key}" || state_file_legacy_key "${key}" || continue
+    fi
     decoded_value="$(decode_state_value "${raw_value}")"
     printf -v "${key}" '%s' "${decoded_value}"
   done < "${file_path}"
@@ -213,6 +223,9 @@ reset_loaded_runtime_context() {
   FINGERPRINT=""
   ENABLE_WARP=""
   ENABLE_NET_OPT=""
+  H3_INTENT=""
+  H3_DECISION="off"
+  H3_REASON="能力未验证"
   NET_BBR_KERNEL=""
   WARP_PRIVATE_KEY=""
   WARP_ADDRESS_V4=""
@@ -292,6 +305,54 @@ nginx_server_name() {
   ' "${NGINX_CONFIG_FILE}" 2>/dev/null | head -n 1
 }
 
+# 只认同一个托管 server 中的 QUIC、Alt-Svc、域名与托管证书引用。
+# 忽略注释及用户保留块；部分痕迹不能推断为关闭，也不能直接删除。
+managed_h3_config_state() {
+  [[ -r "${NGINX_CONFIG_FILE}" ]] || { printf 'unknown'; return; }
+  awk -v domain="${1:-}" -v cert="${TLS_CERT_FILE}" '
+    /# >>> xtun-user:/ { user=1; next }
+    /# <<< xtun-user:/ { user=0; next }
+    user { next }
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*server[[:space:]]*\{/ { server=1; depth=0; quic=0; alt=0; name=0; tls=0 }
+    server {
+      line=$0; sub(/#.*/, "", line)
+      if (line ~ /^[[:space:]]*listen[[:space:]]+([^;]*:)?443[[:space:]][^;]*quic/) quic=1
+      if (line ~ /^[[:space:]]*add_header[[:space:]]+Alt-Svc[[:space:]]+.*h3=/) alt=1
+      value=$2; sub(/;$/, "", value)
+      if ($1 == "server_name" && (domain == "" || value == domain)) name=1
+      if ($1 == "ssl_certificate" && value == cert) tls=1
+      tmp=line; depth+=gsub(/\{/, "{", tmp); depth-=gsub(/\}/, "}", tmp)
+      if (depth <= 0) {
+        if (name && tls) {
+          found=1
+          if (quic && alt) enabled=1
+          else if (quic || alt) partial=1
+        } else if (quic || alt) partial=1
+        server=0
+      }
+    }
+    END { if (partial || server) print "unknown"; else if (enabled) print "on"; else if (found) print "off"; else print "unknown" }
+  ' "${NGINX_CONFIG_FILE}"
+}
+
+load_h3_intent() {
+  case "${H3_INTENT:-}" in
+    on|off|legacy-on|unknown) return 0 ;;
+    '') ;;
+    *) H3_INTENT="unknown"; return 0 ;;
+  esac
+  if [[ ! -f "${STATE_FILE}" && ! -f "${XRAY_CONFIG_FILE}" && ! -f "${NGINX_CONFIG_FILE}" ]]; then
+    H3_INTENT="off"
+    return 0
+  fi
+  case "$(managed_h3_config_state "${XHTTP_DOMAIN:-}")" in
+    on) H3_INTENT="legacy-on" ;;
+    off) H3_INTENT="off" ;;
+    *) H3_INTENT="unknown" ;;
+  esac
+}
+
 load_existing_state() {
   reset_loaded_runtime_context
 
@@ -305,6 +366,7 @@ load_existing_state() {
     XHTTP_ECH_CONFIG_LIST=""
     XHTTP_ECH_FORCE_QUERY=""
   fi
+  load_h3_intent
 }
 
 migrate_state_v1_to_v2() {
@@ -495,6 +557,7 @@ state_file_text() {
   write_state_kv "FINGERPRINT" "${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   write_state_kv "ENABLE_WARP" "${ENABLE_WARP}"
   write_state_kv "ENABLE_NET_OPT" "${ENABLE_NET_OPT}"
+  write_state_kv "H3_INTENT" "${H3_INTENT:-off}"
   write_state_kv "WARP_PRIVATE_KEY" "${WARP_PRIVATE_KEY}"
   write_state_kv "WARP_ADDRESS_V4" "${WARP_ADDRESS_V4}"
   write_state_kv "WARP_ADDRESS_V6" "${WARP_ADDRESS_V6}"
