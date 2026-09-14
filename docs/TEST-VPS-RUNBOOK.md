@@ -128,6 +128,8 @@ XTUN_TEST_ISOLATED_VPS=yes bash tests/minimal-install.sh "$XTUN_TEST_ROOTFS"
 
 批次 A 的 systemd 13/13、filesystem 5/5、ownership 5/5、minbase 5/5，以及安装/升级/bundle 故障和草稿续装结果保持为历史证据。批次 B 的 canonical smoke 增至 220 条，安装/任务菜单 PTY 分别为 68/9 个场景；准确双架构结果与新信号反例见批次 B 报告。sleep unit、模拟失败与共享 HAProxy 的实际 HTTP 监听分别记录，不能互相替代。
 
+CI 补修后最终代码为 `6956e01`，对应 CI `34853691008` 已通过干净 Debian 13 安装/诊断。smoke 因首次日志权限及其失败恢复新增至 222 条，本机/测试 VPS 均通过；VPS 已更新 `df15775f…60f4349` 运行内容，同包 noop、诊断和 SSH/配置/服务快照核对通过，详见报告 §4.2。后续任务从这一安装现场继续，不把早期 220 条归档当成最新候选。
+
 批次 B 还须按实际候选复核以下行为：
 
 1. `show-links --summary`、`show-links --node 3`、`show-links --qr --node 3` 前后文件、备份和服务 PID 不变；不存在的节点返回非零。
