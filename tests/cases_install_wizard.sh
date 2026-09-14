@@ -8,6 +8,14 @@
 
 install_wizard_write_state() {
   local state_file="${1}"
+  local cert_file="${state_file}.cert.pem"
+  local key_file="${state_file}.key.pem"
+
+  # 重建会在确认前检查证书输入；夹具必须自带证书，不能借用宿主机部署。
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+    -subj /CN=cdn.example.com -addext subjectAltName=DNS:cdn.example.com \
+    -keyout "${key_file}" -out "${cert_file}" >/dev/null 2>&1
+  chmod 0600 "${key_file}"
 
   cat > "${state_file}" <<'EOF'
 STATE_VERSION=2
@@ -29,14 +37,13 @@ XHTTP_ECH_CONFIG_LIST=
 XHTTP_ECH_FORCE_QUERY=
 XHTTP_XPADDING_ENABLED=no
 CERT_MODE=existing
-CERT_SOURCE_FILE=/etc/ssl/xtun/cert.pem
-KEY_SOURCE_FILE=/etc/ssl/xtun/key.pem
 ENABLE_WARP=no
 ENABLE_NET_OPT=yes
 NET_BBR_KERNEL=joey
 NGINX_MAIN_MANAGED=no
 ROUTE_BLOCK_CN=no
 EOF
+  printf 'CERT_SOURCE_FILE=%q\nKEY_SOURCE_FILE=%q\n' "${cert_file}" "${key_file}" >> "${state_file}"
 }
 
 # 问答桩：记录提示顺序，值取给定默认值（相当于用户一路回车）。
@@ -1139,7 +1146,7 @@ run_install_cli_menu_parity_case() {
   resolve_install_task
   install_task_apply_context || return 1
   resolve_install_input_sources
-  prepare_install_inputs >/dev/null 2>&1
+  prepare_install_inputs >/dev/null
   cli_config="$(xray_config_text)"
 
   # 菜单入口：用户在同一台机器上选第一项（默认 = 按当前状态重建）
@@ -1153,7 +1160,7 @@ run_install_cli_menu_parity_case() {
   [[ "${INSTALL_TASK}" == "rebuild" ]]
   install_task_apply_context || return 1
   resolve_install_input_sources
-  prepare_install_inputs >/dev/null 2>&1
+  prepare_install_inputs >/dev/null
   menu_config="$(xray_config_text)"
 
   [[ -n "${cli_config}" ]]

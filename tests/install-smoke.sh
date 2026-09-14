@@ -5,6 +5,21 @@ set -Eeuo pipefail
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_TMP_DIR=""
 
+report_smoke_failure() {
+  local status="${1}" line="${2}" command_text="${3}"
+  local message="tests/install-smoke.sh:${line}: ${command_text} (exit ${status})"
+
+  printf '[fail] %s\n' "${message}" >&2
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    message="${message//\%/%25}"
+    message="${message//$'\r'/%0D}"
+    message="${message//$'\n'/%0A}"
+    printf '::error title=Install smoke failure::%s\n' "${message}"
+  fi
+  exit "${status}"
+}
+trap 'report_smoke_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
+
 usage() {
   printf '用法：tests/install-smoke.sh install-core|check-latest|container\n'
 }
@@ -100,7 +115,7 @@ container_install() {
     png_header="$(od -An -tx1 -N8 "${png_file}")"
     [[ "${png_header}" == *"89 50 4e 47 0d 0a 1a 0a"* ]]
   done < <(find /root/xtun-qr -maxdepth 1 -type f -name '*.png' -print0)
-  [[ "${png_count}" -ge 5 ]]
+  [[ "${png_count}" -eq 5 ]]
 
   [[ ! -e /var/www/xtun-sub ]]
   if grep -q '/sub/' "${nginx_config}"; then
@@ -110,7 +125,10 @@ container_install() {
 
   show_links_output="$(xtun show-links --qr)"
   printf '%s\n' "${show_links_output}"
-  [[ "${show_links_output}" == *"二维码 ("* ]]
+  [[ "$(grep -c '^节点 [1-5]: ' <<< "${show_links_output}")" -eq "${png_count}" ]]
+  while IFS= read -r -d '' png_file; do
+    [[ "${show_links_output}" == *"  PNG: ${png_file}"* ]]
+  done < <(find /root/xtun-qr -maxdepth 1 -type f -name '*.png' -print0)
   grep -q '^## 二维码' "${output_file}"
 }
 

@@ -1,7 +1,7 @@
 # 批次 B 实施报告：任务菜单、单节点取用与 H3 意图
 
 > 日期：2026-09-14。范围：W07 的实现与自动验证、W11.1、W09.1，以及直接相关的回归修复。用户已授权继续实施、提交和 push。正式 tag/release、生产迁移与完整人机/网络验收不在本次完成结论内。
-> 当前入口：[PLAN](PLAN.md)；目标与遗留：[详细工单](PLAN-UX-RELIABILITY.md)；行为契约：[D27–D30](DECISIONS-UX-RELIABILITY.md#d27)。前序报告保持原样，不把本次结果回写成旧时已通过。
+> 当前入口：[PLAN](PLAN.md)；目标与遗留：[详细工单](PLAN-UX-RELIABILITY.md)；行为契约：[D27–D31](DECISIONS-UX-RELIABILITY.md#d27)。前序报告保持原样，不把本次结果回写成旧时已通过。
 
 ## 1. 结论与候选身份
 
@@ -10,14 +10,14 @@
 | 对象 | 准确记录 |
 | --- | --- |
 | 接手 Git 基线 | `main / c1fabf74bbfa8a9132c40b65ccb4678424bb5111`；开工 fetch 后与 origin/main 一致，保留累积工作区 |
-| 提交范围 | 前序 W01–W06/W08.1 及 A 批未提交实现、对应报告/回归，加本次 B 批；实际公开 SHA 由包含本报告的 Git 提交标识 |
+| 提交范围 | `a1da4c71005617e2a6eba5c1264de76c7ddde00c` 已 push，包含前序 W01–W06/W08.1、A 批累积实现与 B 批。其后的 CI 修复仅改测试、工作流和文档，见 §4.1 |
 | 脚本 / state | `1.1.0` / schema `2`；没有因中间候选另升发布版本 |
 | 最终运行内容摘要 | `31574b9dbd302342dad45461ab9c435ece6e3e158c3666ba394601e17e56fd67`；由 `bundle_script_signature` 对 `xtun.sh/lib/static` 计算 |
-| 验收归档 | `candidate-acceptance.tar.gz`；SHA256 `e481b18c081d007eaefc576460c3847f67d7f7d656d5692ba9ed4117a1d3e26e`；包含运行文件、tests、`.shellcheckrc` |
+| push 前验收归档 | `candidate-acceptance.tar.gz`；SHA256 `e481b18c081d007eaefc576460c3847f67d7f7d656d5692ba9ed4117a1d3e26e`；包含当时运行文件、tests、`.shellcheckrc`。后续测试修复以 Git 内容为准，不声称该归档已含修复 |
 | 目标 Xray | `v26.9.9 / 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`；本机使用独立 arm64 核心，VPS 使用 amd64 核心 |
 | 本机验证 | arm64，Bash 5.2.37；本机已安装的生产 bundle/core 保持原状 |
 | VPS 验证 | `194.195.251.247`，Debian 12 amd64，Bash 5.2.15；实际 nginx 1.30.1 包含 http_v3；测试自签证书 |
-| CI 边界 | 开工查询基线 CI [34807516823](https://github.com/milikii/xtun/actions/runs/34807516823) 为 success；它不证明本次增量。push 后按本次 SHA 检查 [Actions](https://github.com/milikii/xtun/actions)，不能用本地绿色结果替代 |
+| CI 边界 | 首次 push 的 [34842326929](https://github.com/milikii/xtun/actions/runs/34842326929) 失败；已定位并修正测试输入、执行身份及旧输出断言，见 §4.1。后续公开结果仍须核对修复提交的准确 SHA |
 | 发布状态 | 本次只提交/push 测试候选；不创建或移动 tag，不创建正式 release，不迁移本机生产 |
 
 运行摘要只覆盖安装内容，Git 提交还包括测试与文档。两者分别保留，不能用版本字符串 `1.1.0` 推断是同一包。W08.2 将继续补齐持久安装身份。
@@ -88,6 +88,21 @@ ALPN 依据为仓库官方快照的 `source/config/transport_internet.go`（Stre
 | 80×24 / 只读查看 | 通过，包含于 smoke | 长域名/监听/pending 首屏，纯读取前后文件一致；不代替真人扫码 |
 
 证书正向夹具使用自建根，仅证明验证逻辑与分类，不是生产公网证书实证。PTY 执行部分使用隔离目录与服务桩，不当作 systemd 或真实传输通过；真实 VPS 维护另列如下。
+
+### 4.1 首次公开 CI 失败与修复
+
+首次 push `a1da4c7` 的 CI `34842326929` 中，ShellCheck 通过，smoke、两套 PTY 与 Debian 13 安装容器步骤失败。此前双架构回归均以 root 在已部署主机运行，未覆盖干净 runner 的证书输入和执行身份差异。保留该失败，不把 push 前通过结果改写为 CI 已通过。
+
+| 发现 | 复现与修复 |
+| --- | --- |
+| 安装 CLI/菜单一致性测试把 existing 证书指向 `/etc/ssl/xtun` | 在 `/tmp` 的独立候选副本以普通用户复现缺证书失败；state 夹具改为生成自己的证书/私钥并引用隔离路径，保留真实只读检查，失败 stderr 不再丢弃 |
+| PTY 在真实 root 检查处退出，未进入问答；完整 smoke 随后也在 `recover --yes` 处遇到相同问题 | 普通用户下保留两类失败证据；CI 的三套测试使用 sudo，保留真实 root 检查；完整套件误以非 root 启动时提前返回 2。原有无 root 帮助场景仍用 `setpriv` 降权执行 |
+| 容器 suite 仍要求已删除的 `二维码 (` 标题 | 在已安装候选的 VPS 上复现旧断言失败；新断言检查五个节点、五张真实 PNG 文件头、对应输出路径及文档。没有从匿名不可读的容器日志推断首次失败的精确行，完整容器结果以后续 CI 为准 |
+| PTY/容器失败只有笼统退出码 | PTY 增加失败用例 annotation；安装 smoke 增加行号、命令和退出码 annotation，Docker 显式传递 `GITHUB_ACTIONS`，保留原失败码 |
+
+修复后本机 arm64 的 54 个 Shell 文件静态检查、220/220 smoke、68/68 安装 PTY、9/9 菜单 PTY 通过。普通用户下安装 CLI/菜单一致性用例返回 0；完整三套测试的权限前置检查分别返回 2。VPS 只读复验五节点/PNG 新断言通过，SSH 仍为 PID 524、active/enabled。Debian 13 干净容器的完整结果须由新提交的 CI 补齐，不能用这次已有部署上的 QR 检查代替。
+
+修复没有改动 `xtun.sh/lib/static`，运行摘要与 VPS 已安装候选保持一致。新增私有证据放在本报告证据根的 `ci-followup/`，包括原始失败、普通用户复现、修复后回归和后续公开 CI 查询；它与 push 前归档分开保留。发布门槛、真人/真实传输和下一批 C 的范围不变。
 
 ## 5. 测试 VPS 的实际维护
 

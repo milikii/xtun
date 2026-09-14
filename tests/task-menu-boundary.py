@@ -168,6 +168,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence", type=Path)
     args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error("PTY tests exercise the real root guard; run with sudo python3 tests/task-menu-boundary.py")
     evidence = args.evidence or Path(tempfile.mkdtemp(prefix="xtun-task-menu."))
     results = []
     for outcome in ("node", "cancel", "eof", "input-int", "invalid-back-noop",
@@ -179,6 +181,9 @@ def main():
         except Exception as exc:
             results.append(dict(case=outcome, passed=False, error=str(exc)))
             print(f"FAIL {outcome}: {exc}", flush=True)
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                message = f"{outcome}: {exc}".replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                print(f"::error title=Task menu PTY failure::{message}", flush=True)
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / "results.json").write_text(json.dumps(results, indent=2))
     print(f"task menu evidence: {evidence}", flush=True)

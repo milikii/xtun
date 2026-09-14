@@ -92,7 +92,7 @@ H25–H29 已完成前序报告列出的自动/实机复验；H30 已有批次 B
 
 ### 2.4 已有自动与 VPS 套件的复现
 
-先保留工作区和候选摘要，检查准确核心身份。以下本机命令使用独立核心，不安装生产核心：
+先保留工作区和候选摘要，检查准确核心身份。以下命令在 root shell 执行，使用独立核心，不安装生产核心。完整 smoke 和两套 PTY 会经过真实安装/维护的 root 检查；测试 worker 隔离托管路径和服务调用，无 root 帮助入口由 smoke 内的 `setpriv` 单独验证。若通过 sudo 执行，显式保留 `TEST_HOST_XRAY_BIN`：
 
 ```bash
 export TEST_HOST_XRAY_BIN=/path/to/isolated/xray

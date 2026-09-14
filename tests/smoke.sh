@@ -2,6 +2,12 @@
 
 set -Eeuo pipefail
 
+# 部分恢复用例调用真实 CLI，不替换 root 检查；托管路径与服务仍由沙箱隔离。
+if [[ "${EUID}" -ne 0 ]]; then
+  printf '[fail] 完整 smoke 包含 root 维护入口，请以 root 运行（sudo bash tests/smoke.sh）。\n' >&2
+  exit 2
+fi
+
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_output.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_state_runtime.sh"

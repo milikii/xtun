@@ -40,15 +40,17 @@ jobs:
       # 一个 shellcheck 的 note 不该再有能力把整套用例的结果藏起来。
       - name: Run Smoke Tests
         if: ${{ !cancelled() }}
-        run: bash tests/smoke.sh
+        # 恢复用例穿过真实 recover CLI；无 root 帮助用例单独用 setpriv 降权。
+        run: sudo --preserve-env=GITHUB_ACTIONS bash tests/smoke.sh
 
       - name: Run installation PTY boundaries
         if: ${{ !cancelled() }}
-        run: python3 tests/install-boundary.py
+        # PTY 穿过真实安装/维护入口及 root 检查；托管路径和外部副作用由 worker 隔离。
+        run: sudo --preserve-env=GITHUB_ACTIONS python3 tests/install-boundary.py
 
       - name: Run task menu PTY boundaries
         if: ${{ !cancelled() }}
-        run: python3 tests/task-menu-boundary.py
+        run: sudo --preserve-env=GITHUB_ACTIONS python3 tests/task-menu-boundary.py
 
   # 真机冒烟：debian:13 systemd 容器里完整跑一遍 install + diagnose。
   # 沙箱用例永远碰不到 systemd / apt / 真实 haproxy / nginx，这一层只有真机跑得出来。
@@ -87,7 +89,7 @@ jobs:
           exit 1
 
       - name: Run install smoke
-        run: docker exec -e XRAY_VERSION="${XRAY_VERSION}" smoke bash /src/tests/install-smoke.sh container
+        run: docker exec -e XRAY_VERSION="${XRAY_VERSION}" -e GITHUB_ACTIONS smoke bash /src/tests/install-smoke.sh container
 
       - name: TLS debug（diagnose 失败时留现场）
         if: ${{ always() }}

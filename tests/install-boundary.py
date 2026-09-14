@@ -184,6 +184,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence", type=Path)
     args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error("PTY tests exercise the real root guard; run with sudo python3 tests/install-boundary.py")
     evidence = args.evidence or Path(tempfile.mkdtemp(prefix="xtun-install-boundary."))
     evidence.mkdir(parents=True, exist_ok=True)
     results = []
@@ -201,6 +203,9 @@ def main():
                 except Exception as exc:
                     results.append({"case": name, "passed": False, "error": str(exc)})
                     print(f"FAIL {name}: {exc}", flush=True)
+                    if os.environ.get("GITHUB_ACTIONS") == "true":
+                        message = f"{name}: {exc}".replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                        print(f"::error title=Installation PTY failure::{message}", flush=True)
     (evidence / "results.json").write_text(json.dumps(results, indent=2))
     print(f"install boundary evidence: {evidence}", flush=True)
     return 0 if all(item["passed"] for item in results) else 1
