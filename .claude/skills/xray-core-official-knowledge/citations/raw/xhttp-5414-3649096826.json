@@ -1,0 +1,7 @@
+{
+  "html_url": "https://github.com/XTLS/Xray-core/pull/5414#issuecomment-3649096826",
+  "created_at": "2025-12-13T08:03:16Z",
+  "updated_at": "2025-12-13T08:03:16Z",
+  "body": "~~我们看得懂英文，回复用中文纯粹是因为对我们来说码字速度更快，没有别的意思~~\r\n\r\n我觉得从你改了多个部分的代码以及“Further improvements”的思考来看，你对 Xray 的架构有不浅的研究、完全理解 XHTTP 的工作原理、且有发散性的思维，也就是说你是一个持续改进 XHTTP 的不错的人选，所以我会 reopen 这个 PR，只是怎么改还需讨论\r\n\r\n~~就像 Vision Seed 一样，本来在等 GFW 动手，如果 XHTTP 再不加自定义的话等下隔壁出个类似的传输层号称啥都能改，绷不住~~\r\n\r\n> Renamed X-Padding header to X-Signature - a lot more common and widely used by actual CDN users.\r\n\r\n修改默认名称会破坏 XHTTP 新旧版本之间的兼容性，应当加选项\r\n\r\n> Added xPaddingQueryParam. It can be set in the config to change the name of the query param used to pass the padding data. The default is x_padding\r\n> Changed the way the padding data is generated. It now consists of chars X and Z, not only X.\r\n\r\n然后关于这两点我思考过 https://github.com/XTLS/Xray-core/issues/4346#issuecomment-3567313166 ，如果要改应当加上七八个选项，或者就干脆不带 padding，你觉得哪一种更好？",
+  "author": "RPRX"
+}

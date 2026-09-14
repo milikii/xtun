@@ -1,88 +1,299 @@
-# Xray Core Official Knowledge — Sources Index
-# This file tracks the provenance and currency of all knowledge base content.
-# Update this file every time the knowledge base is synchronized.
-
 metadata:
   skill_name: xray-core-official-knowledge
-  last_sync: "2026-09-09T14:40:00Z"
-  sync_method: automated+manual
-  maintainer_note: >
-    Snapshot generated from XTLS/Xray-core main branch at commit 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
-    and XTLS/Xray-docs-next main branch. Covers the latest pre-release (v26.9.9); the latest
-    stable release (v26.3.27) is tracked via covered_versions.stable.
-
+  revision: 2026-09-14.1
+  last_sync: '2026-09-14'
+  last_verified: '2026-09-14'
+  sync_method: pinned-git-blobs + release-api + reviewed-extracts
+  manifest: source/snapshot-manifest.json
 upstream:
-  repository:
-    name: XTLS/Xray-core
-    url: https://github.com/XTLS/Xray-core
-    primary_branch: main
-  documentation:
-    primary: https://xtls.github.io/
-    config_reference: https://xtls.github.io/config/
-  releases:
-    api: https://api.github.com/repos/XTLS/Xray-core/releases
-    page: https://github.com/XTLS/Xray-core/releases
-
-# Versions currently represented in this knowledge base.
+  repository: https://github.com/XTLS/Xray-core
+  documentation: https://xtls.github.io/
+  releases_api: https://api.github.com/repos/XTLS/Xray-core/releases
+  latest_stable_api: https://api.github.com/repos/XTLS/Xray-core/releases/latest
 covered_versions:
   stable:
     version: v26.3.27
-    tag: v26.3.27
-    commit: d2758a0 (short SHA reported by the v26.3.27 binary; full SHA per tag)
-    docs_snapshot_date: "2026-09-09T14:40:00Z"
-    source_snapshot_date: "2026-09-09T14:40:00Z"
+    commit: d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
+    source_root: source/stable/v26.3.27/
+    scope: Selected config, transport, runtime and locked REALITY source; not a buildable full checkout
   beta:
     version: v26.9.9
-    tag: v26.9.9
     commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
-    docs_snapshot_date: "2026-09-09T14:40:00Z"
-    source_snapshot_date: "2026-09-09T14:40:00Z"
+    source_roots:
+    - source/config/
+    - source/transport/
+    - source/runtime/
+    scope: Selected source from latest prerelease; do not apply it implicitly to stable
   dev:
     branch: main
+    commit: c412e77a9b712082ac9ebf27fa793951cb5a7d85
+    source_root: source/dev/
+    scope: Two post-release fixes only; see source/commits/dev-after-v26.9.9.md
+documentation:
+  directory: docs/stable/
+  track: rolling official documentation, NOT release-matched stable docs
+  commit: 46c680b71b18b48b9cc6e55e596405bd0442ab8a
+  language: Chinese primary docs
+  known_conflicts: references/source-conflicts.md
+repositories:
+  core_stable:
+    name: XTLS/Xray-core
+    clone: core
+    tag: v26.3.27
+    commit: d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
+    url: https://github.com/XTLS/Xray-core
+  core_release:
+    name: XTLS/Xray-core
+    clone: core
+    tag: v26.9.9
     commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
-    snapshot_date: "2026-09-09T14:40:00Z"
-
-# Known gaps in the current knowledge base.
+    url: https://github.com/XTLS/Xray-core
+  core_dev:
+    name: XTLS/Xray-core
+    clone: core
+    branch: main
+    commit: c412e77a9b712082ac9ebf27fa793951cb5a7d85
+    url: https://github.com/XTLS/Xray-core
+  docs:
+    name: XTLS/Xray-docs-next
+    clone: docs
+    branch: main
+    commit: 46c680b71b18b48b9cc6e55e596405bd0442ab8a
+    url: https://github.com/XTLS/Xray-docs-next
+  reality_stable:
+    name: XTLS/REALITY
+    clone: reality
+    module_version: v0.0.0-20260322125925-9234c772ba8f
+    commit: 9234c772ba8f181f31c3e81dc2b4177322e5a9a9
+    url: https://github.com/XTLS/REALITY
+  reality_release:
+    name: XTLS/REALITY
+    clone: reality
+    module_version: v0.0.0-20260908062103-8cdf7bf9c7f0
+    commit: 8cdf7bf9c7f09cb9814bf08c3eb877f68b85fba8
+    url: https://github.com/XTLS/REALITY
+extraction:
+- repository: core_release
+  source_prefix: infra/conf/
+  destination: source/config/
+  recursive: false
+  suffixes:
+  - .go
+  exclude_suffixes:
+  - _test.go
+- repository: core_release
+  source_prefix: transport/internet/
+  destination: source/transport/internet/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_release
+  source_prefix: app/dns/
+  destination: source/runtime/app/dns/
+  suffixes: &id001
+  - .go
+  - .proto
+  exclude_suffixes: &id002
+  - _test.go
+  - .pb.go
+- repository: core_release
+  source_prefix: app/router/
+  destination: source/runtime/app/router/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: app/policy/
+  destination: source/runtime/app/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: features/policy/
+  destination: source/runtime/features/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: proxy/freedom/
+  destination: source/runtime/proxy/freedom/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: proxy/vless/
+  destination: source/runtime/proxy/vless/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: common/errors/
+  destination: source/runtime/common/errors/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: ''
+  destination: source/runtime/
+  files:
+  - go.mod
+  - core/core.go
+- repository: core_stable
+  source_prefix: infra/conf/
+  destination: source/stable/v26.3.27/infra/conf/
+  recursive: false
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: transport/internet/
+  destination: source/stable/v26.3.27/transport/internet/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: app/dns/
+  destination: source/stable/v26.3.27/app/dns/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: app/router/
+  destination: source/stable/v26.3.27/app/router/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: app/policy/
+  destination: source/stable/v26.3.27/app/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: features/policy/
+  destination: source/stable/v26.3.27/features/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: proxy/freedom/
+  destination: source/stable/v26.3.27/proxy/freedom/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: proxy/vless/
+  destination: source/stable/v26.3.27/proxy/vless/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: common/errors/
+  destination: source/stable/v26.3.27/common/errors/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: ''
+  destination: source/stable/v26.3.27/
+  files:
+  - go.mod
+  - core/core.go
+  - LICENSE
+- repository: core_release
+  source_prefix: ''
+  destination: source/licenses/core/
+  files:
+  - LICENSE
+- repository: docs
+  source_prefix: ''
+  destination: source/licenses/docs/
+  files:
+  - LICENSE
+- repository: docs
+  source_prefix: docs/
+  destination: docs/stable/
+  include_prefixes:
+  - config/
+  - about/
+  - development/
+  - document/level-1/
+  - document/level-2/
+- repository: docs
+  source_prefix: docs/
+  destination: docs/stable/
+  files:
+  - index.md
+  - document/document.md
+  - document/command.md
+  - document/config.md
+  - document/install.md
+  - document/index.md
+  - public/img-project-x.png
+  - public/img-project-xray.png
+  - public/logo-dark.svg
+  - public/logo-light.svg
+- repository: reality_stable
+  source_prefix: ''
+  destination: source/dependencies/reality/v26.3.27/
+  files:
+  - tls.go
+  - handshake_server_tls13.go
+  - common.go
+  - record_detect.go
+  - go.mod
+  - LICENSE
+- repository: reality_release
+  source_prefix: ''
+  destination: source/dependencies/reality/v26.9.9/
+  files:
+  - tls.go
+  - handshake_server_tls13.go
+  - common.go
+  - record_detect.go
+  - go.mod
+  - LICENSE
+- repository: core_dev
+  source_prefix: ''
+  destination: source/dev/
+  files:
+  - common/buf/readv_windows.go
+  - proxy/tun/handler.go
+history:
+  release_api_records: 30
+  release_range: v25.8.31 through v26.9.9
+  commit_range: v26.3.27..v26.9.9
+  commit_count: 241
+  commit_indexes: source/commits/
+  reviewed_changelog: changelog/index.md
+  historical_changes: extracted/deprecations/timeline.md
+  critical_commits:
+  - 2c92339f95fe9aa493b6ae51d3b07017a44c4014
+  - 9a953c070f9c3bd2b7f255fb50f076ae8ece7bce
+  - ae62a0fb526f2faa0aa8b3fbce5a566187059090
+  - dde0a4f2729d9c56c0b7c7581b77d98f8f46e108
+  - 75729ce77902d3da2b95c53bb3c87676a6482dff
+  - 18b85adb4e288f49a7894351c6e0f2428c0beef6
+  - 18e283909ca253d4220136eccca0a27006ea709f
+  - 47cfe9994a6b39b1f673ba35e62b091bcce15a71
+  - af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770
+  - fb548f54d22856446e883c6d13b32d60f0dda9bd
+  - c42deab55cc0dcc73eca5487206446fb76c5f79e
+  - d7fa2076c3e5401173bf9b58f7b07f9aa5174443
+  - 3e2f040cd80b33197d358da6bf0d859fae58f180
+  - c26d2eda240f521cd215ef9ff8ef17f323d29452
+  - 18a1b5042ad47ed71f01ae58f95ded4884aaba5e
+maintainer_sources:
+  index: citations/maintainer-intent.md
+  snapshots: citations/raw/
+  policy: Distinguish the post author, quoted third parties, proposals and implementation; dates are part of the
+    evidence
 gaps:
-  - area: XHTTP extra headers
-    status: partial
-    note: Header manipulation parameters extracted from source; advanced obfuscation options need deeper review.
-  - area: REALITY handshake flow
-    status: partial
-    note: High-level config fields captured; low-level crypto flow in transport/internet/reality/ needs deeper extraction.
-  - area: mKCP / QUIC transport
-    status: not-extracted
-    note: Legacy transports present in source but not yet documented in extracted/parameters/.
-  - area: Hysteria2 / WireGuard / TUN
-    status: partial
-    note: Config structs present in source/config/ but not yet extracted to YAML.
-  - area: Full protobuf defaults
-    status: partial
-    note: Only infra/conf Go structs are captured; protobuf-generated defaults in *.pb.go files not yet fully mapped.
-  - area: docs/stable language mirrors and level-0 tutorial
-    status: removed
-    note: >
-      docs/stable/ru/ and docs/stable/en/ (156 files each, translations of the Chinese primary docs)
-      and docs/stable/document/level-0/ (52 files, beginner tutorial with gif/png screenshots) were
-      removed on 2026-09-09 to cut the skill from 27 MB to 3.5 MB. Chinese docs under docs/stable/config/
-      and docs/stable/document/level-{1,2}/ are the authoritative snapshot. Links to level-0/ from
-      about/news.md, document/config.md, document/index.md, level-1/fallbacks-lv1.md,
-      level-2/nginx_or_haproxy_tls_tunnel.md and level-2/tproxy_ipv4_and_ipv6.md are now dangling.
-
-# File-to-source mapping for major sections.
-provenance:
-  docs/stable/:
-    source_repo: XTLS/Xray-docs-next
-    source_path: docs/
-    extraction_date: "2026-09-09T14:40:00Z"
-  source/config/:
-    source_repo: XTLS/Xray-core
-    source_path: infra/conf/
-    extraction_date: "2026-09-09T14:40:00Z"
-  source/transport/:
-    source_repo: XTLS/Xray-core
-    source_path: transport/internet/
-    extraction_date: "2026-09-09T14:40:00Z"
-  source/releases/:
-    source_api: https://api.github.com/repos/XTLS/Xray-core/releases
-    extraction_date: "2026-09-09T14:40:00Z"
+- area: Rolling docs vs release behavior
+  status: documented
+  note: TLS allowInsecure prose and historical XHTTP defaults conflict with implemented behavior; source-conflicts.md
+    records resolution
+- area: Runtime snapshot
+  status: partial
+  note: Not a full build tree; uncollected protocol implementations and protobuf generated defaults may require
+    the pinned upstream checkout
+- area: Hysteria, TUN, WireGuard, Finalmask
+  status: partial
+  note: Official config/docs/transports are available; no complete field-by-field YAML extraction or behavior testing
+- area: Translations and level-0 tutorials
+  status: intentionally-omitted
+  note: Chinese primary docs retained; links in untouched official docs to omitted translations/level-0 may not
+    resolve locally
+- area: Historical versions
+  status: partial
+  note: Two source baselines plus selected historical diffs; do not claim all past releases are fully snapshotted
+- area: Maintainer discussion snapshots
+  status: selected
+  note: Main XHTTP post and selected issues/comments only; not a complete live discussion archive

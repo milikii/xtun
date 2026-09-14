@@ -1,60 +1,41 @@
 name: VLessOutboundConfig
 component: proxy/vless/outbound
-version_introduced: v1.0.0
-version_deprecated: ""
-version_removed: ""
-status: stable
-server_client: client-only
+verified_version: v26.9.9
+track: prerelease
+coverage: Selected fields, not a complete schema
 source:
   docs: https://xtls.github.io/config/outbounds/vless.html
-  code: infra/conf/vless.go
-  commit: current
+  commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+  local:
+  - source/config/vless.go
+  - source/config/xray.go
+  - source/runtime/proxy/vless/outbound/outbound.go
+notes: 稳定版语义见 source/stable/v26.3.27/；v26.9.9 修复了旧 vnext 形式传输安全校验所需的地址与加密字段传递。
 fields:
-  - name: vnext
-    type: []VLessOutboundVnext
-    required: true
-    server_client: client-only
-    notes: >
-      目标服务器列表。当前源码限制：只能且必须包含一个成员。
-      每个成员包含 address, port, users。
-
-  - name: address / port / users
-    type: simplified
-    required: false
-    server_client: client-only
-    notes: >
-      简写模式：可直接在 settings 下写 address, port, level, email, id, flow 等，
-      源码会自动包装为 vnext[0]。不建议与新结构混用。
-
-  - name: id
-    type: string (UUID)
-    required: true
-    server_client: client-only
-    notes: 用户 UUID。出站时必须提供。
-
-  - name: flow
-    type: string
-    required: false
-    default: ""
-    server_client: client-only
-    notes: >
-      支持的值："" 或 "xtls-rprx-vision"（vless.XRV）或 "xtls-rprx-vision-udp443"。
-
-  - name: encryption
-    type: string
-    required: true
-    default: none
-    server_client: client-only
-    notes: >
-      客户端用户加密。必须设为 "none"。
-      也支持 mlkem768x25519plus 前缀实验性格式。
-
-  - name: reverse
-    type: VLessReverseConfig
-    required: false
-    server_client: client-only
-    notes: >
-      反向代理配置（实验性）。简写模式下可用，
-      完整 vnext 模式下不可使用。
-
+- name: address / port / id
+  type: string / integer / string
+  server_client: client-only
+  notes: 可直接写在 settings 的简写格式；提供 address 时覆盖 vnext 表示，不要同时混用两种格式。
+- name: vnext
+  type: array of endpoint objects
+  server_client: client-only
+  notes: 使用旧嵌套格式时必须且只能有一个 endpoint，endpoint.users 必须且只能有一个用户；简写格式下无需填写。
+- name: encryption
+  type: string
+  server_client: client-only
+  notes: 必须显式提供 none 或有效 mlkem768x25519plus.*；省略会报错。当前版本面对公网且使用 none 时还需通过传输安全校验。
+  required: true
+- name: flow
+  type: string
+  server_client: client-only
+  notes: 允许空值、xtls-rprx-vision、xtls-rprx-vision-udp443；运行组合限制继续核对 outbound.go。
+  default: ''
+- name: reverse
+  type: VLessReverseConfig
+  server_client: client-only
+  notes: 使用简写出站格式；必须提供 tag，可设置反向入站的 sniffing。旧 vnext 用户内不接受 reverse。
+- name: testpre / testseed
+  type: integer / array of integer
+  server_client: client-only
+  notes: Vision 的预连接/填充配置，按版本和官方说明使用，不作为通用推荐默认。
 confidence: source-confirmed

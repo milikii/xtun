@@ -1,0 +1,1425 @@
+commit ae62a0fb526f2faa0aa8b3fbce5a566187059090
+Author:     RPRX <63339210+RPRX@users.noreply.github.com>
+AuthorDate: Mon Dec 2 09:56:16 2024 +0000
+Commit:     RPRX <63339210+RPRX@users.noreply.github.com>
+CommitDate: Mon Dec 2 09:56:16 2024 +0000
+
+    Transport: Remove HTTP
+    
+    Migrated to XHTTP "stream-one" mode.
+
+diff --git a/infra/conf/transport_internet.go b/infra/conf/transport_internet.go
+index 428ba353..c62acee7 100644
+--- a/infra/conf/transport_internet.go
++++ b/infra/conf/transport_internet.go
+@@ -16,8 +16,6 @@ import (
+ 	"github.com/xtls/xray-core/common/platform/filesystem"
+ 	"github.com/xtls/xray-core/common/serial"
+ 	"github.com/xtls/xray-core/transport/internet"
+-	httpheader "github.com/xtls/xray-core/transport/internet/headers/http"
+-	"github.com/xtls/xray-core/transport/internet/http"
+ 	"github.com/xtls/xray-core/transport/internet/httpupgrade"
+ 	"github.com/xtls/xray-core/transport/internet/kcp"
+ 	"github.com/xtls/xray-core/transport/internet/reality"
+@@ -344,51 +342,6 @@ func (c *SplitHTTPConfig) Build() (proto.Message, error) {
+ 	return config, nil
+ }
+ 
+-type HTTPConfig struct {
+-	Host               *StringList            `json:"host"`
+-	Path               string                 `json:"path"`
+-	ReadIdleTimeout    int32                  `json:"read_idle_timeout"`
+-	HealthCheckTimeout int32                  `json:"health_check_timeout"`
+-	Method             string                 `json:"method"`
+-	Headers            map[string]*StringList `json:"headers"`
+-}
+-
+-// Build implements Buildable.
+-func (c *HTTPConfig) Build() (proto.Message, error) {
+-	if c.ReadIdleTimeout <= 0 {
+-		c.ReadIdleTimeout = 0
+-	}
+-	if c.HealthCheckTimeout <= 0 {
+-		c.HealthCheckTimeout = 0
+-	}
+-	config := &http.Config{
+-		Path:               c.Path,
+-		IdleTimeout:        c.ReadIdleTimeout,
+-		HealthCheckTimeout: c.HealthCheckTimeout,
+-	}
+-	if c.Host != nil {
+-		config.Host = []string(*c.Host)
+-	}
+-	if c.Method != "" {
+-		config.Method = c.Method
+-	}
+-	if len(c.Headers) > 0 {
+-		config.Header = make([]*httpheader.Header, 0, len(c.Headers))
+-		headerNames := sortMapKeys(c.Headers)
+-		for _, key := range headerNames {
+-			value := c.Headers[key]
+-			if value == nil {
+-				return nil, errors.New("empty HTTP header value: " + key).AtError()
+-			}
+-			config.Header = append(config.Header, &httpheader.Header{
+-				Name:  key,
+-				Value: append([]string(nil), (*value)...),
+-			})
+-		}
+-	}
+-	return config, nil
+-}
+-
+ func readFileOrString(f string, s []string) ([]byte, error) {
+ 	if len(f) > 0 {
+ 		return filesystem.ReadFile(f)
+@@ -709,20 +662,23 @@ func (p TransportProtocol) Build() (string, error) {
+ 	switch strings.ToLower(string(p)) {
+ 	case "raw", "tcp":
+ 		return "tcp", nil
++	case "xhttp", "splithttp":
++		return "splithttp", nil
+ 	case "kcp", "mkcp":
+ 		return "mkcp", nil
+-	case "ws", "websocket":
+-		return "websocket", nil
+-	case "h2", "h3", "http":
+-		errors.PrintDeprecatedFeatureWarning("HTTP transport", "XHTTP transport")
+-		return "http", nil
+ 	case "grpc":
+-		errors.PrintMigrateFeatureInfo("gRPC transport", "XHTTP transport")
++		errors.PrintDeprecatedFeatureWarning("gRPC transport (with unnecessary costs, etc.)", "XHTTP stream-up H2")
+ 		return "grpc", nil
++	case "ws", "websocket":
++		errors.PrintDeprecatedFeatureWarning("WebSocket transport (with ALPN http/1.1, etc.)", "XHTTP H2 & H3")
++		return "websocket", nil
+ 	case "httpupgrade":
++		errors.PrintDeprecatedFeatureWarning("HTTPUpgrade transport (with ALPN http/1.1, etc.)", "XHTTP H2 & H3")
+ 		return "httpupgrade", nil
+-	case "xhttp", "splithttp":
+-		return "splithttp", nil
++	case "h2", "h3", "http":
++		return "", errors.PrintRemovedFeatureError("HTTP transport (without header padding, etc.)", "XHTTP stream-one H2 & H3")
++	case "quic":
++		return "", errors.PrintRemovedFeatureError("QUIC transport (without web service, etc.)", "XHTTP stream-one H3")
+ 	default:
+ 		return "", errors.New("Config: unknown transport protocol: ", p)
+ 	}
+@@ -852,14 +808,13 @@ type StreamConfig struct {
+ 	REALITYSettings     *REALITYConfig     `json:"realitySettings"`
+ 	RAWSettings         *TCPConfig         `json:"rawSettings"`
+ 	TCPSettings         *TCPConfig         `json:"tcpSettings"`
++	XHTTPSettings       *SplitHTTPConfig   `json:"xhttpSettings"`
++	SplitHTTPSettings   *SplitHTTPConfig   `json:"splithttpSettings"`
+ 	KCPSettings         *KCPConfig         `json:"kcpSettings"`
++	GRPCSettings        *GRPCConfig        `json:"grpcSettings"`
+ 	WSSettings          *WebSocketConfig   `json:"wsSettings"`
+-	HTTPSettings        *HTTPConfig        `json:"httpSettings"`
+-	SocketSettings      *SocketConfig      `json:"sockopt"`
+-	GRPCConfig          *GRPCConfig        `json:"grpcSettings"`
+ 	HTTPUPGRADESettings *HttpUpgradeConfig `json:"httpupgradeSettings"`
+-	XHTTPSettings       *SplitHTTPConfig   `json:"xhttpSettings"`
+-	SplitHTTPSettings   *SplitHTTPConfig   `json:"splithttpSettings"`
++	SocketSettings      *SocketConfig      `json:"sockopt"`
+ }
+ 
+ // Build implements Buildable.
+@@ -893,8 +848,8 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
+ 		config.SecuritySettings = append(config.SecuritySettings, tm)
+ 		config.SecurityType = tm.Type
+ 	case "reality":
+-		if config.ProtocolName != "tcp" && config.ProtocolName != "http" && config.ProtocolName != "grpc" && config.ProtocolName != "splithttp" {
+-			return nil, errors.New("REALITY only supports RAW, H2, gRPC and XHTTP for now.")
++		if config.ProtocolName != "tcp" && config.ProtocolName != "splithttp" && config.ProtocolName != "grpc" {
++			return nil, errors.New("REALITY only supports RAW, XHTTP and gRPC for now.")
+ 		}
+ 		if c.REALITYSettings == nil {
+ 			return nil, errors.New(`REALITY: Empty "realitySettings".`)
+@@ -924,38 +879,31 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
+ 			Settings:     serial.ToTypedMessage(ts),
+ 		})
+ 	}
+-	if c.KCPSettings != nil {
+-		ts, err := c.KCPSettings.Build()
+-		if err != nil {
+-			return nil, errors.New("Failed to build mKCP config.").Base(err)
+-		}
+-		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+-			ProtocolName: "mkcp",
+-			Settings:     serial.ToTypedMessage(ts),
+-		})
++	if c.XHTTPSettings != nil {
++		c.SplitHTTPSettings = c.XHTTPSettings
+ 	}
+-	if c.WSSettings != nil {
+-		ts, err := c.WSSettings.Build()
++	if c.SplitHTTPSettings != nil {
++		hs, err := c.SplitHTTPSettings.Build()
+ 		if err != nil {
+-			return nil, errors.New("Failed to build WebSocket config.").Base(err)
++			return nil, errors.New("Failed to build XHTTP config.").Base(err)
+ 		}
+ 		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+-			ProtocolName: "websocket",
+-			Settings:     serial.ToTypedMessage(ts),
++			ProtocolName: "splithttp",
++			Settings:     serial.ToTypedMessage(hs),
+ 		})
+ 	}
+-	if c.HTTPSettings != nil {
+-		ts, err := c.HTTPSettings.Build()
++	if c.KCPSettings != nil {
++		ts, err := c.KCPSettings.Build()
+ 		if err != nil {
+-			return nil, errors.New("Failed to build HTTP config.").Base(err)
++			return nil, errors.New("Failed to build mKCP config.").Base(err)
+ 		}
+ 		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+-			ProtocolName: "http",
++			ProtocolName: "mkcp",
+ 			Settings:     serial.ToTypedMessage(ts),
+ 		})
+ 	}
+-	if c.GRPCConfig != nil {
+-		gs, err := c.GRPCConfig.Build()
++	if c.GRPCSettings != nil {
++		gs, err := c.GRPCSettings.Build()
+ 		if err != nil {
+ 			return nil, errors.New("Failed to build gRPC config.").Base(err)
+ 		}
+@@ -964,33 +912,30 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
+ 			Settings:     serial.ToTypedMessage(gs),
+ 		})
+ 	}
+-	if c.HTTPUPGRADESettings != nil {
+-		hs, err := c.HTTPUPGRADESettings.Build()
++	if c.WSSettings != nil {
++		ts, err := c.WSSettings.Build()
+ 		if err != nil {
+-			return nil, errors.New("Failed to build HttpUpgrade config.").Base(err)
++			return nil, errors.New("Failed to build WebSocket config.").Base(err)
+ 		}
+ 		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+-			ProtocolName: "httpupgrade",
+-			Settings:     serial.ToTypedMessage(hs),
++			ProtocolName: "websocket",
++			Settings:     serial.ToTypedMessage(ts),
+ 		})
+ 	}
+-	if c.XHTTPSettings != nil {
+-		c.SplitHTTPSettings = c.XHTTPSettings
+-	}
+-	if c.SplitHTTPSettings != nil {
+-		hs, err := c.SplitHTTPSettings.Build()
++	if c.HTTPUPGRADESettings != nil {
++		hs, err := c.HTTPUPGRADESettings.Build()
+ 		if err != nil {
+-			return nil, errors.New("Failed to build XHTTP config.").Base(err)
++			return nil, errors.New("Failed to build HTTPUpgrade config.").Base(err)
+ 		}
+ 		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+-			ProtocolName: "splithttp",
++			ProtocolName: "httpupgrade",
+ 			Settings:     serial.ToTypedMessage(hs),
+ 		})
+ 	}
+ 	if c.SocketSettings != nil {
+ 		ss, err := c.SocketSettings.Build()
+ 		if err != nil {
+-			return nil, errors.New("Failed to build sockopt").Base(err)
++			return nil, errors.New("Failed to build sockopt.").Base(err)
+ 		}
+ 		config.SocketSettings = ss
+ 	}
+diff --git a/main/distro/all/all.go b/main/distro/all/all.go
+index 4e9ac3c0..198abb3f 100644
+--- a/main/distro/all/all.go
++++ b/main/distro/all/all.go
+@@ -51,7 +51,6 @@ import (
+ 
+ 	// Transports
+ 	_ "github.com/xtls/xray-core/transport/internet/grpc"
+-	_ "github.com/xtls/xray-core/transport/internet/http"
+ 	_ "github.com/xtls/xray-core/transport/internet/httpupgrade"
+ 	_ "github.com/xtls/xray-core/transport/internet/kcp"
+ 	_ "github.com/xtls/xray-core/transport/internet/reality"
+diff --git a/testing/scenarios/tls_test.go b/testing/scenarios/tls_test.go
+index ffe43300..a8abccd7 100644
+--- a/testing/scenarios/tls_test.go
++++ b/testing/scenarios/tls_test.go
+@@ -23,7 +23,6 @@ import (
+ 	"github.com/xtls/xray-core/testing/servers/udp"
+ 	"github.com/xtls/xray-core/transport/internet"
+ 	"github.com/xtls/xray-core/transport/internet/grpc"
+-	"github.com/xtls/xray-core/transport/internet/http"
+ 	"github.com/xtls/xray-core/transport/internet/tls"
+ 	"github.com/xtls/xray-core/transport/internet/websocket"
+ 	"golang.org/x/sync/errgroup"
+@@ -458,128 +457,6 @@ func TestTLSOverWebSocket(t *testing.T) {
+ 	}
+ }
+ 
+-func TestHTTP2(t *testing.T) {
+-	tcpServer := tcp.Server{
+-		MsgProcessor: xor,
+-	}
+-	dest, err := tcpServer.Start()
+-	common.Must(err)
+-	defer tcpServer.Close()
+-
+-	userID := protocol.NewID(uuid.New())
+-	serverPort := tcp.PickPort()
+-	serverConfig := &core.Config{
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(serverPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-					StreamSettings: &internet.StreamConfig{
+-						ProtocolName: "http",
+-						TransportSettings: []*internet.TransportConfig{
+-							{
+-								ProtocolName: "http",
+-								Settings: serial.ToTypedMessage(&http.Config{
+-									Host: []string{"example.com"},
+-									Path: "/testpath",
+-								}),
+-							},
+-						},
+-						SecurityType: serial.GetMessageType(&tls.Config{}),
+-						SecuritySettings: []*serial.TypedMessage{
+-							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
+-							}),
+-						},
+-					},
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-					User: []*protocol.User{
+-						{
+-							Account: serial.ToTypedMessage(&vmess.Account{
+-								Id: userID.String(),
+-							}),
+-						},
+-					},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
+-			},
+-		},
+-	}
+-
+-	clientPort := tcp.PickPort()
+-	clientConfig := &core.Config{
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+-					Address:  net.NewIPOrDomain(dest.Address),
+-					Port:     uint32(dest.Port),
+-					Networks: []net.Network{net.Network_TCP},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&outbound.Config{
+-					Receiver: []*protocol.ServerEndpoint{
+-						{
+-							Address: net.NewIPOrDomain(net.LocalHostIP),
+-							Port:    uint32(serverPort),
+-							User: []*protocol.User{
+-								{
+-									Account: serial.ToTypedMessage(&vmess.Account{
+-										Id: userID.String(),
+-									}),
+-								},
+-							},
+-						},
+-					},
+-				}),
+-				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+-					StreamSettings: &internet.StreamConfig{
+-						ProtocolName: "http",
+-						TransportSettings: []*internet.TransportConfig{
+-							{
+-								ProtocolName: "http",
+-								Settings: serial.ToTypedMessage(&http.Config{
+-									Host: []string{"example.com"},
+-									Path: "/testpath",
+-								}),
+-							},
+-						},
+-						SecurityType: serial.GetMessageType(&tls.Config{}),
+-						SecuritySettings: []*serial.TypedMessage{
+-							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
+-							}),
+-						},
+-					},
+-				}),
+-			},
+-		},
+-	}
+-
+-	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+-	common.Must(err)
+-	defer CloseAllServers(servers)
+-
+-	var errg errgroup.Group
+-	for i := 0; i < 10; i++ {
+-		errg.Go(testTCPConn(clientPort, 1024*1024, time.Second*40))
+-	}
+-	if err := errg.Wait(); err != nil {
+-		t.Error(err)
+-	}
+-}
+-
+ func TestGRPC(t *testing.T) {
+ 	tcpServer := tcp.Server{
+ 		MsgProcessor: xor,
+diff --git a/transport/internet/http/config.go b/transport/internet/http/config.go
+deleted file mode 100644
+index 1cd7d058..00000000
+--- a/transport/internet/http/config.go
++++ /dev/null
+@@ -1,48 +0,0 @@
+-package http
+-
+-import (
+-	"github.com/xtls/xray-core/common"
+-	"github.com/xtls/xray-core/common/dice"
+-	"github.com/xtls/xray-core/transport/internet"
+-)
+-
+-func (c *Config) getHosts() []string {
+-	if len(c.Host) == 0 {
+-		return []string{""}
+-	}
+-	return c.Host
+-}
+-
+-func (c *Config) isValidHost(host string) bool {
+-	if len(c.Host) == 0 {
+-		return true
+-	}
+-	hosts := c.getHosts()
+-	for _, h := range hosts {
+-		if internet.IsValidHTTPHost(host, h) {
+-			return true
+-		}
+-	}
+-	return false
+-}
+-
+-func (c *Config) getRandomHost() string {
+-	hosts := c.getHosts()
+-	return hosts[dice.Roll(len(hosts))]
+-}
+-
+-func (c *Config) getNormalizedPath() string {
+-	if c.Path == "" {
+-		return "/"
+-	}
+-	if c.Path[0] != '/' {
+-		return "/" + c.Path
+-	}
+-	return c.Path
+-}
+-
+-func init() {
+-	common.Must(internet.RegisterProtocolConfigCreator(protocolName, func() interface{} {
+-		return new(Config)
+-	}))
+-}
+diff --git a/transport/internet/http/config.pb.go b/transport/internet/http/config.pb.go
+deleted file mode 100644
+index c3e9b89f..00000000
+--- a/transport/internet/http/config.pb.go
++++ /dev/null
+@@ -1,193 +0,0 @@
+-// Code generated by protoc-gen-go. DO NOT EDIT.
+-// versions:
+-// 	protoc-gen-go v1.35.1
+-// 	protoc        v5.28.2
+-// source: transport/internet/http/config.proto
+-
+-package http
+-
+-import (
+-	http "github.com/xtls/xray-core/transport/internet/headers/http"
+-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+-	reflect "reflect"
+-	sync "sync"
+-)
+-
+-const (
+-	// Verify that this generated code is sufficiently up-to-date.
+-	_ = protoimpl.EnforceVersion(20 - protoimpl.MinVersion)
+-	// Verify that runtime/protoimpl is sufficiently up-to-date.
+-	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
+-)
+-
+-type Config struct {
+-	state         protoimpl.MessageState
+-	sizeCache     protoimpl.SizeCache
+-	unknownFields protoimpl.UnknownFields
+-
+-	Host               []string       `protobuf:"bytes,1,rep,name=host,proto3" json:"host,omitempty"`
+-	Path               string         `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+-	IdleTimeout        int32          `protobuf:"varint,3,opt,name=idle_timeout,json=idleTimeout,proto3" json:"idle_timeout,omitempty"`
+-	HealthCheckTimeout int32          `protobuf:"varint,4,opt,name=health_check_timeout,json=healthCheckTimeout,proto3" json:"health_check_timeout,omitempty"`
+-	Method             string         `protobuf:"bytes,5,opt,name=method,proto3" json:"method,omitempty"`
+-	Header             []*http.Header `protobuf:"bytes,6,rep,name=header,proto3" json:"header,omitempty"`
+-}
+-
+-func (x *Config) Reset() {
+-	*x = Config{}
+-	mi := &file_transport_internet_http_config_proto_msgTypes[0]
+-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+-	ms.StoreMessageInfo(mi)
+-}
+-
+-func (x *Config) String() string {
+-	return protoimpl.X.MessageStringOf(x)
+-}
+-
+-func (*Config) ProtoMessage() {}
+-
+-func (x *Config) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_http_config_proto_msgTypes[0]
+-	if x != nil {
+-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+-		if ms.LoadMessageInfo() == nil {
+-			ms.StoreMessageInfo(mi)
+-		}
+-		return ms
+-	}
+-	return mi.MessageOf(x)
+-}
+-
+-// Deprecated: Use Config.ProtoReflect.Descriptor instead.
+-func (*Config) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_http_config_proto_rawDescGZIP(), []int{0}
+-}
+-
+-func (x *Config) GetHost() []string {
+-	if x != nil {
+-		return x.Host
+-	}
+-	return nil
+-}
+-
+-func (x *Config) GetPath() string {
+-	if x != nil {
+-		return x.Path
+-	}
+-	return ""
+-}
+-
+-func (x *Config) GetIdleTimeout() int32 {
+-	if x != nil {
+-		return x.IdleTimeout
+-	}
+-	return 0
+-}
+-
+-func (x *Config) GetHealthCheckTimeout() int32 {
+-	if x != nil {
+-		return x.HealthCheckTimeout
+-	}
+-	return 0
+-}
+-
+-func (x *Config) GetMethod() string {
+-	if x != nil {
+-		return x.Method
+-	}
+-	return ""
+-}
+-
+-func (x *Config) GetHeader() []*http.Header {
+-	if x != nil {
+-		return x.Header
+-	}
+-	return nil
+-}
+-
+-var File_transport_internet_http_config_proto protoreflect.FileDescriptor
+-
+-var file_transport_internet_http_config_proto_rawDesc = []byte{
+-	0x0a, 0x24, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2f, 0x69, 0x6e, 0x74, 0x65,
+-	0x72, 0x6e, 0x65, 0x74, 0x2f, 0x68, 0x74, 0x74, 0x70, 0x2f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67,
+-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x1c, 0x78, 0x72, 0x61, 0x79, 0x2e, 0x74, 0x72, 0x61,
+-	0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e,
+-	0x68, 0x74, 0x74, 0x70, 0x1a, 0x2c, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2f,
+-	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2f, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x73,
+-	0x2f, 0x68, 0x74, 0x74, 0x70, 0x2f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x2e, 0x70, 0x72, 0x6f,
+-	0x74, 0x6f, 0x22, 0xe3, 0x01, 0x0a, 0x06, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x12, 0x12, 0x0a,
+-	0x04, 0x68, 0x6f, 0x73, 0x74, 0x18, 0x01, 0x20, 0x03, 0x28, 0x09, 0x52, 0x04, 0x68, 0x6f, 0x73,
+-	0x74, 0x12, 0x12, 0x0a, 0x04, 0x70, 0x61, 0x74, 0x68, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52,
+-	0x04, 0x70, 0x61, 0x74, 0x68, 0x12, 0x21, 0x0a, 0x0c, 0x69, 0x64, 0x6c, 0x65, 0x5f, 0x74, 0x69,
+-	0x6d, 0x65, 0x6f, 0x75, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0b, 0x69, 0x64, 0x6c,
+-	0x65, 0x54, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74, 0x12, 0x30, 0x0a, 0x14, 0x68, 0x65, 0x61, 0x6c,
+-	0x74, 0x68, 0x5f, 0x63, 0x68, 0x65, 0x63, 0x6b, 0x5f, 0x74, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74,
+-	0x18, 0x04, 0x20, 0x01, 0x28, 0x05, 0x52, 0x12, 0x68, 0x65, 0x61, 0x6c, 0x74, 0x68, 0x43, 0x68,
+-	0x65, 0x63, 0x6b, 0x54, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74, 0x12, 0x16, 0x0a, 0x06, 0x6d, 0x65,
+-	0x74, 0x68, 0x6f, 0x64, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x06, 0x6d, 0x65, 0x74, 0x68,
+-	0x6f, 0x64, 0x12, 0x44, 0x0a, 0x06, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x18, 0x06, 0x20, 0x03,
+-	0x28, 0x0b, 0x32, 0x2c, 0x2e, 0x78, 0x72, 0x61, 0x79, 0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70,
+-	0x6f, 0x72, 0x74, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x68, 0x65, 0x61,
+-	0x64, 0x65, 0x72, 0x73, 0x2e, 0x68, 0x74, 0x74, 0x70, 0x2e, 0x48, 0x65, 0x61, 0x64, 0x65, 0x72,
+-	0x52, 0x06, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x42, 0x76, 0x0a, 0x20, 0x63, 0x6f, 0x6d, 0x2e,
+-	0x78, 0x72, 0x61, 0x79, 0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2e, 0x69,
+-	0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x68, 0x74, 0x74, 0x70, 0x50, 0x01, 0x5a, 0x31,
+-	0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x78, 0x74, 0x6c, 0x73, 0x2f,
+-	0x78, 0x72, 0x61, 0x79, 0x2d, 0x63, 0x6f, 0x72, 0x65, 0x2f, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70,
+-	0x6f, 0x72, 0x74, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2f, 0x68, 0x74, 0x74,
+-	0x70, 0xaa, 0x02, 0x1c, 0x58, 0x72, 0x61, 0x79, 0x2e, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f,
+-	0x72, 0x74, 0x2e, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x48, 0x74, 0x74, 0x70,
+-	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+-}
+-
+-var (
+-	file_transport_internet_http_config_proto_rawDescOnce sync.Once
+-	file_transport_internet_http_config_proto_rawDescData = file_transport_internet_http_config_proto_rawDesc
+-)
+-
+-func file_transport_internet_http_config_proto_rawDescGZIP() []byte {
+-	file_transport_internet_http_config_proto_rawDescOnce.Do(func() {
+-		file_transport_internet_http_config_proto_rawDescData = protoimpl.X.CompressGZIP(file_transport_internet_http_config_proto_rawDescData)
+-	})
+-	return file_transport_internet_http_config_proto_rawDescData
+-}
+-
+-var file_transport_internet_http_config_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+-var file_transport_internet_http_config_proto_goTypes = []any{
+-	(*Config)(nil),      // 0: xray.transport.internet.http.Config
+-	(*http.Header)(nil), // 1: xray.transport.internet.headers.http.Header
+-}
+-var file_transport_internet_http_config_proto_depIdxs = []int32{
+-	1, // 0: xray.transport.internet.http.Config.header:type_name -> xray.transport.internet.headers.http.Header
+-	1, // [1:1] is the sub-list for method output_type
+-	1, // [1:1] is the sub-list for method input_type
+-	1, // [1:1] is the sub-list for extension type_name
+-	1, // [1:1] is the sub-list for extension extendee
+-	0, // [0:1] is the sub-list for field type_name
+-}
+-
+-func init() { file_transport_internet_http_config_proto_init() }
+-func file_transport_internet_http_config_proto_init() {
+-	if File_transport_internet_http_config_proto != nil {
+-		return
+-	}
+-	type x struct{}
+-	out := protoimpl.TypeBuilder{
+-		File: protoimpl.DescBuilder{
+-			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+-			RawDescriptor: file_transport_internet_http_config_proto_rawDesc,
+-			NumEnums:      0,
+-			NumMessages:   1,
+-			NumExtensions: 0,
+-			NumServices:   0,
+-		},
+-		GoTypes:           file_transport_internet_http_config_proto_goTypes,
+-		DependencyIndexes: file_transport_internet_http_config_proto_depIdxs,
+-		MessageInfos:      file_transport_internet_http_config_proto_msgTypes,
+-	}.Build()
+-	File_transport_internet_http_config_proto = out.File
+-	file_transport_internet_http_config_proto_rawDesc = nil
+-	file_transport_internet_http_config_proto_goTypes = nil
+-	file_transport_internet_http_config_proto_depIdxs = nil
+-}
+diff --git a/transport/internet/http/config.proto b/transport/internet/http/config.proto
+deleted file mode 100644
+index 82f5cbeb..00000000
+--- a/transport/internet/http/config.proto
++++ /dev/null
+@@ -1,18 +0,0 @@
+-syntax = "proto3";
+-
+-package xray.transport.internet.http;
+-option csharp_namespace = "Xray.Transport.Internet.Http";
+-option go_package = "github.com/xtls/xray-core/transport/internet/http";
+-option java_package = "com.xray.transport.internet.http";
+-option java_multiple_files = true;
+-
+-import "transport/internet/headers/http/config.proto";
+-
+-message Config {
+-  repeated string host = 1;
+-  string path = 2;
+-  int32 idle_timeout = 3;
+-  int32 health_check_timeout = 4;
+-  string method = 5;
+-  repeated xray.transport.internet.headers.http.Header header = 6;
+-}
+diff --git a/transport/internet/http/dialer.go b/transport/internet/http/dialer.go
+deleted file mode 100644
+index 42a9f9b3..00000000
+--- a/transport/internet/http/dialer.go
++++ /dev/null
+@@ -1,311 +0,0 @@
+-package http
+-
+-import (
+-	"context"
+-	gotls "crypto/tls"
+-	"io"
+-	"net/http"
+-	"net/url"
+-	"sync"
+-	"time"
+-
+-	"github.com/quic-go/quic-go"
+-	"github.com/quic-go/quic-go/http3"
+-	"github.com/xtls/xray-core/common"
+-	"github.com/xtls/xray-core/common/buf"
+-	c "github.com/xtls/xray-core/common/ctx"
+-	"github.com/xtls/xray-core/common/errors"
+-	"github.com/xtls/xray-core/common/net"
+-	"github.com/xtls/xray-core/common/net/cnc"
+-	"github.com/xtls/xray-core/common/session"
+-	"github.com/xtls/xray-core/transport/internet"
+-	"github.com/xtls/xray-core/transport/internet/reality"
+-	"github.com/xtls/xray-core/transport/internet/stat"
+-	"github.com/xtls/xray-core/transport/internet/tls"
+-	"github.com/xtls/xray-core/transport/pipe"
+-	"golang.org/x/net/http2"
+-)
+-
+-// defines the maximum time an idle TCP session can survive in the tunnel, so
+-// it should be consistent across HTTP versions and with other transports.
+-const connIdleTimeout = 300 * time.Second
+-
+-// consistent with quic-go
+-const h3KeepalivePeriod = 10 * time.Second
+-
+-type dialerConf struct {
+-	net.Destination
+-	*internet.MemoryStreamConfig
+-}
+-
+-var (
+-	globalDialerMap    map[dialerConf]*http.Client
+-	globalDialerAccess sync.Mutex
+-)
+-
+-func getHTTPClient(ctx context.Context, dest net.Destination, streamSettings *internet.MemoryStreamConfig) (*http.Client, error) {
+-	globalDialerAccess.Lock()
+-	defer globalDialerAccess.Unlock()
+-
+-	if globalDialerMap == nil {
+-		globalDialerMap = make(map[dialerConf]*http.Client)
+-	}
+-
+-	httpSettings := streamSettings.ProtocolSettings.(*Config)
+-	tlsConfigs := tls.ConfigFromStreamSettings(streamSettings)
+-	realityConfigs := reality.ConfigFromStreamSettings(streamSettings)
+-	if tlsConfigs == nil && realityConfigs == nil {
+-		return nil, errors.New("TLS or REALITY must be enabled for http transport.").AtWarning()
+-	}
+-	isH3 := tlsConfigs != nil && (len(tlsConfigs.NextProtocol) == 1 && tlsConfigs.NextProtocol[0] == "h3")
+-	if isH3 {
+-		dest.Network = net.Network_UDP
+-	}
+-	sockopt := streamSettings.SocketSettings
+-
+-	if client, found := globalDialerMap[dialerConf{dest, streamSettings}]; found {
+-		return client, nil
+-	}
+-
+-	var transport http.RoundTripper
+-	if isH3 {
+-		quicConfig := &quic.Config{
+-			MaxIdleTimeout: connIdleTimeout,
+-
+-			// these two are defaults of quic-go/http3. the default of quic-go (no
+-			// http3) is different, so it is hardcoded here for clarity.
+-			// https://github.com/quic-go/quic-go/blob/b8ea5c798155950fb5bbfdd06cad1939c9355878/http3/client.go#L36-L39
+-			MaxIncomingStreams: -1,
+-			KeepAlivePeriod:    h3KeepalivePeriod,
+-		}
+-		roundTripper := &http3.RoundTripper{
+-			QUICConfig:      quicConfig,
+-			TLSClientConfig: tlsConfigs.GetTLSConfig(tls.WithDestination(dest)),
+-			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+-				conn, err := internet.DialSystem(ctx, dest, streamSettings.SocketSettings)
+-				if err != nil {
+-					return nil, err
+-				}
+-
+-				var udpConn net.PacketConn
+-				var udpAddr *net.UDPAddr
+-
+-				switch c := conn.(type) {
+-				case *internet.PacketConnWrapper:
+-					var ok bool
+-					udpConn, ok = c.Conn.(*net.UDPConn)
+-					if !ok {
+-						return nil, errors.New("PacketConnWrapper does not contain a UDP connection")
+-					}
+-					udpAddr, err = net.ResolveUDPAddr("udp", c.Dest.String())
+-					if err != nil {
+-						return nil, err
+-					}
+-				case *net.UDPConn:
+-					udpConn = c
+-					udpAddr, err = net.ResolveUDPAddr("udp", c.RemoteAddr().String())
+-					if err != nil {
+-						return nil, err
+-					}
+-				default:
+-					udpConn = &internet.FakePacketConn{c}
+-					udpAddr, err = net.ResolveUDPAddr("udp", c.RemoteAddr().String())
+-					if err != nil {
+-						return nil, err
+-					}
+-				}
+-
+-				return quic.DialEarly(ctx, udpConn, udpAddr, tlsCfg, cfg)
+-			},
+-		}
+-		transport = roundTripper
+-	} else {
+-		transportH2 := &http2.Transport{
+-			DialTLSContext: func(hctx context.Context, string, addr string, tlsConfig *gotls.Config) (net.Conn, error) {
+-				rawHost, rawPort, err := net.SplitHostPort(addr)
+-				if err != nil {
+-					return nil, err
+-				}
+-				if len(rawPort) == 0 {
+-					rawPort = "443"
+-				}
+-				port, err := net.PortFromString(rawPort)
+-				if err != nil {
+-					return nil, err
+-				}
+-				address := net.ParseAddress(rawHost)
+-
+-				hctx = c.ContextWithID(hctx, c.IDFromContext(ctx))
+-				hctx = session.ContextWithOutbounds(hctx, session.OutboundsFromContext(ctx))
+-				hctx = session.ContextWithTimeoutOnly(hctx, true)
+-
+-				pconn, err := internet.DialSystem(hctx, net.TCPDestination(address, port), sockopt)
+-				if err != nil {
+-					errors.LogErrorInner(ctx, err, "failed to dial to "+addr)
+-					return nil, err
+-				}
+-
+-				if realityConfigs != nil {
+-					return reality.UClient(pconn, realityConfigs, hctx, dest)
+-				}
+-
+-				var cn tls.Interface
+-				if fingerprint := tls.GetFingerprint(tlsConfigs.Fingerprint); fingerprint != nil {
+-					cn = tls.UClient(pconn, tlsConfig, fingerprint).(*tls.UConn)
+-				} else {
+-					cn = tls.Client(pconn, tlsConfig).(*tls.Conn)
+-				}
+-				if err := cn.HandshakeContext(ctx); err != nil {
+-					errors.LogErrorInner(ctx, err, "failed to dial to "+addr)
+-					return nil, err
+-				}
+-				if !tlsConfig.InsecureSkipVerify {
+-					if err := cn.VerifyHostname(tlsConfig.ServerName); err != nil {
+-						errors.LogErrorInner(ctx, err, "failed to dial to "+addr)
+-						return nil, err
+-					}
+-				}
+-				negotiatedProtocol := cn.NegotiatedProtocol()
+-				if negotiatedProtocol != http2.NextProtoTLS {
+-					return nil, errors.New("http2: unexpected ALPN protocol " + negotiatedProtocol + "; want q" + http2.NextProtoTLS).AtError()
+-				}
+-				return cn, nil
+-			},
+-		}
+-		if tlsConfigs != nil {
+-			transportH2.TLSClientConfig = tlsConfigs.GetTLSConfig(tls.WithDestination(dest))
+-		}
+-		if httpSettings.IdleTimeout > 0 || httpSettings.HealthCheckTimeout > 0 {
+-			transportH2.ReadIdleTimeout = time.Second * time.Duration(httpSettings.IdleTimeout)
+-			transportH2.PingTimeout = time.Second * time.Duration(httpSettings.HealthCheckTimeout)
+-		}
+-		transport = transportH2
+-	}
+-
+-	client := &http.Client{
+-		Transport: transport,
+-	}
+-
+-	globalDialerMap[dialerConf{dest, streamSettings}] = client
+-	return client, nil
+-}
+-
+-// Dial dials a new TCP connection to the given destination.
+-func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.MemoryStreamConfig) (stat.Connection, error) {
+-	httpSettings := streamSettings.ProtocolSettings.(*Config)
+-	client, err := getHTTPClient(ctx, dest, streamSettings)
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	opts := pipe.OptionsFromContext(ctx)
+-	preader, pwriter := pipe.New(opts...)
+-	breader := &buf.BufferedReader{Reader: preader}
+-
+-	httpMethod := "PUT"
+-	if httpSettings.Method != "" {
+-		httpMethod = httpSettings.Method
+-	}
+-
+-	httpHeaders := make(http.Header)
+-
+-	for _, httpHeader := range httpSettings.Header {
+-		for _, httpHeaderValue := range httpHeader.Value {
+-			httpHeaders.Set(httpHeader.Name, httpHeaderValue)
+-		}
+-	}
+-
+-	Host := httpSettings.getRandomHost()
+-	if Host == "" && net.ParseAddress(dest.NetAddr()).Family().IsDomain() {
+-		Host = dest.Address.String()
+-	} else if Host == "" {
+-		Host = "www.example.com"
+-	}
+-
+-	request := &http.Request{
+-		Method: httpMethod,
+-		Host:   Host,
+-		Body:   breader,
+-		URL: &url.URL{
+-			Scheme: "https",
+-			Host:   dest.NetAddr(),
+-			Path:   httpSettings.getNormalizedPath(),
+-		},
+-		Header: httpHeaders,
+-	}
+-	// Disable any compression method from server.
+-	request.Header.Set("Accept-Encoding", "identity")
+-
+-	wrc := &WaitReadCloser{Wait: make(chan struct{})}
+-	go func() {
+-		response, err := client.Do(request)
+-		if err != nil || response.StatusCode != 200 {
+-			if err != nil {
+-				errors.LogWarningInner(ctx, err, "failed to dial to ", dest)
+-			} else {
+-				errors.LogWarning(ctx, "unexpected status ", response.StatusCode)
+-			}
+-			wrc.Close()
+-			{
+-				// Abandon `client` if `client.Do(request)` failed
+-				// See https://github.com/golang/go/issues/30702
+-				globalDialerAccess.Lock()
+-				if globalDialerMap[dialerConf{dest, streamSettings}] == client {
+-					delete(globalDialerMap, dialerConf{dest, streamSettings})
+-				}
+-				globalDialerAccess.Unlock()
+-			}
+-			return
+-		}
+-		wrc.Set(response.Body)
+-	}()
+-
+-	bwriter := buf.NewBufferedWriter(pwriter)
+-	common.Must(bwriter.SetBuffered(false))
+-	return cnc.NewConnection(
+-		cnc.ConnectionOutput(wrc),
+-		cnc.ConnectionInput(bwriter),
+-		cnc.ConnectionOnClose(common.ChainedClosable{breader, bwriter, wrc}),
+-	), nil
+-}
+-
+-func init() {
+-	common.Must(internet.RegisterTransportDialer(protocolName, Dial))
+-}
+-
+-type WaitReadCloser struct {
+-	Wait chan struct{}
+-	io.ReadCloser
+-}
+-
+-func (w *WaitReadCloser) Set(rc io.ReadCloser) {
+-	w.ReadCloser = rc
+-	defer func() {
+-		if recover() != nil {
+-			rc.Close()
+-		}
+-	}()
+-	close(w.Wait)
+-}
+-
+-func (w *WaitReadCloser) Read(b []byte) (int, error) {
+-	if w.ReadCloser == nil {
+-		if <-w.Wait; w.ReadCloser == nil {
+-			return 0, io.ErrClosedPipe
+-		}
+-	}
+-	return w.ReadCloser.Read(b)
+-}
+-
+-func (w *WaitReadCloser) Close() error {
+-	if w.ReadCloser != nil {
+-		return w.ReadCloser.Close()
+-	}
+-	defer func() {
+-		if recover() != nil && w.ReadCloser != nil {
+-			w.ReadCloser.Close()
+-		}
+-	}()
+-	close(w.Wait)
+-	return nil
+-}
+diff --git a/transport/internet/http/http.go b/transport/internet/http/http.go
+deleted file mode 100644
+index a6343422..00000000
+--- a/transport/internet/http/http.go
++++ /dev/null
+@@ -1,3 +0,0 @@
+-package http
+-
+-const protocolName = "http"
+diff --git a/transport/internet/http/http_test.go b/transport/internet/http/http_test.go
+deleted file mode 100644
+index 1b3afa80..00000000
+--- a/transport/internet/http/http_test.go
++++ /dev/null
+@@ -1,172 +0,0 @@
+-package http_test
+-
+-import (
+-	"context"
+-	"crypto/rand"
+-	"testing"
+-	"time"
+-
+-	"github.com/google/go-cmp/cmp"
+-	"github.com/xtls/xray-core/common"
+-	"github.com/xtls/xray-core/common/buf"
+-	"github.com/xtls/xray-core/common/net"
+-	"github.com/xtls/xray-core/common/protocol/tls/cert"
+-	"github.com/xtls/xray-core/testing/servers/tcp"
+-	"github.com/xtls/xray-core/testing/servers/udp"
+-	"github.com/xtls/xray-core/transport/internet"
+-	. "github.com/xtls/xray-core/transport/internet/http"
+-	"github.com/xtls/xray-core/transport/internet/stat"
+-	"github.com/xtls/xray-core/transport/internet/tls"
+-)
+-
+-func TestHTTPConnection(t *testing.T) {
+-	port := tcp.PickPort()
+-
+-	listener, err := Listen(context.Background(), net.LocalHostIP, port, &internet.MemoryStreamConfig{
+-		ProtocolName:     "http",
+-		ProtocolSettings: &Config{},
+-		SecurityType:     "tls",
+-		SecuritySettings: &tls.Config{
+-			Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil, cert.CommonName("www.example.com")))},
+-		},
+-	}, func(conn stat.Connection) {
+-		go func() {
+-			defer conn.Close()
+-
+-			b := buf.New()
+-			defer b.Release()
+-
+-			for {
+-				if _, err := b.ReadFrom(conn); err != nil {
+-					return
+-				}
+-				_, err := conn.Write(b.Bytes())
+-				common.Must(err)
+-			}
+-		}()
+-	})
+-	common.Must(err)
+-
+-	defer listener.Close()
+-
+-	time.Sleep(time.Second)
+-
+-	dctx := context.Background()
+-	conn, err := Dial(dctx, net.TCPDestination(net.LocalHostIP, port), &internet.MemoryStreamConfig{
+-		ProtocolName:     "http",
+-		ProtocolSettings: &Config{},
+-		SecurityType:     "tls",
+-		SecuritySettings: &tls.Config{
+-			ServerName:    "www.example.com",
+-			AllowInsecure: true,
+-		},
+-	})
+-	common.Must(err)
+-	defer conn.Close()
+-
+-	const N = 1024
+-	b1 := make([]byte, N)
+-	common.Must2(rand.Read(b1))
+-	b2 := buf.New()
+-
+-	nBytes, err := conn.Write(b1)
+-	common.Must(err)
+-	if nBytes != N {
+-		t.Error("write: ", nBytes)
+-	}
+-
+-	b2.Clear()
+-	common.Must2(b2.ReadFullFrom(conn, N))
+-	if r := cmp.Diff(b2.Bytes(), b1); r != "" {
+-		t.Error(r)
+-	}
+-
+-	nBytes, err = conn.Write(b1)
+-	common.Must(err)
+-	if nBytes != N {
+-		t.Error("write: ", nBytes)
+-	}
+-
+-	b2.Clear()
+-	common.Must2(b2.ReadFullFrom(conn, N))
+-	if r := cmp.Diff(b2.Bytes(), b1); r != "" {
+-		t.Error(r)
+-	}
+-}
+-
+-func TestH3Connection(t *testing.T) {
+-	port := udp.PickPort()
+-
+-	listener, err := Listen(context.Background(), net.LocalHostIP, port, &internet.MemoryStreamConfig{
+-		ProtocolName:     "http",
+-		ProtocolSettings: &Config{},
+-		SecurityType:     "tls",
+-		SecuritySettings: &tls.Config{
+-			NextProtocol: []string{"h3"},
+-			Certificate:  []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil, cert.CommonName("www.example.com")))},
+-		},
+-	}, func(conn stat.Connection) {
+-		go func() {
+-			defer conn.Close()
+-
+-			b := buf.New()
+-			defer b.Release()
+-
+-			for {
+-				if _, err := b.ReadFrom(conn); err != nil {
+-					return
+-				}
+-				_, err := conn.Write(b.Bytes())
+-				common.Must(err)
+-			}
+-		}()
+-	})
+-	common.Must(err)
+-
+-	defer listener.Close()
+-
+-	time.Sleep(time.Second)
+-
+-	dctx := context.Background()
+-	conn, err := Dial(dctx, net.TCPDestination(net.LocalHostIP, port), &internet.MemoryStreamConfig{
+-		ProtocolName:     "http",
+-		ProtocolSettings: &Config{},
+-		SecurityType:     "tls",
+-		SecuritySettings: &tls.Config{
+-			NextProtocol:  []string{"h3"},
+-			ServerName:    "www.example.com",
+-			AllowInsecure: true,
+-		},
+-	})
+-	common.Must(err)
+-	defer conn.Close()
+-
+-	const N = 1024
+-	b1 := make([]byte, N)
+-	common.Must2(rand.Read(b1))
+-	b2 := buf.New()
+-
+-	nBytes, err := conn.Write(b1)
+-	common.Must(err)
+-	if nBytes != N {
+-		t.Error("write: ", nBytes)
+-	}
+-
+-	b2.Clear()
+-	common.Must2(b2.ReadFullFrom(conn, N))
+-	if r := cmp.Diff(b2.Bytes(), b1); r != "" {
+-		t.Error(r)
+-	}
+-
+-	nBytes, err = conn.Write(b1)
+-	common.Must(err)
+-	if nBytes != N {
+-		t.Error("write: ", nBytes)
+-	}
+-
+-	b2.Clear()
+-	common.Must2(b2.ReadFullFrom(conn, N))
+-	if r := cmp.Diff(b2.Bytes(), b1); r != "" {
+-		t.Error(r)
+-	}
+-}
+diff --git a/transport/internet/http/hub.go b/transport/internet/http/hub.go
+deleted file mode 100644
+index 1fac2b73..00000000
+--- a/transport/internet/http/hub.go
++++ /dev/null
+@@ -1,252 +0,0 @@
+-package http
+-
+-import (
+-	"context"
+-	gotls "crypto/tls"
+-	"io"
+-	"net/http"
+-	"strings"
+-	"time"
+-
+-	"github.com/quic-go/quic-go"
+-	"github.com/quic-go/quic-go/http3"
+-	goreality "github.com/xtls/reality"
+-	"github.com/xtls/xray-core/common"
+-	"github.com/xtls/xray-core/common/errors"
+-	"github.com/xtls/xray-core/common/net"
+-	"github.com/xtls/xray-core/common/net/cnc"
+-	http_proto "github.com/xtls/xray-core/common/protocol/http"
+-	"github.com/xtls/xray-core/common/serial"
+-	"github.com/xtls/xray-core/common/signal/done"
+-	"github.com/xtls/xray-core/transport/internet"
+-	"github.com/xtls/xray-core/transport/internet/reality"
+-	"github.com/xtls/xray-core/transport/internet/tls"
+-	"golang.org/x/net/http2"
+-	"golang.org/x/net/http2/h2c"
+-)
+-
+-type Listener struct {
+-	server   *http.Server
+-	h3server *http3.Server
+-	handler  internet.ConnHandler
+-	local    net.Addr
+-	config   *Config
+-	isH3     bool
+-}
+-
+-func (l *Listener) Addr() net.Addr {
+-	return l.local
+-}
+-
+-func (l *Listener) Close() error {
+-	if l.h3server != nil {
+-		if err := l.h3server.Close(); err != nil {
+-			return err
+-		}
+-	} else if l.server != nil {
+-		return l.server.Close()
+-	}
+-	return errors.New("listener does not have an HTTP/3 server or h2 server")
+-}
+-
+-type flushWriter struct {
+-	w io.Writer
+-	d *done.Instance
+-}
+-
+-func (fw flushWriter) Write(p []byte) (n int, err error) {
+-	if fw.d.Done() {
+-		return 0, io.ErrClosedPipe
+-	}
+-
+-	defer func() {
+-		if recover() != nil {
+-			fw.d.Close()
+-			err = io.ErrClosedPipe
+-		}
+-	}()
+-
+-	n, err = fw.w.Write(p)
+-	if f, ok := fw.w.(http.Flusher); ok && err == nil {
+-		f.Flush()
+-	}
+-	return
+-}
+-
+-func (l *Listener) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+-	host := request.Host
+-	if !l.config.isValidHost(host) {
+-		writer.WriteHeader(404)
+-		return
+-	}
+-	path := l.config.getNormalizedPath()
+-	if !strings.HasPrefix(request.URL.Path, path) {
+-		writer.WriteHeader(404)
+-		return
+-	}
+-
+-	writer.Header().Set("Cache-Control", "no-store")
+-
+-	for _, httpHeader := range l.config.Header {
+-		for _, httpHeaderValue := range httpHeader.Value {
+-			writer.Header().Set(httpHeader.Name, httpHeaderValue)
+-		}
+-	}
+-
+-	writer.WriteHeader(200)
+-	if f, ok := writer.(http.Flusher); ok {
+-		f.Flush()
+-	}
+-
+-	remoteAddr := l.Addr()
+-	dest, err := net.ParseDestination(request.RemoteAddr)
+-	if err != nil {
+-		errors.LogInfoInner(context.Background(), err, "failed to parse request remote addr: ", request.RemoteAddr)
+-	} else {
+-		remoteAddr = &net.TCPAddr{
+-			IP:   dest.Address.IP(),
+-			Port: int(dest.Port),
+-		}
+-	}
+-
+-	forwardedAddress := http_proto.ParseXForwardedFor(request.Header)
+-	if len(forwardedAddress) > 0 && forwardedAddress[0].Family().IsIP() {
+-		remoteAddr = &net.TCPAddr{
+-			IP:   forwardedAddress[0].IP(),
+-			Port: 0,
+-		}
+-	}
+-
+-	done := done.New()
+-	conn := cnc.NewConnection(
+-		cnc.ConnectionOutput(request.Body),
+-		cnc.ConnectionInput(flushWriter{w: writer, d: done}),
+-		cnc.ConnectionOnClose(common.ChainedClosable{done, request.Body}),
+-		cnc.ConnectionLocalAddr(l.Addr()),
+-		cnc.ConnectionRemoteAddr(remoteAddr),
+-	)
+-	l.handler(conn)
+-	<-done.Wait()
+-}
+-
+-func Listen(ctx context.Context, address net.Address, port net.Port, streamSettings *internet.MemoryStreamConfig, handler internet.ConnHandler) (internet.Listener, error) {
+-	httpSettings := streamSettings.ProtocolSettings.(*Config)
+-	config := tls.ConfigFromStreamSettings(streamSettings)
+-	var tlsConfig *gotls.Config
+-	if config == nil {
+-		tlsConfig = &gotls.Config{}
+-	} else {
+-		tlsConfig = config.GetTLSConfig()
+-	}
+-	isH3 := len(tlsConfig.NextProtos) == 1 && tlsConfig.NextProtos[0] == "h3"
+-	listener := &Listener{
+-		handler: handler,
+-		config:  httpSettings,
+-		isH3:    isH3,
+-	}
+-	if port == net.Port(0) { // unix
+-		listener.local = &net.UnixAddr{
+-			Name: address.Domain(),
+-			Net:  "unix",
+-		}
+-	} else if isH3 { // udp
+-		listener.local = &net.UDPAddr{
+-			IP:   address.IP(),
+-			Port: int(port),
+-		}
+-	} else {
+-		listener.local = &net.TCPAddr{
+-			IP:   address.IP(),
+-			Port: int(port),
+-		}
+-	}
+-
+-	if streamSettings.SocketSettings != nil && streamSettings.SocketSettings.AcceptProxyProtocol {
+-		errors.LogWarning(ctx, "accepting PROXY protocol")
+-	}
+-
+-	if isH3 {
+-		Conn, err := internet.ListenSystemPacket(context.Background(), listener.local, streamSettings.SocketSettings)
+-		if err != nil {
+-			return nil, errors.New("failed to listen UDP(for SH3) on ", address, ":", port).Base(err)
+-		}
+-		h3listener, err := quic.ListenEarly(Conn, tlsConfig, nil)
+-		if err != nil {
+-			return nil, errors.New("failed to listen QUIC(for SH3) on ", address, ":", port).Base(err)
+-		}
+-		errors.LogInfo(ctx, "listening QUIC(for SH3) on ", address, ":", port)
+-
+-		listener.h3server = &http3.Server{
+-			Handler: listener,
+-		}
+-		go func() {
+-			if err := listener.h3server.ServeListener(h3listener); err != nil {
+-				errors.LogWarningInner(ctx, err, "failed to serve http3 for splithttp")
+-			}
+-		}()
+-	} else {
+-		var server *http.Server
+-		if config == nil {
+-			h2s := &http2.Server{}
+-
+-			server = &http.Server{
+-				Addr:              serial.Concat(address, ":", port),
+-				Handler:           h2c.NewHandler(listener, h2s),
+-				ReadHeaderTimeout: time.Second * 4,
+-			}
+-		} else {
+-			server = &http.Server{
+-				Addr:              serial.Concat(address, ":", port),
+-				TLSConfig:         config.GetTLSConfig(tls.WithNextProto("h2")),
+-				Handler:           listener,
+-				ReadHeaderTimeout: time.Second * 4,
+-			}
+-		}
+-
+-		listener.server = server
+-		go func() {
+-			var streamListener net.Listener
+-			var err error
+-			if port == net.Port(0) { // unix
+-				streamListener, err = internet.ListenSystem(ctx, &net.UnixAddr{
+-					Name: address.Domain(),
+-					Net:  "unix",
+-				}, streamSettings.SocketSettings)
+-				if err != nil {
+-					errors.LogErrorInner(ctx, err, "failed to listen on ", address)
+-					return
+-				}
+-			} else { // tcp
+-				streamListener, err = internet.ListenSystem(ctx, &net.TCPAddr{
+-					IP:   address.IP(),
+-					Port: int(port),
+-				}, streamSettings.SocketSettings)
+-				if err != nil {
+-					errors.LogErrorInner(ctx, err, "failed to listen on ", address, ":", port)
+-					return
+-				}
+-			}
+-
+-			if config == nil {
+-				if config := reality.ConfigFromStreamSettings(streamSettings); config != nil {
+-					streamListener = goreality.NewListener(streamListener, config.GetREALITYConfig())
+-				}
+-				err = server.Serve(streamListener)
+-				if err != nil {
+-					errors.LogInfoInner(ctx, err, "stopping serving H2C or REALITY H2")
+-				}
+-			} else {
+-				err = server.ServeTLS(streamListener, "", "")
+-				if err != nil {
+-					errors.LogInfoInner(ctx, err, "stopping serving TLS H2")
+-				}
+-			}
+-		}()
+-	}
+-
+-	return listener, nil
+-}
+-
+-func init() {
+-	common.Must(internet.RegisterTransportListener(protocolName, Listen))
+-}

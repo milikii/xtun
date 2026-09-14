@@ -1,24 +1,13 @@
-# docs/
+# 官方文档快照
 
-This directory holds official Xray Core documentation snapshots.
+`stable/` 是历史目录名，保留它是为了兼容已有引用。这里保存的是中文官网 main 的
+滚动快照，**不是 v26.3.27 对应的独立稳定版文档**。精确提交及抓取范围见
+[来源索引](../sources.yaml)。
 
-## Structure
+回答稳定版行为时，使用 [稳定版源码](../source/stable/v26.3.27/)；回答预发布版时
+使用 `../source/config/`、`../source/transport/`、`../source/runtime/`。
+文档与实现的已知差异见 [冲突记录](../references/source-conflicts.md)。
 
-- `stable/` — Documentation matching the latest **stable** release.
-- `beta/` — Documentation matching the latest **beta** or pre-release.
-- `archived/` — Past major/minor version documentation snapshots.
-
-## Import Instructions
-
-1. Identify the target version (stable, beta, or specific archived version).
-2. Pull the official documentation from https://xtls.github.io/ or the `XTLS/Xray-core` repo.
-3. Save as Markdown or original format under the appropriate subdirectory.
-4. Update `sources.yaml` with the snapshot date and source URL.
-
-## Naming Convention
-
-- `stable/config-overview.md`
-- `beta/config-overview.md`
-- `archived/v1.8/config-overview.md`
-
-Do not mix versions within the same directory.
+官方正文按 Git blob 原样保存，不在其中混入人工修正。英文、俄文镜像以及 level-0
+入门教程有意省略，官方正文指向这些内容的本地链接可能无法解析，可访问官网原链接。
+不存在单独维护的 beta/archived 文档镜像；旧版本应查指定 tag 的源码与发布记录。

@@ -1,0 +1,111 @@
+{
+  "version": "v26.9.9",
+  "binary_version_output": "Xray 26.9.9 (Xray, Penetrates Everything.) 52a412d (go1.27.1 linux/arm64)\nA unified platform for anti-censorship.",
+  "binary_sha256": "c1defe42b6db958a97c5e049a02a00a4baaedaca7b51c1c229f0830e288acef5",
+  "example_config_sha256": "0676883e5500f02e8a3e66b22377d2599dd67502017050eb772ce4edfe4cbf2d",
+  "scope": "Configuration parsing/building only; no listeners, live handshakes or throughput tests",
+  "results": [
+    {
+      "case": "tls-allowInsecure-false",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "case": "tls-allowInsecure-true",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "tls-native-fingerprint",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "case": "removed-http",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "removed-quic",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "grpc-reality",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "case": "reality-native-fingerprint",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "reality-implicit-chrome",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "case": "ws-reality-rejected",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "xhttp-string-range",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "case": "xhttp-object-range-rejected",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "xhttp-xmux-conflict",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "xhttp-host-header-rejected",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "xhttp-extra-replaces-outer",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "case": "proxySettings-version-boundary",
+      "expected_accepted": false,
+      "exit_code": 23,
+      "passed": true
+    },
+    {
+      "case": "example-server",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "case": "example-client",
+      "expected_accepted": true,
+      "exit_code": 0,
+      "passed": true
+    }
+  ]
+}

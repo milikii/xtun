@@ -1,0 +1,99 @@
+{
+  "meta": {
+    "target_version": "v26.3.27",
+    "track": "stable",
+    "source_commit": "d2758a023cd7f4174a5a5fa4ff66e487d4342ba0",
+    "kind": "parameterized-server-client-pair",
+    "validation": {
+      "source_reviewed": true,
+      "configuration_checked": true,
+      "live_handshake_tested": false,
+      "checked_at": "2026-09-14",
+      "report": "source/validation/v26.3.27.json"
+    },
+    "instructions": "Read references/examples.md. Replace placeholders and use either server or client as the Xray config; this wrapper is not itself a core configuration."
+  },
+  "server": {
+    "log": {
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "listen": "0.0.0.0",
+        "port": 443,
+        "protocol": "vless",
+        "settings": {
+          "clients": [
+            {
+              "id": "REPLACE_WITH_UUID"
+            }
+          ],
+          "decryption": "none"
+        },
+        "streamSettings": {
+          "network": "xhttp",
+          "security": "reality",
+          "realitySettings": {
+            "target": "REPLACE_WITH_REALITY_TARGET:443",
+            "serverNames": [
+              "REPLACE_WITH_SERVER_NAME"
+            ],
+            "privateKey": "REPLACE_WITH_PRIVATE_KEY",
+            "shortIds": [
+              "REPLACE_WITH_SHORT_ID"
+            ]
+          },
+          "xhttpSettings": {
+            "path": "/xhttp",
+            "mode": "auto"
+          }
+        }
+      }
+    ],
+    "outbounds": [
+      {
+        "protocol": "freedom"
+      }
+    ]
+  },
+  "client": {
+    "log": {
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "listen": "127.0.0.1",
+        "port": 1080,
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
+    "outbounds": [
+      {
+        "protocol": "vless",
+        "settings": {
+          "address": "REPLACE_WITH_SERVER_ADDRESS",
+          "port": 443,
+          "id": "REPLACE_WITH_UUID",
+          "encryption": "none"
+        },
+        "streamSettings": {
+          "network": "xhttp",
+          "security": "reality",
+          "realitySettings": {
+            "fingerprint": "chrome",
+            "serverName": "REPLACE_WITH_SERVER_NAME",
+            "password": "REPLACE_WITH_PASSWORD",
+            "shortId": "REPLACE_WITH_SHORT_ID"
+          },
+          "xhttpSettings": {
+            "path": "/xhttp",
+            "mode": "auto"
+          }
+        }
+      }
+    ]
+  }
+}

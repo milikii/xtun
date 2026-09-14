@@ -1,0 +1,25 @@
+commit af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770
+Author:     RPRX <63339210+RPRX@users.noreply.github.com>
+AuthorDate: Sat Jul 11 14:30:54 2026 +0000
+Commit:     GitHub <noreply@github.com>
+CommitDate: Sat Jul 11 14:30:54 2026 +0000
+
+    REALITY server: Set default `"minClientVer": "26.3.27"` (change it at your own risk)
+    
+    https://github.com/XTLS/Xray-core/pull/6181#issuecomment-4567373533
+    https://t.me/projectXtls/3373
+    https://t.me/projectXtls/3378
+
+diff --git a/infra/conf/transport_security.go b/infra/conf/transport_security.go
+index 7d0e0529..21f3702a 100644
+--- a/infra/conf/transport_security.go
++++ b/infra/conf/transport_security.go
+@@ -113,6 +113,8 @@ func (c *REALITYConfig) Build() (proto.Message, error) {
+ 					config.MinClientVer[i] = byte(u)
+ 				}
+ 			}
++		} else {
++			config.MinClientVer = []byte{26, 3, 27} // change it at your own risk: https://github.com/XTLS/Xray-core/pull/6181#issuecomment-4567373533
+ 		}
+ 		if c.MaxClientVer != "" {
+ 			config.MaxClientVer = make([]byte, 3)

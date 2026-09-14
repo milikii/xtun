@@ -1,0 +1,1065 @@
+commit 3e2f040cd80b33197d358da6bf0d859fae58f180
+Author:     Meow <197331664+Meo597@users.noreply.github.com>
+AuthorDate: Tue Sep 8 11:31:25 2026 +0800
+Commit:     GitHub <noreply@github.com>
+CommitDate: Tue Sep 8 03:31:25 2026 +0000
+
+    Direct/Freedom outbound: Better Compatibility (#6058)
+    
+    Fixes https://github.com/XTLS/Xray-core/issues/6393
+
+diff --git a/app/proxyman/config.pb.go b/app/proxyman/config.pb.go
+index 8b9dfd27..37f5c6c3 100644
+--- a/app/proxyman/config.pb.go
++++ b/app/proxyman/config.pb.go
+@@ -330,7 +330,6 @@ type SenderConfig struct {
+ 	// Send traffic through the given IP. Only IP is allowed.
+ 	Via               *net.IPOrDomain         `protobuf:"bytes,1,opt,name=via,proto3" json:"via,omitempty"`
+ 	StreamSettings    *internet.StreamConfig  `protobuf:"bytes,2,opt,name=stream_settings,json=streamSettings,proto3" json:"stream_settings,omitempty"`
+-	ProxySettings     *internet.ProxyConfig   `protobuf:"bytes,3,opt,name=proxy_settings,json=proxySettings,proto3" json:"proxy_settings,omitempty"`
+ 	MultiplexSettings *MultiplexingConfig     `protobuf:"bytes,4,opt,name=multiplex_settings,json=multiplexSettings,proto3" json:"multiplex_settings,omitempty"`
+ 	ViaCidr           string                  `protobuf:"bytes,5,opt,name=via_cidr,json=viaCidr,proto3" json:"via_cidr,omitempty"`
+ 	TargetStrategy    internet.DomainStrategy `protobuf:"varint,6,opt,name=target_strategy,json=targetStrategy,proto3,enum=xray.transport.internet.DomainStrategy" json:"target_strategy,omitempty"`
+@@ -382,13 +381,6 @@ func (x *SenderConfig) GetStreamSettings() *internet.StreamConfig {
+ 	return nil
+ }
+ 
+-func (x *SenderConfig) GetProxySettings() *internet.ProxyConfig {
+-	if x != nil {
+-		return x.ProxySettings
+-	}
+-	return nil
+-}
+-
+ func (x *SenderConfig) GetMultiplexSettings() *MultiplexingConfig {
+ 	if x != nil {
+ 		return x.MultiplexSettings
+@@ -506,14 +498,13 @@ const file_app_proxyman_config_proto_rawDesc = "" +
+ 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12M\n" +
+ 	"\x11receiver_settings\x18\x02 \x01(\v2 .xray.common.serial.TypedMessageR\x10receiverSettings\x12G\n" +
+ 	"\x0eproxy_settings\x18\x03 \x01(\v2 .xray.common.serial.TypedMessageR\rproxySettings\"\x10\n" +
+-	"\x0eOutboundConfig\"\x9d\x03\n" +
++	"\x0eOutboundConfig\"\xd6\x02\n" +
+ 	"\fSenderConfig\x12-\n" +
+ 	"\x03via\x18\x01 \x01(\v2\x1b.xray.common.net.IPOrDomainR\x03via\x12N\n" +
+-	"\x0fstream_settings\x18\x02 \x01(\v2%.xray.transport.internet.StreamConfigR\x0estreamSettings\x12K\n" +
+-	"\x0eproxy_settings\x18\x03 \x01(\v2$.xray.transport.internet.ProxyConfigR\rproxySettings\x12T\n" +
++	"\x0fstream_settings\x18\x02 \x01(\v2%.xray.transport.internet.StreamConfigR\x0estreamSettings\x12T\n" +
+ 	"\x12multiplex_settings\x18\x04 \x01(\v2%.xray.app.proxyman.MultiplexingConfigR\x11multiplexSettings\x12\x19\n" +
+ 	"\bvia_cidr\x18\x05 \x01(\tR\aviaCidr\x12P\n" +
+-	"\x0ftarget_strategy\x18\x06 \x01(\x0e2'.xray.transport.internet.DomainStrategyR\x0etargetStrategy\"\xa4\x01\n" +
++	"\x0ftarget_strategy\x18\x06 \x01(\x0e2'.xray.transport.internet.DomainStrategyR\x0etargetStrategyJ\x04\b\x03\x10\x04\"\xa4\x01\n" +
+ 	"\x12MultiplexingConfig\x12\x18\n" +
+ 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12 \n" +
+ 	"\vconcurrency\x18\x02 \x01(\x05R\vconcurrency\x12(\n" +
+@@ -548,8 +539,7 @@ var file_app_proxyman_config_proto_goTypes = []any{
+ 	(*net.IPOrDomain)(nil),        // 10: xray.common.net.IPOrDomain
+ 	(*internet.StreamConfig)(nil), // 11: xray.transport.internet.StreamConfig
+ 	(*serial.TypedMessage)(nil),   // 12: xray.common.serial.TypedMessage
+-	(*internet.ProxyConfig)(nil),  // 13: xray.transport.internet.ProxyConfig
+-	(internet.DomainStrategy)(0),  // 14: xray.transport.internet.DomainStrategy
++	(internet.DomainStrategy)(0),  // 13: xray.transport.internet.DomainStrategy
+ }
+ var file_app_proxyman_config_proto_depIdxs = []int32{
+ 	7,  // 0: xray.app.proxyman.SniffingConfig.domains_excluded:type_name -> xray.common.geodata.DomainRule
+@@ -562,14 +552,13 @@ var file_app_proxyman_config_proto_depIdxs = []int32{
+ 	12, // 7: xray.app.proxyman.InboundHandlerConfig.proxy_settings:type_name -> xray.common.serial.TypedMessage
+ 	10, // 8: xray.app.proxyman.SenderConfig.via:type_name -> xray.common.net.IPOrDomain
+ 	11, // 9: xray.app.proxyman.SenderConfig.stream_settings:type_name -> xray.transport.internet.StreamConfig
+-	13, // 10: xray.app.proxyman.SenderConfig.proxy_settings:type_name -> xray.transport.internet.ProxyConfig
+-	6,  // 11: xray.app.proxyman.SenderConfig.multiplex_settings:type_name -> xray.app.proxyman.MultiplexingConfig
+-	14, // 12: xray.app.proxyman.SenderConfig.target_strategy:type_name -> xray.transport.internet.DomainStrategy
+-	13, // [13:13] is the sub-list for method output_type
+-	13, // [13:13] is the sub-list for method input_type
+-	13, // [13:13] is the sub-list for extension type_name
+-	13, // [13:13] is the sub-list for extension extendee
+-	0,  // [0:13] is the sub-list for field type_name
++	6,  // 10: xray.app.proxyman.SenderConfig.multiplex_settings:type_name -> xray.app.proxyman.MultiplexingConfig
++	13, // 11: xray.app.proxyman.SenderConfig.target_strategy:type_name -> xray.transport.internet.DomainStrategy
++	12, // [12:12] is the sub-list for method output_type
++	12, // [12:12] is the sub-list for method input_type
++	12, // [12:12] is the sub-list for extension type_name
++	12, // [12:12] is the sub-list for extension extendee
++	0,  // [0:12] is the sub-list for field type_name
+ }
+ 
+ func init() { file_app_proxyman_config_proto_init() }
+diff --git a/app/proxyman/config.proto b/app/proxyman/config.proto
+index 8ccb5132..7a038714 100644
+--- a/app/proxyman/config.proto
++++ b/app/proxyman/config.proto
+@@ -57,7 +57,7 @@ message SenderConfig {
+   // Send traffic through the given IP. Only IP is allowed.
+   xray.common.net.IPOrDomain via = 1;
+   xray.transport.internet.StreamConfig stream_settings = 2;
+-  xray.transport.internet.ProxyConfig proxy_settings = 3;
++  reserved 3;
+   MultiplexingConfig multiplex_settings = 4;
+   string via_cidr = 5;
+   xray.transport.internet.DomainStrategy target_strategy = 6;
+diff --git a/app/proxyman/outbound/handler.go b/app/proxyman/outbound/handler.go
+index 8cf2a783..136796f2 100644
+--- a/app/proxyman/outbound/handler.go
++++ b/app/proxyman/outbound/handler.go
+@@ -15,7 +15,6 @@ import (
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/mux"
+ 	"github.com/xtls/xray-core/common/net"
+-	"github.com/xtls/xray-core/common/net/cnc"
+ 	"github.com/xtls/xray-core/common/serial"
+ 	"github.com/xtls/xray-core/common/session"
+ 	"github.com/xtls/xray-core/core"
+@@ -26,8 +25,6 @@ import (
+ 	"github.com/xtls/xray-core/transport"
+ 	"github.com/xtls/xray-core/transport/internet"
+ 	"github.com/xtls/xray-core/transport/internet/stat"
+-	"github.com/xtls/xray-core/transport/internet/tls"
+-	"github.com/xtls/xray-core/transport/pipe"
+ 	"google.golang.org/protobuf/proto"
+ )
+ 
+@@ -63,7 +60,6 @@ type Handler struct {
+ 	streamSettings  *internet.MemoryStreamConfig
+ 	proxyConfig     proto.Message
+ 	proxy           proxy.Outbound
+-	outboundManager outbound.Manager
+ 	mux             *mux.ClientManager
+ 	xudp            *mux.ClientManager
+ 	udp443          string
+@@ -77,7 +73,6 @@ func NewHandler(ctx context.Context, config *core.OutboundHandlerConfig) (outbou
+ 	uplinkCounter, downlinkCounter := getStatCounter(v, config.Tag)
+ 	h := &Handler{
+ 		tag:             config.Tag,
+-		outboundManager: v.GetFeature(outbound.ManagerType()).(outbound.Manager),
+ 		uplinkCounter:   uplinkCounter,
+ 		downlinkCounter: downlinkCounter,
+ 	}
+@@ -108,9 +103,11 @@ func NewHandler(ctx context.Context, config *core.OutboundHandlerConfig) (outbou
+ 
+ 	ctx = session.ContextWithFullHandler(ctx, h)
+ 
+-	newCtx := session.ContextWithStreamSettings(ctx, h.streamSettings)
++	if h.streamSettings != nil {
++		ctx = session.ContextWithStreamSettings(ctx, h.streamSettings)
++	}
+ 
+-	rawProxyHandler, err := common.CreateObject(newCtx, proxyConfig)
++	rawProxyHandler, err := common.CreateObject(ctx, proxyConfig)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -197,7 +194,6 @@ func (h *Handler) Dispatch(ctx context.Context, link *transport.Link) {
+ 				common.Interrupt(link.Reader)
+ 				return
+ 			}
+-
+ 		} else {
+ 			unchangedDomain := ob.Target.Address.Domain()
+ 			ob.Target.Address = net.IPAddress(ips[dice.Roll(len(ips))])
+@@ -270,66 +266,26 @@ func (h *Handler) DestIpAddress() net.IP {
+ 
+ // Dial implements internet.Dialer.
+ func (h *Handler) Dial(ctx context.Context, dest net.Destination) (stat.Connection, error) {
+-	if h.senderSettings != nil {
+-
+-		if h.senderSettings.ProxySettings.HasTag() {
+-
+-			tag := h.senderSettings.ProxySettings.Tag
+-			handler := h.outboundManager.GetHandler(tag)
+-			if handler != nil {
+-				errors.LogDebug(ctx, "proxying to ", tag, " for dest ", dest)
+-				outbounds := session.OutboundsFromContext(ctx)
+-				ctx = session.ContextWithOutbounds(ctx, append(outbounds, &session.Outbound{
+-					Target: dest,
+-					Tag:    tag,
+-				})) // add another outbound in session ctx
+-				opts := pipe.OptionsFromContext(ctx)
+-				uplinkReader, uplinkWriter := pipe.New(opts...)
+-				downlinkReader, downlinkWriter := pipe.New(opts...)
+-
+-				go handler.Dispatch(ctx, &transport.Link{Reader: uplinkReader, Writer: downlinkWriter})
+-				conn := cnc.NewConnection(cnc.ConnectionInputMulti(uplinkWriter), cnc.ConnectionOutputMulti(downlinkReader))
+-
+-				if config := tls.ConfigFromStreamSettings(h.streamSettings); config != nil {
+-					tlsConfig := config.GetTLSConfig(tls.WithDestination(dest))
+-					conn = tls.Client(conn, tlsConfig)
+-				}
+-
+-				return h.getStatCouterConnection(conn), nil
+-			}
+-
+-			errors.LogError(ctx, "failed to get outbound handler with tag: ", tag)
+-			return nil, errors.New("failed to get outbound handler with tag: " + tag)
+-		}
+-
+-		if h.senderSettings.Via != nil {
+-			outbounds := session.OutboundsFromContext(ctx)
+-			ob := outbounds[len(outbounds)-1]
+-			h.SetOutboundGateway(ctx, ob)
+-		}
++	if h.senderSettings != nil && h.senderSettings.Via != nil {
++		outbounds := session.OutboundsFromContext(ctx)
++		ob := outbounds[len(outbounds)-1]
++		h.SetOutboundGateway(ctx, ob)
+ 	}
+ 
+ 	conn, err := internet.Dial(ctx, dest, h.streamSettings)
+ 	conn = h.getStatCouterConnection(conn)
+-	outbounds := session.OutboundsFromContext(ctx)
+-	if outbounds != nil {
+-		ob := outbounds[len(outbounds)-1]
+-		ob.Conn = conn
+-	} else {
+-		// for Vision's pre-connect
+-	}
+ 	return conn, err
+ }
+ 
+ func (h *Handler) SetOutboundGateway(ctx context.Context, ob *session.Outbound) {
+-	if ob.Gateway == nil && h.senderSettings != nil && h.senderSettings.Via != nil && !h.senderSettings.ProxySettings.HasTag() && (h.streamSettings.SocketSettings == nil || len(h.streamSettings.SocketSettings.DialerProxy) == 0) {
++	if ob.Gateway == nil && h.senderSettings != nil && h.senderSettings.Via != nil &&
++		(h.streamSettings.SocketSettings == nil || len(h.streamSettings.SocketSettings.DialerProxy) == 0) {
+ 		var domain string
+ 		addr := h.senderSettings.Via.AsAddress()
+ 		domain = h.senderSettings.Via.GetDomain()
+ 		switch {
+ 		case h.senderSettings.ViaCidr != "":
+ 			ob.Gateway = ParseRandomIP(addr, h.senderSettings.ViaCidr)
+-
+ 		case domain == "origin":
+ 			if inbound := session.InboundFromContext(ctx); inbound != nil {
+ 				if inbound.Local.IsValid() && inbound.Local.Address.Family().IsIP() {
+@@ -344,11 +300,9 @@ func (h *Handler) SetOutboundGateway(ctx context.Context, ob *session.Outbound)
+ 					errors.LogDebug(ctx, "use inbound source ip as sendthrough: ", inbound.Source.Address.String())
+ 				}
+ 			}
+-		// case addr.Family().IsDomain():
+-		default:
++		default: // case addr.Family().IsDomain():
+ 			ob.Gateway = addr
+ 		}
+-
+ 	}
+ }
+ 
+diff --git a/common/session/session.go b/common/session/session.go
+index b5f163ff..8d47bd77 100644
+--- a/common/session/session.go
++++ b/common/session/session.go
+@@ -70,8 +70,6 @@ type Outbound struct {
+ 	Tag string
+ 	// Name of the outbound proxy that handles the connection.
+ 	Name string
+-	// Unused. Conn is actually internet.Connection. May be nil. It is currently nil for outbound with proxySettings
+-	Conn net.Conn
+ 	// CanSpliceCopy is a property for this connection
+ 	// 1 = can, 2 = after processing protocol info should be able to, 3 = cannot
+ 	CanSpliceCopy int
+diff --git a/infra/conf/transport_internet.go b/infra/conf/transport_internet.go
+index 1ef98695..066bf0e0 100644
+--- a/infra/conf/transport_internet.go
++++ b/infra/conf/transport_internet.go
+@@ -312,21 +312,3 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
+ 
+ 	return config, nil
+ }
+-
+-type ProxyConfig struct {
+-	Tag string `json:"tag"`
+-
+-	// TransportLayerProxy: For compatibility.
+-	TransportLayerProxy bool `json:"transportLayer"`
+-}
+-
+-// Build implements Buildable.
+-func (v *ProxyConfig) Build() (*internet.ProxyConfig, error) {
+-	if v.Tag == "" {
+-		return nil, errors.New("Proxy tag is not set.")
+-	}
+-	return &internet.ProxyConfig{
+-		Tag:                 v.Tag,
+-		TransportLayerProxy: v.TransportLayerProxy,
+-	}, nil
+-}
+diff --git a/infra/conf/xray.go b/infra/conf/xray.go
+index c029a7bf..0643a54f 100644
+--- a/infra/conf/xray.go
++++ b/infra/conf/xray.go
+@@ -15,6 +15,7 @@ import (
+ 	"github.com/xtls/xray-core/common/net"
+ 	"github.com/xtls/xray-core/common/serial"
+ 	core "github.com/xtls/xray-core/core"
++	"github.com/xtls/xray-core/proxy/freedom"
+ 	"github.com/xtls/xray-core/transport/internet"
+ )
+ 
+@@ -216,21 +217,11 @@ type OutboundDetourConfig struct {
+ 	Tag            string           `json:"tag"`
+ 	Settings       *json.RawMessage `json:"settings"`
+ 	StreamSetting  *StreamConfig    `json:"streamSettings"`
+-	ProxySettings  *ProxyConfig     `json:"proxySettings"`
++	ProxySettings  *json.RawMessage `json:"proxySettings"`
+ 	MuxSettings    *MuxConfig       `json:"mux"`
+ 	TargetStrategy string           `json:"targetStrategy"`
+ }
+ 
+-func (c *OutboundDetourConfig) checkChainProxyConfig() error {
+-	if c.StreamSetting == nil || c.ProxySettings == nil || c.StreamSetting.SocketSettings == nil {
+-		return nil
+-	}
+-	if len(c.ProxySettings.Tag) > 0 && len(c.StreamSetting.SocketSettings.DialerProxy) > 0 {
+-		return errors.New("proxySettings.tag is conflicted with sockopt.dialerProxy").AtWarning()
+-	}
+-	return nil
+-}
+-
+ func requiresTransportSecurity(address *Address) bool {
+ 	if address == nil || address.Address == nil {
+ 		return false
+@@ -267,6 +258,10 @@ func validateOutboundTransportSecurity(rawConfig interface{}, senderSettings *pr
+ 
+ // Build implements Buildable.
+ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
++	if c.ProxySettings != nil {
++		return nil, errors.PrintRemovedFeatureError(`outbound "proxySettings"`, `"streamSettings.sockopt.dialerProxy"`)
++	}
++
+ 	senderSettings := &proxyman.SenderConfig{}
+ 	switch strings.ToLower(c.TargetStrategy) {
+ 	case "asis", "":
+@@ -294,9 +289,6 @@ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
+ 	default:
+ 		return nil, errors.New("unsupported target domain strategy: ", c.TargetStrategy)
+ 	}
+-	if err := c.checkChainProxyConfig(); err != nil {
+-		return nil, err
+-	}
+ 
+ 	if c.SendThrough != nil {
+ 		address := ParseSendThough(c.SendThrough)
+@@ -322,26 +314,6 @@ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
+ 		senderSettings.StreamSettings = ss
+ 	}
+ 
+-	if c.ProxySettings != nil {
+-		ps, err := c.ProxySettings.Build()
+-		if err != nil {
+-			return nil, errors.New("invalid outbound detour proxy settings").Base(err)
+-		}
+-		if ps.TransportLayerProxy {
+-			if senderSettings.StreamSettings != nil {
+-				if senderSettings.StreamSettings.SocketSettings != nil {
+-					senderSettings.StreamSettings.SocketSettings.DialerProxy = ps.Tag
+-				} else {
+-					senderSettings.StreamSettings.SocketSettings = &internet.SocketConfig{DialerProxy: ps.Tag}
+-				}
+-			} else {
+-				senderSettings.StreamSettings = &internet.StreamConfig{SocketSettings: &internet.SocketConfig{DialerProxy: ps.Tag}}
+-			}
+-			ps = nil
+-		}
+-		senderSettings.ProxySettings = ps
+-	}
+-
+ 	if c.MuxSettings != nil {
+ 		ms, err := c.MuxSettings.Build()
+ 		if err != nil {
+@@ -366,6 +338,31 @@ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
+ 		return nil, err
+ 	}
+ 
++	if fc, ok := ts.(*freedom.Config); ok {
++		if senderSettings.StreamSettings != nil &&
++			senderSettings.StreamSettings.SocketSettings != nil &&
++			senderSettings.StreamSettings.SocketSettings.AddressPortStrategy != internet.AddressPortStrategy_None {
++			return nil, errors.New(`freedom outbound does not support "sockopt.addressPortStrategy"`)
++		}
++
++		var strategy internet.DomainStrategy
++		if strategy = senderSettings.TargetStrategy; strategy != internet.DomainStrategy_AS_IS {
++			errors.LogWarning(context.Background(), `The "outbound.targetStrategy" setting is not supported directly by freedom and has been automatically migrated to "sockopt.domainStrategy" with no behavior change.`)
++			senderSettings.TargetStrategy = internet.DomainStrategy_AS_IS
++		} else if strategy = fc.DomainStrategy; strategy != internet.DomainStrategy_AS_IS {
++			errors.LogWarning(context.Background(), `The "freedom.domainStrategy" setting is deprecated and will be removed. For compatibility, its value has been automatically migrated to "sockopt.domainStrategy". Please update your config before removal.`)
++		}
++		if strategy != internet.DomainStrategy_AS_IS {
++			if senderSettings.StreamSettings == nil {
++				senderSettings.StreamSettings = &internet.StreamConfig{}
++			}
++			if senderSettings.StreamSettings.SocketSettings == nil {
++				senderSettings.StreamSettings.SocketSettings = &internet.SocketConfig{}
++			}
++			senderSettings.StreamSettings.SocketSettings.DomainStrategy = strategy
++		}
++	}
++
+ 	return &core.OutboundHandlerConfig{
+ 		SenderSettings: serial.ToTypedMessage(senderSettings),
+ 		Tag:            c.Tag,
+diff --git a/proxy/freedom/freedom.go b/proxy/freedom/freedom.go
+index 00ed3f4c..148a296f 100644
+--- a/proxy/freedom/freedom.go
++++ b/proxy/freedom/freedom.go
+@@ -53,6 +53,10 @@ func reloadEnvSettings() error {
+ func init() {
+ 	common.Must(common.RegisterConfig((*Config)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
+ 		h := new(Handler)
++		if streamSettings, ok := session.StreamSettingsFromContext(ctx).(*internet.MemoryStreamConfig); ok && streamSettings.SocketSettings != nil {
++			h.resolveStrategy = streamSettings.SocketSettings.DomainStrategy
++			h.usesDialerProxy = len(streamSettings.SocketSettings.DialerProxy) > 0
++		}
+ 		if err := core.RequireFeatures(ctx, func(pm policy.Manager) error {
+ 			return h.Init(config.(*Config), pm)
+ 		}); err != nil {
+@@ -89,9 +93,11 @@ type FinalRule struct {
+ 
+ // Handler handles Freedom connections.
+ type Handler struct {
+-	policyManager policy.Manager
+-	config        *Config
+-	finalRules    []*FinalRule
++	policyManager   policy.Manager
++	config          *Config
++	finalRules      []*FinalRule
++	resolveStrategy internet.DomainStrategy
++	usesDialerProxy bool
+ }
+ 
+ func buildFinalRule(config *FinalRuleConfig) (*FinalRule, error) {
+@@ -168,22 +174,6 @@ func getDefaultFinalRule(inbound *session.Inbound) *FinalRule {
+ 	return nil
+ }
+ 
+-func (h *Handler) shouldResolveDomainBeforeFinalRules(dialDest net.Destination, defaultRule *FinalRule) bool {
+-	if !dialDest.Address.Family().IsDomain() {
+-		return false
+-	}
+-	if len(h.finalRules) > 0 {
+-		rule := h.finalRules[0]
+-		if rule.action == RuleAction_Allow && rule.network[dialDest.Network] && len(rule.port) == 0 && rule.ip == nil {
+-			return false
+-		}
+-	}
+-	if defaultRule != nil || len(h.finalRules) > 0 {
+-		return true
+-	}
+-	return false
+-}
+-
+ func (h *Handler) matchFinalRule(network net.Network, address net.Address, port net.Port, defaultRule *FinalRule) *FinalRule {
+ 	for _, rule := range h.finalRules {
+ 		if rule.Apply(network, address, port) {
+@@ -196,13 +186,6 @@ func (h *Handler) matchFinalRule(network net.Network, address net.Address, port
+ 	return nil
+ }
+ 
+-func (h *Handler) applyFinalRules(network net.Network, address net.Address, port net.Port, defaultRule *FinalRule) RuleAction {
+-	if rule := h.matchFinalRule(network, address, port, defaultRule); rule != nil {
+-		return rule.action
+-	}
+-	return RuleAction_Allow
+-}
+-
+ // Init initializes the Handler with necessary parameters.
+ func (h *Handler) Init(config *Config, pm policy.Manager) error {
+ 	h.config = config
+@@ -237,6 +220,20 @@ func (h *Handler) blockDelay(rule *FinalRule) time.Duration {
+ 	return time.Duration(min+uint64(dice.Roll(int(span+1)))) * time.Second
+ }
+ 
++func (h *Handler) blackhole(ctx context.Context, input buf.Reader, output buf.Writer, rule *FinalRule, dest *net.Destination) error {
++	delay := h.blockDelay(rule)
++	errors.LogInfo(ctx, "blocked target: ", *dest, ", blackholing connection for ", delay)
++	timer := time.AfterFunc(delay, func() {
++		common.Interrupt(input)
++		common.Interrupt(output)
++		errors.LogInfo(ctx, "closed blackholed connection to blocked target: ", *dest)
++	})
++	defer timer.Stop()
++	defer common.Close(output)
++	_ = buf.Copy(input, buf.Discard)
++	return nil
++}
++
+ func isValidAddress(addr *net.IPOrDomain) bool {
+ 	if addr == nil {
+ 		return false
+@@ -284,61 +281,53 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 	var conn stat.Connection
+ 	var blockedDest *net.Destination
+ 	var blockedRule *FinalRule
+-	firstResolve := true
+ 	err := retry.ExponentialBackoff(5, 100).On(func() error {
+-		dialDest := destination
+-		if h.config.DomainStrategy.HasStrategy() && dialDest.Address.Family().IsDomain() {
+-			strategy := h.config.DomainStrategy
+-			if destination.Network == net.Network_UDP && origTargetAddr != nil && outGateway == nil {
+-				strategy = strategy.GetDynamicStrategy(origTargetAddr.Family())
+-			}
+-			ips, err := internet.LookupForIP(dialDest.Address.Domain(), strategy, outGateway)
+-			if err != nil {
+-				errors.LogInfoInner(ctx, err, "failed to get IP address for domain ", dialDest.Address.Domain())
+-				if h.config.DomainStrategy.ForceIP() || h.shouldResolveDomainBeforeFinalRules(dialDest, defaultRule) {
+-					return err
+-				}
+-			} else {
+-				dialDest = net.Destination{
+-					Network: dialDest.Network,
+-					Address: net.IPAddress(ips[dice.Roll(len(ips))]),
+-					Port:    dialDest.Port,
+-				}
+-				errors.LogInfo(ctx, "dialing to ", dialDest)
+-			}
+-		} else if h.shouldResolveDomainBeforeFinalRules(dialDest, defaultRule) { // asis + domain + hasrules
+-			domain := dialDest.Address.Domain()
+-			var ips []net.IP
+-			if firstResolve {
+-				firstResolve = false
+-				supportIPv4, supportIPv6 := utils.CheckRoutes()
+-				if supportIPv4 {
+-					ips, _ = net.DefaultResolver.LookupIP(ctx, "ip4", domain)
+-				}
+-				if len(ips) == 0 && supportIPv6 {
+-					ips, _ = net.DefaultResolver.LookupIP(ctx, "ip6", domain)
+-				}
+-				if len(ips) == 0 {
+-					return errors.New("failed to get IP address for domain ", domain)
++		if destination.Address.Family().IsDomain() {
++			if defaultRule != nil || len(h.finalRules) > 0 {
++				if strategy := h.resolveStrategy; strategy.HasStrategy() {
++					ips, err := internet.LookupForIP(destination.Address.Domain(), strategy, outGateway)
++					if err != nil { // non-force may still dial with system DNS
++						errors.LogInfoInner(ctx, err, "failed to get IP address for domain ", destination.Address.Domain())
++						if strategy.ForceIP() {
++							return err // retry
++						}
++					}
++					for _, ip := range ips {
++						if addr := net.IPAddress(ip); addr != nil {
++							if rule := h.matchFinalRule(destination.Network, addr, destination.Port, defaultRule); rule != nil && rule.action == RuleAction_Block {
++								blockedDest = &destination
++								blockedDest.Address = addr
++								blockedRule = rule
++								return nil
++							}
++						}
++					}
++				} else {
++					addrs, err := net.DefaultResolver.LookupIPAddr(ctx, destination.Address.Domain())
++					if err != nil { // dialer may retry DNS
++						errors.LogInfoInner(ctx, err, "failed to get IP address for domain ", destination.Address.Domain())
++					}
++					for _, addr := range addrs {
++						if ipAddr := net.IPAddress(addr.IP); ipAddr != nil {
++							if rule := h.matchFinalRule(destination.Network, ipAddr, destination.Port, defaultRule); rule != nil && rule.action == RuleAction_Block {
++								blockedDest = &destination
++								blockedDest.Address = ipAddr
++								blockedRule = rule
++								return nil
++							}
++						}
++					}
+ 				}
+-			} else {
+-				ips, _ = net.DefaultResolver.LookupIP(ctx, "ip", domain)
+-			}
+-			if len(ips) == 0 { // SRV/TXT, lookup failed
+-				return errors.New("failed to get IP address for domain ", domain)
+ 			}
+-			if addr := net.IPAddress(ips[dice.Roll(len(ips))]); addr != nil {
+-				dialDest.Address = addr
+-				errors.LogInfo(ctx, "dialing to ", dialDest)
++		} else {
++			if rule := h.matchFinalRule(destination.Network, destination.Address, destination.Port, defaultRule); rule != nil && rule.action == RuleAction_Block {
++				blockedDest = &destination
++				blockedRule = rule
++				return nil
+ 			}
+ 		}
+-		if rule := h.matchFinalRule(dialDest.Network, dialDest.Address, dialDest.Port, defaultRule); rule != nil && rule.action == RuleAction_Block {
+-			blockedDest = &dialDest
+-			blockedRule = rule
+-			return nil
+-		}
+ 
+-		rawConn, err := dialer.Dial(ctx, dialDest)
++		rawConn, err := dialer.Dial(ctx, destination)
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -350,20 +339,21 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 		return errors.New("failed to open connection to ", destination).Base(err)
+ 	}
+ 	if blockedDest != nil {
+-		delay := h.blockDelay(blockedRule)
+-		errors.LogInfo(ctx, "blocked target: ", *blockedDest, ", blackholing connection for ", delay)
+-		timer := time.AfterFunc(delay, func() {
+-			common.Interrupt(input)
+-			common.Interrupt(output)
+-			errors.LogInfo(ctx, "closed blackholed connection to blocked target: ", *blockedDest)
+-		})
+-		defer timer.Stop()
+-		defer common.Close(output)
+-		if err := buf.Copy(input, buf.Discard); err != nil {
+-			return nil
++		return h.blackhole(ctx, input, output, blockedRule, blockedDest)
++	}
++	if destination.Address.Family().IsDomain() && (defaultRule != nil || len(h.finalRules) > 0) {
++		if h.usesDialerProxy {
++			errors.LogInfo(ctx, "skipping final rule check for proxied remote endpoint, original target: ", destination)
++		} else {
++			// pre-check may fail or dialer may select another IP
++			remoteDest := net.DestinationFromAddr(conn.RemoteAddr())
++			if rule := h.matchFinalRule(remoteDest.Network, remoteDest.Address, remoteDest.Port, defaultRule); rule != nil && rule.action == RuleAction_Block {
++				conn.Close()
++				return h.blackhole(ctx, input, output, rule, &remoteDest)
++			}
+ 		}
+-		return nil
+ 	}
++
+ 	if h.config.ProxyProtocol > 0 && h.config.ProxyProtocol <= 2 {
+ 		version := byte(h.config.ProxyProtocol)
+ 		srcAddr := inbound.Source.RawNetAddr()
+@@ -408,7 +398,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 				writer = buf.NewWriter(conn)
+ 			}
+ 		} else {
+-			writer = NewPacketWriter(conn, h, defaultRule, UDPOverride, destination)
++			writer = NewPacketWriter(conn, h, defaultRule, UDPOverride, destination, outGateway)
+ 			if h.config.Noises != nil {
+ 				errors.LogDebug(ctx, "NOISE", h.config.Noises)
+ 				writer = &NoisePacketWriter{
+@@ -512,7 +502,7 @@ func (r *PacketReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
+ 		}
+ 		udpAddr := d.(*net.UDPAddr)
+ 		sourceAddr := net.IPAddress(udpAddr.IP)
+-		if r.Handler.applyFinalRules(net.Network_UDP, sourceAddr, net.Port(udpAddr.Port), r.DefaultRule) == RuleAction_Block {
++		if rule := r.Handler.matchFinalRule(net.Network_UDP, sourceAddr, net.Port(udpAddr.Port), r.DefaultRule); rule != nil && rule.action == RuleAction_Block {
+ 			continue
+ 		}
+ 		b.Resize(0, int32(n))
+@@ -537,7 +527,7 @@ func (r *PacketReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
+ }
+ 
+ // DialDest means the dial target used in the dialer when creating conn
+-func NewPacketWriter(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverride net.Destination, DialDest net.Destination) buf.Writer {
++func NewPacketWriter(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverride net.Destination, DialDest net.Destination, outGateway net.Address) buf.Writer {
+ 	iConn := conn
+ 	statConn, ok := iConn.(*stat.CounterConnection)
+ 	if ok {
+@@ -561,9 +551,8 @@ func NewPacketWriter(conn net.Conn, h *Handler, defaultRule *FinalRule, UDPOverr
+ 			DefaultRule:       defaultRule,
+ 			UDPOverride:       UDPOverride,
+ 			ResolvedUDPAddr:   resolvedUDPAddr,
+-			LocalAddr:         net.DestinationFromAddr(conn.LocalAddr()).Address,
++			OutGateway:        outGateway,
+ 		}
+-
+ 	}
+ 	return &buf.SequentialWriter{Writer: conn}
+ }
+@@ -580,7 +569,7 @@ type PacketWriter struct {
+ 	// Resulting in these packets being sent to many different IPs randomly
+ 	// So, cache and keep the resolve result
+ 	ResolvedUDPAddr *utils.TypedSyncMap[string, net.Address]
+-	LocalAddr       net.Address
++	OutGateway      net.Address
+ }
+ 
+ func (w *PacketWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
+@@ -603,21 +592,21 @@ func (w *PacketWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
+ 				if ip, ok := w.ResolvedUDPAddr.Load(b.UDP.Address.Domain()); ok {
+ 					b.UDP.Address = ip
+ 				} else {
+-					ShouldUseSystemResolver := true
+-					if w.Handler.config.DomainStrategy.HasStrategy() {
+-						ips, err := internet.LookupForIP(b.UDP.Address.Domain(), w.Handler.config.DomainStrategy, w.LocalAddr)
++					shouldUseSystemResolver := true
++					if strategy := w.Handler.resolveStrategy; strategy.HasStrategy() {
++						ips, err := internet.LookupForIP(b.UDP.Address.Domain(), strategy, w.OutGateway)
+ 						if err != nil {
+ 							// drop packet if resolve failed when forceIP
+-							if w.Handler.config.DomainStrategy.ForceIP() {
++							if strategy.ForceIP() {
+ 								b.Release()
+ 								continue
+ 							}
+ 						} else {
+ 							ip = net.IPAddress(ips[dice.Roll(len(ips))])
+-							ShouldUseSystemResolver = false
++							shouldUseSystemResolver = false
+ 						}
+ 					}
+-					if ShouldUseSystemResolver {
++					if shouldUseSystemResolver {
+ 						udpAddr, err := net.ResolveUDPAddr("udp", b.UDP.NetAddr())
+ 						if err != nil {
+ 							b.Release()
+@@ -631,7 +620,7 @@ func (w *PacketWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
+ 					}
+ 				}
+ 			}
+-			if w.applyFinalRules(net.Network_UDP, b.UDP.Address, b.UDP.Port, w.DefaultRule) == RuleAction_Block {
++			if rule := w.matchFinalRule(net.Network_UDP, b.UDP.Address, b.UDP.Port, w.DefaultRule); rule != nil && rule.action == RuleAction_Block {
+ 				b.Release()
+ 				continue
+ 			}
+diff --git a/proxy/vless/outbound/outbound.go b/proxy/vless/outbound/outbound.go
+index ac087c63..6a013dae 100644
+--- a/proxy/vless/outbound/outbound.go
++++ b/proxy/vless/outbound/outbound.go
+@@ -202,8 +202,6 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 	}
+ 	defer conn.Close()
+ 
+-	ob.Conn = conn // for Vision's pre-connect
+-
+ 	iConn := stat.TryUnwrapStatsConn(conn)
+ 	target := ob.Target
+ 	errors.LogInfo(ctx, "tunneling request to ", target, " via ", rec.Destination.NetAddr())
+diff --git a/testing/scenarios/dns_test.go b/testing/scenarios/dns_test.go
+index 9be19a7d..a38f1b20 100644
+--- a/testing/scenarios/dns_test.go
++++ b/testing/scenarios/dns_test.go
+@@ -82,9 +82,14 @@ func TestResolveIP(t *testing.T) {
+ 			},
+ 			{
+ 				Tag: "direct",
+-				ProxySettings: serial.ToTypedMessage(&freedom.Config{
+-					DomainStrategy: internet.DomainStrategy_USE_IP,
++				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
++					StreamSettings: &internet.StreamConfig{
++						SocketSettings: &internet.SocketConfig{
++							DomainStrategy: internet.DomainStrategy_USE_IP,
++						},
++					},
+ 				}),
++				ProxySettings: serial.ToTypedMessage(&freedom.Config{}),
+ 			},
+ 		},
+ 	}
+diff --git a/testing/scenarios/feature_test.go b/testing/scenarios/feature_test.go
+index 0b6dd7cb..fa1ff356 100644
+--- a/testing/scenarios/feature_test.go
++++ b/testing/scenarios/feature_test.go
+@@ -92,7 +92,7 @@ func TestPassiveConnection(t *testing.T) {
+ 	}
+ }
+ 
+-func TestProxy(t *testing.T) {
++func TestDialerProxy(t *testing.T) {
+ 	tcpServer := tcp.Server{
+ 		MsgProcessor: xor,
+ 	}
+@@ -187,8 +187,10 @@ func TestProxy(t *testing.T) {
+ 					},
+ 				}),
+ 				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+-					ProxySettings: &internet.ProxyConfig{
+-						Tag: "proxy",
++					StreamSettings: &internet.StreamConfig{
++						SocketSettings: &internet.SocketConfig{
++							DialerProxy: "proxy",
++						},
+ 					},
+ 				}),
+ 			},
+@@ -218,7 +220,7 @@ func TestProxy(t *testing.T) {
+ 	}
+ }
+ 
+-func TestProxyOverKCP(t *testing.T) {
++func TestDialerProxyOverKCP(t *testing.T) {
+ 	tcpServer := tcp.Server{
+ 		MsgProcessor: xor,
+ 	}
+@@ -321,11 +323,11 @@ func TestProxyOverKCP(t *testing.T) {
+ 					},
+ 				}),
+ 				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+-					ProxySettings: &internet.ProxyConfig{
+-						Tag: "proxy",
+-					},
+ 					StreamSettings: &internet.StreamConfig{
+ 						ProtocolName: "mkcp",
++						SocketSettings: &internet.SocketConfig{
++							DialerProxy: "proxy",
++						},
+ 					},
+ 				}),
+ 			},
+diff --git a/transport/internet/config.go b/transport/internet/config.go
+index 460cdc4f..5762655b 100644
+--- a/transport/internet/config.go
++++ b/transport/internet/config.go
+@@ -10,7 +10,7 @@ type ConfigCreator func() interface{}
+ 
+ var globalTransportConfigCreatorCache = make(map[string]ConfigCreator)
+ 
+-var strategy = [][]byte{
++var strategy = [11][3]byte{
+ 	//              name        strategy,   prefer, fallback
+ 	{0, 0, 0}, //   AsIs        none,       /,      /
+ 	{1, 0, 0}, //   UseIP       use,        both,   none
+@@ -25,8 +25,6 @@ var strategy = [][]byte{
+ 	{2, 6, 4}, //   ForceIPv6v4 force,      6,      4
+ }
+ 
+-const unknownProtocol = "unknown"
+-
+ func RegisterProtocolConfigCreator(name string, creator ConfigCreator) error {
+ 	if _, found := globalTransportConfigCreatorCache[name]; found {
+ 		return errors.New("protocol ", name, " is already registered").AtError()
+@@ -91,10 +89,6 @@ func (c *StreamConfig) HasSecuritySettings() bool {
+ 	return len(c.SecuritySettings) > 0
+ }
+ 
+-func (c *ProxyConfig) HasTag() bool {
+-	return c != nil && len(c.Tag) > 0
+-}
+-
+ func (m SocketConfig_TProxyMode) IsEnabled() bool {
+ 	return m != SocketConfig_Off
+ }
+diff --git a/transport/internet/config.pb.go b/transport/internet/config.pb.go
+index f747998e..ae4004cc 100644
+--- a/transport/internet/config.pb.go
++++ b/transport/internet/config.pb.go
+@@ -206,7 +206,7 @@ func (x SocketConfig_TProxyMode) Number() protoreflect.EnumNumber {
+ 
+ // Deprecated: Use SocketConfig_TProxyMode.Descriptor instead.
+ func (SocketConfig_TProxyMode) EnumDescriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{6, 0}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{5, 0}
+ }
+ 
+ type TransportConfig struct {
+@@ -614,58 +614,6 @@ func (x *QuicParams) GetDisableStatelessReset() bool {
+ 	return false
+ }
+ 
+-type ProxyConfig struct {
+-	state               protoimpl.MessageState `protogen:"open.v1"`
+-	Tag                 string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
+-	TransportLayerProxy bool                   `protobuf:"varint,2,opt,name=transportLayerProxy,proto3" json:"transportLayerProxy,omitempty"`
+-	unknownFields       protoimpl.UnknownFields
+-	sizeCache           protoimpl.SizeCache
+-}
+-
+-func (x *ProxyConfig) Reset() {
+-	*x = ProxyConfig{}
+-	mi := &file_transport_internet_config_proto_msgTypes[4]
+-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+-	ms.StoreMessageInfo(mi)
+-}
+-
+-func (x *ProxyConfig) String() string {
+-	return protoimpl.X.MessageStringOf(x)
+-}
+-
+-func (*ProxyConfig) ProtoMessage() {}
+-
+-func (x *ProxyConfig) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[4]
+-	if x != nil {
+-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+-		if ms.LoadMessageInfo() == nil {
+-			ms.StoreMessageInfo(mi)
+-		}
+-		return ms
+-	}
+-	return mi.MessageOf(x)
+-}
+-
+-// Deprecated: Use ProxyConfig.ProtoReflect.Descriptor instead.
+-func (*ProxyConfig) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{4}
+-}
+-
+-func (x *ProxyConfig) GetTag() string {
+-	if x != nil {
+-		return x.Tag
+-	}
+-	return ""
+-}
+-
+-func (x *ProxyConfig) GetTransportLayerProxy() bool {
+-	if x != nil {
+-		return x.TransportLayerProxy
+-	}
+-	return false
+-}
+-
+ type CustomSockopt struct {
+ 	state         protoimpl.MessageState `protogen:"open.v1"`
+ 	System        string                 `protobuf:"bytes,1,opt,name=system,proto3" json:"system,omitempty"`
+@@ -680,7 +628,7 @@ type CustomSockopt struct {
+ 
+ func (x *CustomSockopt) Reset() {
+ 	*x = CustomSockopt{}
+-	mi := &file_transport_internet_config_proto_msgTypes[5]
++	mi := &file_transport_internet_config_proto_msgTypes[4]
+ 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 	ms.StoreMessageInfo(mi)
+ }
+@@ -692,7 +640,7 @@ func (x *CustomSockopt) String() string {
+ func (*CustomSockopt) ProtoMessage() {}
+ 
+ func (x *CustomSockopt) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[5]
++	mi := &file_transport_internet_config_proto_msgTypes[4]
+ 	if x != nil {
+ 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 		if ms.LoadMessageInfo() == nil {
+@@ -705,7 +653,7 @@ func (x *CustomSockopt) ProtoReflect() protoreflect.Message {
+ 
+ // Deprecated: Use CustomSockopt.ProtoReflect.Descriptor instead.
+ func (*CustomSockopt) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{5}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{4}
+ }
+ 
+ func (x *CustomSockopt) GetSystem() string {
+@@ -785,7 +733,7 @@ type SocketConfig struct {
+ 
+ func (x *SocketConfig) Reset() {
+ 	*x = SocketConfig{}
+-	mi := &file_transport_internet_config_proto_msgTypes[6]
++	mi := &file_transport_internet_config_proto_msgTypes[5]
+ 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 	ms.StoreMessageInfo(mi)
+ }
+@@ -797,7 +745,7 @@ func (x *SocketConfig) String() string {
+ func (*SocketConfig) ProtoMessage() {}
+ 
+ func (x *SocketConfig) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[6]
++	mi := &file_transport_internet_config_proto_msgTypes[5]
+ 	if x != nil {
+ 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 		if ms.LoadMessageInfo() == nil {
+@@ -810,7 +758,7 @@ func (x *SocketConfig) ProtoReflect() protoreflect.Message {
+ 
+ // Deprecated: Use SocketConfig.ProtoReflect.Descriptor instead.
+ func (*SocketConfig) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{6}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{5}
+ }
+ 
+ func (x *SocketConfig) GetMark() int32 {
+@@ -972,7 +920,7 @@ type HappyEyeballsConfig struct {
+ 
+ func (x *HappyEyeballsConfig) Reset() {
+ 	*x = HappyEyeballsConfig{}
+-	mi := &file_transport_internet_config_proto_msgTypes[7]
++	mi := &file_transport_internet_config_proto_msgTypes[6]
+ 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 	ms.StoreMessageInfo(mi)
+ }
+@@ -984,7 +932,7 @@ func (x *HappyEyeballsConfig) String() string {
+ func (*HappyEyeballsConfig) ProtoMessage() {}
+ 
+ func (x *HappyEyeballsConfig) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[7]
++	mi := &file_transport_internet_config_proto_msgTypes[6]
+ 	if x != nil {
+ 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 		if ms.LoadMessageInfo() == nil {
+@@ -997,7 +945,7 @@ func (x *HappyEyeballsConfig) ProtoReflect() protoreflect.Message {
+ 
+ // Deprecated: Use HappyEyeballsConfig.ProtoReflect.Descriptor instead.
+ func (*HappyEyeballsConfig) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{7}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{6}
+ }
+ 
+ func (x *HappyEyeballsConfig) GetPrioritizeIpv6() bool {
+@@ -1078,10 +1026,7 @@ const file_transport_internet_config_proto_rawDesc = "" +
+ 	"disableGSO\x18\x0f \x01(\bR\n" +
+ 	"disableGSO\x120\n" +
+ 	"\x14max_incoming_streams\x18\x10 \x01(\x03R\x12maxIncomingStreams\x126\n" +
+-	"\x17disable_stateless_reset\x18\x11 \x01(\bR\x15disableStatelessReset\"Q\n" +
+-	"\vProxyConfig\x12\x10\n" +
+-	"\x03tag\x18\x01 \x01(\tR\x03tag\x120\n" +
+-	"\x13transportLayerProxy\x18\x02 \x01(\bR\x13transportLayerProxy\"\x93\x01\n" +
++	"\x17disable_stateless_reset\x18\x11 \x01(\bR\x15disableStatelessReset\"\x93\x01\n" +
+ 	"\rCustomSockopt\x12\x16\n" +
+ 	"\x06system\x18\x01 \x01(\tR\x06system\x12\x18\n" +
+ 	"\anetwork\x18\x02 \x01(\tR\anetwork\x12\x14\n" +
+@@ -1165,7 +1110,7 @@ func file_transport_internet_config_proto_rawDescGZIP() []byte {
+ }
+ 
+ var file_transport_internet_config_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+-var file_transport_internet_config_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
++var file_transport_internet_config_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+ var file_transport_internet_config_proto_goTypes = []any{
+ 	(DomainStrategy)(0),          // 0: xray.transport.internet.DomainStrategy
+ 	(AddressPortStrategy)(0),     // 1: xray.transport.internet.AddressPortStrategy
+@@ -1174,28 +1119,27 @@ var file_transport_internet_config_proto_goTypes = []any{
+ 	(*StreamConfig)(nil),         // 4: xray.transport.internet.StreamConfig
+ 	(*UdpHop)(nil),               // 5: xray.transport.internet.UdpHop
+ 	(*QuicParams)(nil),           // 6: xray.transport.internet.QuicParams
+-	(*ProxyConfig)(nil),          // 7: xray.transport.internet.ProxyConfig
+-	(*CustomSockopt)(nil),        // 8: xray.transport.internet.CustomSockopt
+-	(*SocketConfig)(nil),         // 9: xray.transport.internet.SocketConfig
+-	(*HappyEyeballsConfig)(nil),  // 10: xray.transport.internet.HappyEyeballsConfig
+-	(*serial.TypedMessage)(nil),  // 11: xray.common.serial.TypedMessage
+-	(*net.IPOrDomain)(nil),       // 12: xray.common.net.IPOrDomain
++	(*CustomSockopt)(nil),        // 7: xray.transport.internet.CustomSockopt
++	(*SocketConfig)(nil),         // 8: xray.transport.internet.SocketConfig
++	(*HappyEyeballsConfig)(nil),  // 9: xray.transport.internet.HappyEyeballsConfig
++	(*serial.TypedMessage)(nil),  // 10: xray.common.serial.TypedMessage
++	(*net.IPOrDomain)(nil),       // 11: xray.common.net.IPOrDomain
+ }
+ var file_transport_internet_config_proto_depIdxs = []int32{
+-	11, // 0: xray.transport.internet.TransportConfig.settings:type_name -> xray.common.serial.TypedMessage
+-	12, // 1: xray.transport.internet.StreamConfig.address:type_name -> xray.common.net.IPOrDomain
++	10, // 0: xray.transport.internet.TransportConfig.settings:type_name -> xray.common.serial.TypedMessage
++	11, // 1: xray.transport.internet.StreamConfig.address:type_name -> xray.common.net.IPOrDomain
+ 	3,  // 2: xray.transport.internet.StreamConfig.transport_settings:type_name -> xray.transport.internet.TransportConfig
+-	11, // 3: xray.transport.internet.StreamConfig.security_settings:type_name -> xray.common.serial.TypedMessage
+-	11, // 4: xray.transport.internet.StreamConfig.udpmasks:type_name -> xray.common.serial.TypedMessage
+-	11, // 5: xray.transport.internet.StreamConfig.tcpmasks:type_name -> xray.common.serial.TypedMessage
++	10, // 3: xray.transport.internet.StreamConfig.security_settings:type_name -> xray.common.serial.TypedMessage
++	10, // 4: xray.transport.internet.StreamConfig.udpmasks:type_name -> xray.common.serial.TypedMessage
++	10, // 5: xray.transport.internet.StreamConfig.tcpmasks:type_name -> xray.common.serial.TypedMessage
+ 	6,  // 6: xray.transport.internet.StreamConfig.quic_params:type_name -> xray.transport.internet.QuicParams
+-	9,  // 7: xray.transport.internet.StreamConfig.socket_settings:type_name -> xray.transport.internet.SocketConfig
++	8,  // 7: xray.transport.internet.StreamConfig.socket_settings:type_name -> xray.transport.internet.SocketConfig
+ 	5,  // 8: xray.transport.internet.QuicParams.udp_hop:type_name -> xray.transport.internet.UdpHop
+ 	2,  // 9: xray.transport.internet.SocketConfig.tproxy:type_name -> xray.transport.internet.SocketConfig.TProxyMode
+ 	0,  // 10: xray.transport.internet.SocketConfig.domain_strategy:type_name -> xray.transport.internet.DomainStrategy
+-	8,  // 11: xray.transport.internet.SocketConfig.customSockopt:type_name -> xray.transport.internet.CustomSockopt
++	7,  // 11: xray.transport.internet.SocketConfig.customSockopt:type_name -> xray.transport.internet.CustomSockopt
+ 	1,  // 12: xray.transport.internet.SocketConfig.address_port_strategy:type_name -> xray.transport.internet.AddressPortStrategy
+-	10, // 13: xray.transport.internet.SocketConfig.happy_eyeballs:type_name -> xray.transport.internet.HappyEyeballsConfig
++	9,  // 13: xray.transport.internet.SocketConfig.happy_eyeballs:type_name -> xray.transport.internet.HappyEyeballsConfig
+ 	14, // [14:14] is the sub-list for method output_type
+ 	14, // [14:14] is the sub-list for method input_type
+ 	14, // [14:14] is the sub-list for extension type_name
+@@ -1214,7 +1158,7 @@ func file_transport_internet_config_proto_init() {
+ 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+ 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_transport_internet_config_proto_rawDesc), len(file_transport_internet_config_proto_rawDesc)),
+ 			NumEnums:      3,
+-			NumMessages:   8,
++			NumMessages:   7,
+ 			NumExtensions: 0,
+ 			NumServices:   0,
+ 		},
+diff --git a/transport/internet/config.proto b/transport/internet/config.proto
+index 58b4f21b..cbf48bf5 100644
+--- a/transport/internet/config.proto
++++ b/transport/internet/config.proto
+@@ -90,11 +90,6 @@ message QuicParams {
+   bool disable_stateless_reset = 17;    
+ }
+ 
+-message ProxyConfig {
+-  string tag = 1;
+-  bool transportLayerProxy = 2;
+-}
+-
+ message CustomSockopt {
+   string system = 1;
+   string network = 2;

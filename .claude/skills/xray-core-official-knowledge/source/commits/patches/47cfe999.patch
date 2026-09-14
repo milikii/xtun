@@ -1,0 +1,80 @@
+commit 47cfe9994a6b39b1f673ba35e62b091bcce15a71
+Author:     RPRX <63339210+RPRX@users.noreply.github.com>
+AuthorDate: Tue Sep 8 07:22:54 2026 +0000
+Commit:     RPRX <63339210+RPRX@users.noreply.github.com>
+CommitDate: Tue Sep 8 07:22:54 2026 +0000
+
+    Update github.com/xtls/reality to 20260908062103
+    
+    https://github.com/XTLS/REALITY/commit/8cdf7bf9c7f09cb9814bf08c3eb877f68b85fba8
+    https://github.com/XTLS/REALITY/commit/e1986a4d31ca33c087a72ab4644aef1295693b69
+    https://github.com/XTLS/REALITY/commit/393f8de3ee2d685271d79ee608334e441b2db324
+
+diff --git a/go.mod b/go.mod
+index 85cfbab8..a717e802 100644
+--- a/go.mod
++++ b/go.mod
+@@ -22,7 +22,7 @@ require (
+ 	github.com/sagernet/sing-shadowsocks v0.2.7
+ 	github.com/stretchr/testify v1.12.1
+ 	github.com/vishvananda/netlink v1.3.1
+-	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f
++	github.com/xtls/reality v0.0.0-20260908062103-8cdf7bf9c7f0
+ 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
+ 	golang.org/x/crypto v0.55.0
+ 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
+diff --git a/go.sum b/go.sum
+index c0c5e976..d8e174e9 100644
+--- a/go.sum
++++ b/go.sum
+@@ -87,8 +87,8 @@ github.com/vishvananda/netns v0.0.5 h1:DfiHV+j8bA32MFM7bfEunvT8IAqQ/NzSJHtcmW5zd
+ github.com/vishvananda/netns v0.0.5/go.mod h1:SpkAiCQRtJ6TvvxPnOSyH3BMl6unz3xZlaprSwhNNJM=
+ github.com/wlynxg/anet v0.0.5 h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=
+ github.com/wlynxg/anet v0.0.5/go.mod h1:eay5PRQr7fIVAMbTbchTnO9gG65Hg/uYGdc7mguHxoA=
+-github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f h1:iy2JRioxmUpoJ3SzbFPyTxHZMbR/rSHP7dOOgYaq1O8=
+-github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f/go.mod h1:DsJblcWDGt76+FVqBVwbwRhxyyNJsGV48gJLch0OOWI=
++github.com/xtls/reality v0.0.0-20260908062103-8cdf7bf9c7f0 h1:rb+fKQFhz+5I2PPuQsNYxI5mUU840XWYtRF0ZBjvkws=
++github.com/xtls/reality v0.0.0-20260908062103-8cdf7bf9c7f0/go.mod h1:DsJblcWDGt76+FVqBVwbwRhxyyNJsGV48gJLch0OOWI=
+ github.com/yuin/goldmark v1.4.1/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=
+ go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
+ go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
+diff --git a/infra/conf/transport_security.go b/infra/conf/transport_security.go
+index ec45d555..b5cd7d28 100644
+--- a/infra/conf/transport_security.go
++++ b/infra/conf/transport_security.go
+@@ -113,10 +113,10 @@ func (c *REALITYConfig) Build() (proto.Message, error) {
+ 					config.MinClientVer[i] = byte(u)
+ 				}
+ 			}
+-			errors.LogWarning(context.Background(), `REALITY: Changing "minClientVer" will increase the likelihood of your server's IP being blocked by the GFW`)
++			// errors.LogWarning(context.Background(), `REALITY: Changing "minClientVer" will increase the likelihood of your server's IP being blocked by the GFW`)
+ 		} else {
+-			config.MinClientVer = []byte{26, 3, 27} // change it at your own risk: https://github.com/XTLS/Xray-core/commit/af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770
+-			errors.LogWarning(context.Background(), `REALITY: The default minimal client version is Xray-core v26.3.27, other clients may be refused to connect`)
++			// config.MinClientVer = []byte{26, 3, 27} // change it at your own risk: https://github.com/XTLS/Xray-core/commit/af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770
++			// errors.LogWarning(context.Background(), `REALITY: The default minimal client version is Xray-core v26.3.27, other clients may be refused to connect`)
+ 		}
+ 		if c.MaxClientVer != "" {
+ 			config.MaxClientVer = make([]byte, 3)
+diff --git a/testing/scenarios/vless_test.go b/testing/scenarios/vless_test.go
+index ca176cf7..1ff4809d 100644
+--- a/testing/scenarios/vless_test.go
++++ b/testing/scenarios/vless_test.go
+@@ -509,7 +509,7 @@ func TestVlessXtlsVisionReality(t *testing.T) {
+ 
+ // This testing test all known utls fingerprint in tls.PresetFingerprints that support reality (expect unsafe and random*)
+ // Beacuse figerprint support may be broken after utls/reality update
+-// Known broken fingerprint: android, 360
++// Known working fingerprint: chrome, firefox, safari
+ func TestVlessRealityFingerprints(t *testing.T) {
+ 	TestFingerprint := func(fingerprint string) error {
+ 		tcpServer := tcp.Server{
+@@ -641,7 +641,7 @@ func TestVlessRealityFingerprints(t *testing.T) {
+ 		}
+ 		return nil
+ 	}
+-	fingerPrints := []string{"chrome", "firefox", "safari", "ios", "edge", "qq"}
++	fingerPrints := []string{"chrome", "firefox", "safari"}
+ 	wg := sync.WaitGroup{}
+ 	wg.Add(len(fingerPrints))
+ 	for _, fp := range fingerPrints {

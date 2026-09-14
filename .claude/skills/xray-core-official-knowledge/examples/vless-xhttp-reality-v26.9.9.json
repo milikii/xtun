@@ -1,163 +1,99 @@
 {
-  "_comment": "VLESS + XHTTP + REALITY Server/Client Pair for Xray-core v26.9.9\n    Verified against: infra/conf/vless.go, transport_method.go, transport_security.go\n    This example uses fields confirmed in source code as of commit 52a412d9.",
   "meta": {
     "target_version": "v26.9.9",
-    "protocol": "VLESS",
-    "transport": "xhttp",
-    "security": "reality",
-    "verified": true,
-    "source_commit": "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120"
+    "track": "prerelease",
+    "source_commit": "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120",
+    "kind": "parameterized-server-client-pair",
+    "validation": {
+      "source_reviewed": true,
+      "configuration_checked": true,
+      "live_handshake_tested": false,
+      "checked_at": "2026-09-14",
+      "report": "source/validation/v26.9.9.json"
+    },
+    "instructions": "Read references/examples.md. Replace placeholders and use either server or client as the Xray config; this wrapper is not itself a core configuration."
   },
   "server": {
+    "log": {
+      "loglevel": "warning"
+    },
     "inbounds": [
       {
         "listen": "0.0.0.0",
         "port": 443,
-        "protocol": "VLESS",
+        "protocol": "vless",
         "settings": {
-          "clients": [
+          "users": [
             {
-              "id": "REPLACE_WITH_UUID",
-              "flow": ""
+              "id": "REPLACE_WITH_UUID"
             }
           ],
           "decryption": "none"
         },
         "streamSettings": {
-          "network": "xhttp",
+          "method": "xhttp",
           "security": "reality",
           "realitySettings": {
-            "dest": "www.example.com:443",
+            "target": "REPLACE_WITH_REALITY_TARGET:443",
             "serverNames": [
-              "www.example.com"
+              "REPLACE_WITH_SERVER_NAME"
             ],
-            "privateKey": "REPLACE_WITH_BASE64_PRIVATE_KEY",
+            "privateKey": "REPLACE_WITH_PRIVATE_KEY",
             "shortIds": [
-              "REPLACE_WITH_HEX_SHORTID"
-            ],
-            "maxTimeDiff": 0,
-            "show": false
+              "REPLACE_WITH_SHORT_ID"
+            ]
           },
           "xhttpSettings": {
             "path": "/xhttp",
             "mode": "auto"
           }
-        },
-        "sniffing": {
-          "enabled": true,
-          "destOverride": [
-            "http",
-            "tls",
-            "quic"
-          ]
         }
+      }
+    ],
+    "outbounds": [
+      {
+        "protocol": "freedom"
       }
     ]
   },
   "client": {
+    "log": {
+      "loglevel": "warning"
+    },
+    "inbounds": [
+      {
+        "listen": "127.0.0.1",
+        "port": 1080,
+        "protocol": "socks",
+        "settings": {
+          "udp": true
+        }
+      }
+    ],
     "outbounds": [
       {
-        "protocol": "VLESS",
+        "protocol": "vless",
         "settings": {
-          "vnext": [
-            {
-              "address": "SERVER_IP",
-              "port": 443,
-              "users": [
-                {
-                  "id": "REPLACE_WITH_UUID",
-                  "encryption": "none",
-                  "flow": ""
-                }
-              ]
-            }
-          ]
+          "address": "REPLACE_WITH_SERVER_ADDRESS",
+          "port": 443,
+          "id": "REPLACE_WITH_UUID",
+          "encryption": "none"
         },
         "streamSettings": {
-          "network": "xhttp",
+          "method": "xhttp",
           "security": "reality",
           "realitySettings": {
             "fingerprint": "chrome",
-            "serverName": "www.example.com",
-            "publicKey": "REPLACE_WITH_BASE64_PUBLIC_KEY",
-            "shortId": "REPLACE_WITH_HEX_SHORTID",
-            "spiderX": "/",
-            "show": false
+            "serverName": "REPLACE_WITH_SERVER_NAME",
+            "password": "REPLACE_WITH_PASSWORD",
+            "shortId": "REPLACE_WITH_SHORT_ID"
           },
           "xhttpSettings": {
             "path": "/xhttp",
-            "mode": "auto",
-            "xmux": {
-              "maxConcurrency": {
-                "from": 16,
-                "to": 32
-              },
-              "maxConnections": {
-                "from": 0,
-                "to": 0
-              }
-            }
+            "mode": "auto"
           }
         }
       }
     ]
-  },
-  "field_notes": {
-    "server.decryption": {
-      "required": true,
-      "value": "none",
-      "note": "VLESS inbound 必须设置 decryption 为 none。"
-    },
-    "server.realitySettings.dest": {
-      "required": true,
-      "server_only": true,
-      "note": "REALITY 服务端目标地址，支持端口或完整地址。"
-    },
-    "server.realitySettings.privateKey": {
-      "required": true,
-      "server_only": true,
-      "note": "服务端私钥，32 字节 base64 raw url 编码。"
-    },
-    "server.realitySettings.serverNames": {
-      "required": true,
-      "server_only": true,
-      "note": "不能为空。"
-    },
-    "server.realitySettings.shortIds": {
-      "required": true,
-      "server_only": true,
-      "note": "服务端允许的 ShortId 列表，每项最多 16 字符十六进制。"
-    },
-    "client.users.encryption": {
-      "required": true,
-      "client_only": true,
-      "value": "none",
-      "note": "VLESS 客户端用户必须设置 encryption 为 none。"
-    },
-    "client.realitySettings.fingerprint": {
-      "required": true,
-      "client_only": true,
-      "note": "客户端 TLS 指纹，不能为 unsafe/hellogolang。"
-    },
-    "client.realitySettings.publicKey": {
-      "required": true,
-      "client_only": true,
-      "note": "服务端公钥，32 字节 base64 raw url 编码。旧字段名 password。"
-    },
-    "client.realitySettings.spiderX": {
-      "required": false,
-      "default": "/",
-      "client_only": true,
-      "note": "必须以 / 开头。"
-    },
-    "xhttpSettings.mode": {
-      "required": false,
-      "default": "auto",
-      "note": "可选 auto, packet-up, stream-up, stream-one。"
-    },
-    "xhttpSettings.xmux": {
-      "client_only": true,
-      "note": "连接复用配置，主要客户端生效。"
-    }
   }
 }

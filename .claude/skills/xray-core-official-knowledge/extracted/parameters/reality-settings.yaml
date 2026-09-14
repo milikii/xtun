@@ -1,144 +1,105 @@
 name: REALITYConfig
 component: transport/internet/reality
-version_introduced: v1.8.0
-version_deprecated: ""
-version_removed: ""
-status: stable
-server_client: depends
+verified_version: v26.9.9
+track: prerelease
+coverage: Selected fields, not a complete schema
 source:
-  docs: https://xtls.github.io/config/transport.html#realitysettings
-  code: infra/conf/transport_security.go
-  commit: current
-notes: >
-  REALITY 配置在服务端和客户端共用同一结构，但字段要求截然不同。
-  源码通过 dest 是否存在来区分服务端/客户端模式。
-
+  docs: https://xtls.github.io/config/transports/reality.html
+  commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+  local:
+  - source/config/transport_security.go
+  - source/transport/internet/reality/reality.go
+  - source/transport/internet/tls/tls.go
+notes: 握手强制条件还需 source/dependencies/reality/v26.9.9/tls.go；取消默认版本号限制不表示旧指纹重新兼容。
 fields:
-  # === 服务端独有字段 (dest != nil) ===
-  - name: dest / target
-    type: json.RawMessage (uint16 or string)
-    required: true (server)
-    server_client: server-only
-    notes: >
-      服务端目标地址。可以是端口号或地址字符串。
-      旧名为 dest，现名为 target，两字段互为 alias（docs/stable/config/transports/reality.md:74-78；source/config/transport_security.go:30-31）。
-
-  - name: type
-    type: string
-    required: false (auto-detected)
-    server_client: server-only
-    notes: >
-      目标类型。若 dest 以 @ 或 / 开头自动识别为 unix；
-      纯数字识别为 tcp（会自动补 localhost:port）；
-      含冒号识别为 tcp。
-
-  - name: xver
-    type: uint64
-    required: false
-    default: 0
-    server_client: server-only
-    notes: >
-      PROXY protocol 版本。仅接受 0, 1, 2。
-
-  - name: serverNames
-    type: []string
-    required: true (server)
-    server_client: server-only
-    notes: 服务端允许的真实 ServerName 列表。不能为空。
-
-  - name: privateKey
-    type: string (base64.RawURLEncoding, 32 bytes)
-    required: true (server)
-    server_client: server-only
-    notes: 服务端私钥。
-
-  - name: minClientVer / maxClientVer
-    type: string (x.y.z)
-    required: false
-    server_client: server-only
-    notes: >
-      限制客户端最低/最高版本。每个部分需小于 256。
-      默认无限制，但维护者建议设置 minClientVer。
-
-  - name: maxTimeDiff
-    type: uint64
-    required: false
-    server_client: server-only
-    notes: 允许的最大客户端时间差（毫秒）。
-
-  - name: shortIds
-    type: []string (hex, max 16 chars each)
-    required: true (server)
-    server_client: server-only
-    notes: 服务端允许的 ShortId 列表。不能为空，每项最多 16 字符十六进制。
-
-  - name: mldsa65Seed
-    type: string (base64.RawURLEncoding, 32 bytes)
-    required: false
-    server_client: server-only
-    notes: ML-DSA-65 种子，不能与 privateKey 相同。
-
-  - name: limitFallbackUpload / limitFallbackDownload
-    type: LimitFallback
-    required: false
-    server_client: server-only
-    notes: 实验性限速回落配置。
-
-  # === 客户端独有字段 (dest == nil) ===
-  - name: fingerprint
-    type: string
-    required: true (client)
-    server_client: client-only
-    notes: >
-      TLS 指纹。不能为 "unsafe" 或 "hellogolang"。
-      必须通过 tls.GetFingerprint() 校验存在。
-
-  - name: serverName
-    type: string
-    required: false
-    server_client: client-only
-    notes: 客户端请求的实际 SNI。
-
-  - name: publicKey / password
-    type: string (base64.RawURLEncoding, 32 bytes)
-    required: true (client)
-    server_client: client-only
-    notes: >
-      服务端公钥。旧字段名为 password，现已由 publicKey 替代。
-
-  - name: shortId
-    type: string (hex, max 16 chars)
-    required: false
-    server_client: client-only
-    notes: 客户端使用的 ShortId。与服务端 shortIds 列表中的某一项匹配。
-
-  - name: mldsa65Verify
-    type: string (base64.RawURLEncoding, 1952 bytes)
-    required: false
-    server_client: client-only
-    notes: ML-DSA-65 验证公钥。
-
-  - name: spiderX
-    type: string
-    required: false
-    default: "/"
-    server_client: client-only
-    notes: >
-      爬虫路径。必须以 "/" 开头。支持查询参数：
-      p=padding, c=concurrency, t=times, i=interval, r=return。
-
-  # === 共用字段 ===
-  - name: show
-    type: bool
-    required: false
-    default: false
-    server_client: server-and-client
-    notes: 是否显示调试信息。
-
-  - name: masterKeyLog
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: TLS 密钥日志文件路径（调试用）。
-
+- name: target
+  type: string or port number
+  server_client: server-only
+  notes: 当前名称，旧名 dest；target 非 nil 时覆盖 dest。存在目标字段时按服务端配置构建。
+  required: true
+  aliases:
+  - dest
+  alias_introduced: v24.10.16
+- name: type
+  type: string
+  server_client: server-only
+  notes: 通常由目标自动推导：@ 或 / 开头为 unix，有合法地址端口为 tcp；纯端口补 localhost。
+- name: xver
+  type: integer
+  server_client: server-only
+  notes: 目标侧 PROXY protocol 版本，仅接受 0、1、2。
+  default: 0
+- name: serverNames
+  type: array of string
+  server_client: server-only
+  notes: 非空列表；列表可包含空字符串，用于无 SNI 客户端。
+  required: true
+- name: privateKey
+  type: base64url without padding
+  server_client: server-only
+  notes: 解码后 32 字节的服务端私钥。
+  required: true
+- name: minClientVer / maxClientVer
+  type: version string
+  server_client: server-only
+  notes: 显式客户端版本限制。v26.7.11 设置过默认最低版本 26.3.27；v26.9.8 取消该默认值，并由锁定的 REALITY 库检查 ClientHello。
+  default: ''
+- name: maxTimeDiff
+  type: integer milliseconds
+  server_client: server-only
+  notes: 允许的时间差；0 不启用该限制。
+  default: 0
+- name: shortIds
+  type: array of hex string
+  server_client: server-only
+  notes: 列表不得为空；每项为偶数长度十六进制，最长 16 字符；允许单个空字符串。
+  required: true
+- name: mldsa65Seed
+  type: base64url without padding
+  server_client: server-only
+  notes: 解码后 32 字节的 ML-DSA-65 种子，不可与 privateKey 相同；目标证书等兼容要求另见官方文档。
+- name: limitFallbackUpload / limitFallbackDownload
+  type: LimitFallback object
+  server_client: server-only
+  notes: 回落流量限速；不是已认证代理流量限速。不把维护者的场景性建议当成强制默认。
+- name: fingerprint
+  type: string
+  server_client: client-only
+  notes: 文档建议显式填写；源码允许空值并选择 Chrome。拒绝 unsafe 与 hellogolang；能解析的指纹也不保证通过新版服务器握手检查。
+  default: chrome
+- name: serverName
+  type: string
+  server_client: client-only
+  notes: 与服务端 serverNames 对应的 SNI；特殊无 SNI 用法按官网与目标版本核对。
+- name: password
+  type: base64url without padding
+  server_client: client-only
+  notes: 当前名称，旧名 publicKey；非空 password 优先。服务端私钥对应的 32 字节公钥，在 REALITY 设计中作为客户端持有的凭据。
+  required: true
+  aliases:
+  - publicKey
+  alias_introduced: v25.3.6
+- name: shortId
+  type: hex string
+  server_client: client-only
+  notes: 须匹配服务端 shortIds 的一项；最长 16 字符，允许空值的前提是服务端也允许。
+  default: ''
+- name: mldsa65Verify
+  type: base64url without padding
+  server_client: client-only
+  notes: 解码后 1952 字节的 ML-DSA-65 验证公钥。
+- name: spiderX
+  type: string
+  server_client: client-only
+  notes: 以 / 开头；支持 p/c/t/i/r 查询参数。
+  default: /
+- name: show
+  type: boolean
+  server_client: server-and-client
+  notes: 调试输出。
+  default: false
+- name: masterKeyLog
+  type: string
+  server_client: server-and-client
+  notes: 调试用 NSS 密钥日志路径。
 confidence: source-confirmed

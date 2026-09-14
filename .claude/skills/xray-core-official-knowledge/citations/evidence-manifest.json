@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "files": {
+    "citations/raw/xhttp-4113.txt": {
+      "url": "https://github.com/XTLS/Xray-core/discussions/4113",
+      "retrieved_at": "2026-09-14",
+      "sha256": "1a201665c8e61ee6fff1f982e0fe82d3f543a0837422488a16cd573a3a445b38",
+      "author": "RPRX",
+      "representation": "Rendered main-post text with expanded links; not the entire discussion; original update time not captured"
+    },
+    "citations/raw/design-priorities-19.json": {
+      "url": "https://github.com/XTLS/BBS/issues/19",
+      "retrieved_at": "2026-09-14",
+      "sha256": "f2733cde123cb671123a723752033daed8ae45941ca4eff1c47e81eea8364c77",
+      "author": "RPRX",
+      "created_at": "2026-02-19T14:05:53Z",
+      "updated_at": "2026-07-28T18:03:57Z",
+      "representation": "Selected GitHub API metadata and complete body"
+    },
+    "citations/raw/reality-clienthello-6181.json": {
+      "url": "https://github.com/XTLS/Xray-core/pull/6181#issuecomment-4567373533",
+      "retrieved_at": "2026-09-14",
+      "sha256": "aedc4d1868240c675629695277812037edd78c28a75b13ca3beef79b1476562e",
+      "author": "RPRX",
+      "created_at": "2026-05-28T19:09:17Z",
+      "updated_at": "2026-05-29T06:24:37Z",
+      "representation": "Selected GitHub API metadata and complete body"
+    },
+    "citations/raw/xhttp-5414-3649096826.json": {
+      "url": "https://github.com/XTLS/Xray-core/pull/5414#issuecomment-3649096826",
+      "retrieved_at": "2026-09-14",
+      "sha256": "64df500b02debf82bca9b205d3624efe83ec34428073c90bccfe03181030c4f8",
+      "author": "RPRX",
+      "created_at": "2025-12-13T08:03:16Z",
+      "updated_at": "2025-12-13T08:03:16Z",
+      "representation": "Selected GitHub API metadata and complete comment body"
+    },
+    "citations/raw/xhttp-5414-3812196530.json": {
+      "url": "https://github.com/XTLS/Xray-core/pull/5414#issuecomment-3812196530",
+      "retrieved_at": "2026-09-14",
+      "sha256": "5396cca7f7c951dfb22f622c1fa585f1836b6f3a4eff7f65583c52f9c556d77a",
+      "author": "RPRX",
+      "created_at": "2026-01-28T16:05:50Z",
+      "updated_at": "2026-01-28T16:06:09Z",
+      "representation": "Selected GitHub API metadata and complete comment body"
+    },
+    "citations/raw/xhttp-5414-3823861456.json": {
+      "url": "https://github.com/XTLS/Xray-core/pull/5414#issuecomment-3823861456",
+      "retrieved_at": "2026-09-14",
+      "sha256": "f76d017a562a8ccd43fb0e4a0c88b85fd9198f7b3e5630a57a857c0ad145f6d0",
+      "author": "RPRX",
+      "created_at": "2026-01-30T13:49:24Z",
+      "updated_at": "2026-01-30T13:49:24Z",
+      "representation": "Selected GitHub API metadata and complete comment body"
+    }
+  }
+}

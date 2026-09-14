@@ -1,0 +1,504 @@
+
+        
+中文 |  [https://github.com/XTLS/Xray-core/discussions/4113#discussioncomment-11468947] Русский
+
+
+XHTTP: Beyond REALITY
+
+
+开发简述：2024 年中， [https://github.com/mmmray] @mmmray  [https://github.com/ll11l1lIllIl1lll] @ll11l1lIllIl1lll 等人基于  [https://github.com/RPRX] @RPRX 所述的“分包上行、流式下行”原理及实现细节开发出了 SplitHTTP，首次实现了不牺牲下行效率的同时穿透绝大多数支持 HTTP 的中间盒，并首次大规模实现了 QUIC H3 过 CDN，开启了一个崭新的时代，浏览器转发 Broswer Dialer 支持、减少特征的 header padding、控制复用的 XMUX、解锁 REALITY 也相继被安排上。随后  [https://github.com/RPRX] @RPRX 接手开发，实现了真正的上下行分离并更名为 XHTTP，比如上下行可以分别是 IPv6 CDN H3、IPv4 REALITY H2（源 IP 都可以不同），这下又开启了一个崭新的时代，紧接着开发了不牺牲上行效率的流式上行 stream-up 模式、可以分享全部细节配置的 extra 方案，并给 stream-up 模式加上了默认的 gRPC header 伪装，实现了 H2 流式上行过 CDN，取代了传统的 gRPC 传输层，当初发现这也行就不会有它了，最后将 HTTP 传输层作为 stream-one 模式并入 XHTTP，使其也拥有了 header padding、XMUX、gRPC header 伪装等特性。至此，我们有了完全体 XHTTP：各种姿势穿透中间盒、上下行分离、丝滑的 XMUX 等应有尽有，XHTTP 全场景通吃的时代正式到来。
+
+
+原为导剪版文档，不小心写成了文章。这篇文章旨在帮助你透彻地理解 XHTTP 的原理、设计，以便更好地使用它。
+
+
+如果你要捐助 Xray 项目、收藏 NFT，相关介绍在文末，感谢支持！
+
+
+快速上手指南
+
+
+别看 XHTTP 的参数较多，其实都调好了默认值，如果你只是想用 XHTTP 的话，只需遵循六步：
+
+
+
+无论是 TLS 还是 REALITY，一般来说 XHTTP 配置只需填 path，其它不填即可
+
+
+服务端支持 QUIC H3 的话，客户端 alpn 选 "h3" 即可使用 QUIC
+
+
+CDN 优选 IP 的话，客户端 address 填 IP，serverName（SNI）填域名即可
+
+
+连不上 CF 的话，启用 CF 面板内的 gRPC 支持
+
+
+无法穿透 Nginx 的话，把 Nginx 的 proxy_pass 改为 grpc_pass
+
+
+无法穿透其它 CDN 或反代软件的话，建议 mode 选 "packet-up"，兼容性最强
+
+
+
+XHTTP 默认有多路复用，延迟比 Vision 低但多线程测速不如它，除非测速前设了 "maxConcurrency": 1，参考 XMUX 小节。
+
+
+CF 会掐断下行 100 秒无实际数据的 HTTP，代理长连接需在应用层面保活，比如 SSH 需在 sshd 设置 ClientAliveInterval。
+
+
+这篇文章可以当增强版文档用，它基本上涵盖了关于 XHTTP 你想要了解的所有内容，对每个参数都有解释，文末也有一份涵盖了所有参数的配置示例，并且标注了每个参数的使用场景，如果你对哪个参数不清楚，文内搜索参数名即可找到该参数的详细解释。
+
+
+两个底层逻辑
+
+
+正如  [https://github.com/XTLS/REALITY] REALITY 可以伪装成别人的网站，反审查的根本逻辑就是增加审查者执行封锁时的“附带伤害”，使审查者不敢贸然封锁，我当年看好 TLS 以及 TLS 上流量的时序、长度特征混淆也是同理。多年经验告诉我们 GFW 不会永久封锁大型 CDN 的整个 IP，否则会波及太多常规网站，那么对于 XHTTP，我们最初的目标就是把它隐藏在众多各种各样的 CDN 后面。然而 CDN 为了防止源站遭受攻击，除了有特殊支持的 WS、gRPC 外，一般会缓存完整个 HTTP 请求再发给源站，许多 HTTP 中间盒默认也是这样的行为。据此，Tor 的 Meek 协议把往返流量包装为了一个个 HTTP 请求以穿透这些中间盒，但速率惨不忍睹，因为它没有采用 XHTTP 的“流式下行”。什么是“流式下行”呢？想象一下你正在一个网站上下载一个很大的文件，CDN 没击中缓存于是回源拿，但显然它不太好像上行一样先缓存完整个文件让你干等，而是源站发来多少数据，CDN 就即时转发给你，这就是 XHTTP “流式下行”的基础，也保证了最重要的下行速率可以拉满。至于上行，出于兼容性考虑，XHTTP 首先实现的是“分包上行”，即把上行流量包装为一个个 POST 请求，它的效率显然会打折扣，但好在对于一般的代理需求而言上行流量极少。此后我加了“流式上行”，并且我们发现加上 gRPC header 伪装后还能 H2 流式上行穿透 CF，而我几轮优化”分包上行“后速率甚至直追”流式上行“。
+
+
+顺便谈一下最近又比较火的套 CDN 是否属于“滥用”的问题：显然不支持流式上行的 CDN 其本意并非让你用来搭建代理服务，但我们为了对抗 GFW，不断探索、开发、利用尽可能多的新路是合理且必要的，是不得已而为之，且增加审查者的“附带伤害”就是要求我们混入“正常”服务，这也是不可避免的。举个最简单的例子：哪天 IP 白名单了而 CDN 的 IP 在里面，你用还是不用？反审查这一领域并不适用现实世界的一些规则，这么简单的道理却一直都有人想不明白。 如果还是没想通，那像 WebSocket 这样的传输层现在仅为了套 CDN 而存在，作为开发者可以删掉它，作为用户可以建议开发者删掉它，以自身的实际行动来证明“滥用 CDN”并不只是为了眼红攻击 Xray 这一为满足某些病态心理的日经无聊行为而找出的又一个借口罢了，与此同时身体却很诚实，与此同时不难窥见，有些人的虚伪本质已经暴露无遗。
+
+
+PACKET-UP
+
+
+这一小节技术细节太多，非开发者可以只看粗体部分。
+
+
+对于 XHTTP 兼容性最强的“分包上行、流式下行”，即 packet-up 模式，我们是这样设计的：
+
+
+
+
+
+客户端 POST /yourpath/sameUUID/seq 以发送上行数据：
+
+
+
+UUID 是随机生成的，等下启动下行时的 UUID 与它相同，以便服务端关联，若服务端未在 30 秒内成功关联，将终止会话
+
+
+seq 从 0 开始，必须发完上一个 POST 的 body（但无需等响应）再发下一个
+
+
+多个 POST 有小概率乱序到达服务端，服务端会按 seq 进行重组，默认最多缓存 30 个，超限断连
+
+
+注意 UUID 和 seq 都设计在 path 里而非 query string，以避免遇到奇怪的问题
+
+
+
+
+
+
+
+客户端 GET /yourpath/sameUUID 启动下行，服务端响应头包含：
+
+
+
+X-Accel-Buffering: no 以告知中间盒禁用缓冲
+
+
+Cache-Control: no-store 以告知中间盒无需缓存
+
+
+Content-Type: text/event-stream 以伪装成 server-sent events（兼容性更好，可以设置 noSSEHeader 以关闭）
+
+
+若为 HTTP/1.1 还需包含 Transfer-Encoding: chunked，H2/H3 则不需要
+
+
+
+
+
+
+
+为了避免浏览器转发  [https://xtls.github.io/config/features/browser_dialer.html] Browser Dialer 遇到跨域限制，服务端针对所有 GET、POST 的响应头都会包含：
+
+
+
+Access-Control-Allow-Origin: *
+
+
+Access-Control-Allow-Methods: GET, POST
+
+
+
+
+
+
+
+为了解决 HTTP 请求头和响应头的固定长度特征：
+
+
+
+客户端发的 request header 均默认包含 Referer: ...?x_padding=XXX...（放 Referer 是为了防止 Browser Dialer 产生不必要的 OPTIONS 请求），默认长度为 100-1000，每次请求随机，服务端默认会检查它是否在服务端允许的范围内
+
+
+服务端发的 response header 均默认包含 X-Padding: XXX...，默认长度为 100-1000，每次响应随机
+
+
+这便是我多次提及的 header padding，对应设置项为 xPaddingBytes
+
+
+请求头的 padding 改为放到 Referer 由  [https://github.com/rPDmYQ] @rPDmYQ 提出，选用 XXX 也是，X 在 huffman encoding 中为 8 bit
+
+
+
+
+
+
+分包上行、Referer: ...?x_padding=XXX... 会产生较多、较长的日志，你可以在反代软件中设置不记录它们。
+
+
+此外，和 Xray 的其它传输层一样，服务端也接受 X-Forwarded-For header 以取得客户端的真实 IP，也会依据服务端设置的 host 来检查客户端发来的 host（个人建议是没事别设，毕竟已经隐藏在 path 后面了）。
+
+
+以上就是 packet-up 模式的最简化、必要流程，不过此时还有个小问题：如何具体实施、限制 POST 请求？有三个专属参数：
+
+
+
+scMaxEachPostBytes：客户端每个 POST 最多携带多少数据，默认值 1000000 即 1MB，该值应小于 CDN 等 HTTP 中间盒所允许的最大值，服务端也会拒绝大于该值的 POST
+
+
+scMinPostsIntervalMs：仅客户端，基于单个代理请求，客户端发起 POST 请求的最小间隔，默认值 30 毫秒
+
+
+scMaxBufferedPosts：仅服务端，基于单个代理请求，服务端最多缓存多少个 POST 请求，默认值 30 个，超限断连
+
+
+
+“基于单个代理请求”的意思是每个代理请求各自计数、互不影响，即使它们在同一条 H2 / H3 连接内，这便是 sc 即 sub-connection 的含义。为了减少指纹，前两个值可以设为范围的形式，比如分别为字符串 "500000-1000000"、"10-50"，每次随机。这些参数都可以通过 extra 下发给客户端，文末有说明。此外值得一提的是，Xray 最新版优化了 packet-up，速率甚至直追 stream-up，主要利好 QUIC H3 过 CDN。
+
+
+H1 / H2 / H3
+
+
+既然我们有了几乎能穿透所有 HTTP 中间盒的 packet-up 模式，让我们来讨论一个有趣的东西：QUIC H3 过 CDN，即当初 SplitHTTP 那个崭新的时代，理解这一小节对于灵活使用 XHTTP 尤为重要。
+
+
+很多 HTTP 中间盒的一个特性就是会进行 HTTP 版本的转换，比如 CDN、Nginx 会将收到的 H3 流量转为 H1 或 H2 流量回源，也就是说我们的 XHTTP 服务端可以仅监听 H1 和 H2，无需监听 H3，但 XHTTP 客户端却可以使用 H3。
+
+
+这也是 XHTTP 服务端的默认行为：仅监听 TCP 端口并处理 H1 和 H2 流量。 当启用 TLS 并在 alpn 处仅设置一个元素 "h3" 时，服务端将仅使用 quic-go 监听 UDP 端口并处理 H3 流量，但是目前不建议你这样做，而应将 XHTTP 隐藏在真正的 Nginx、Caddy 后面以减少指纹特征，这也是 XHTTP 相较于其它 QUIC 类代理的重要优点之一，另一个当然是能过 CDN。 此外 H3 的拥塞控制为应用层实现，理论上你可以修改这些反代软件的 QUIC 拥塞控制算法并编译，以实现有些人想要的暴力发包。
+
+
+对于 XHTTP 客户端：
+
+
+
+启用 TLS/REALITY 时，默认使用 H2，否则使用 HTTP/1.1
+
+
+启用 TLS 时，若 alpn 仅有 "http/1.1" 则使用 HTTP/1.1（但 Xray 并不会允许它修改 uTLS 浏览器指纹伪装）
+
+
+启用 TLS 时，若 alpn 仅有 "h3" 则使用 quic-go H3
+
+
+不过当你使用 Browser Dialer 时，具体的 HTTP 版本就由浏览器决定了（整个 tlsSettings 都会失效）
+
+
+
+如果你要确认 Xray 客户端实际使用的 HTTP 版本、host，以及 XHTTP mode、上下行分离等信息，将日志调至 "info" 级别即可。
+
+
+代理的 QUIC H3 过 CDN，至少 XHTTP 是首个大规模实现的，开了条新路，毕竟有的地区、有的运营商对 H3 审查不严，不过也有的会 Q 死。即使后来我们开发了 stream-up 模式并发现了加上 gRPC header 伪装就能穿透 CF，也只作用于 H2，看来这个崭新的时代的含金量还在不断上升。
+
+
+XMUX
+
+
+既然我们提到了 H2 和 H3，就不得不提它们的多路复用：均为 0-RTT，区别是 H3 没有 H2 的 TCP 队头阻塞问题，并且支持连接迁移，客户端换网也不会断。那么经常研读 RFC 的朋友就会问了：如何具体控制它们的多路复用？我们设计了一个简洁而强大的接口，即 XMUX：
+
+
+
+
+
+maxConcurrency：每条 TCP/QUIC 连接中最多同时存在多少代理请求，连接中的代理请求数量达到该值后 core 会建立新的连接，以容纳更多的代理请求。XMUX 全为 0 时该项默认值为 "16-32"，每次随机。
+
+
+
+
+
+
+maxConnections：最多同时存在多少条连接，连接数达到该值前每个新的代理请求都会开启一条新的连接，此后 core 会开始复用已有的连接。该值与 maxConcurrency 冲突，只能二选一。默认值 0，即不限制，支持填写范围，每次随机。
+
+
+
+
+
+
+cMaxReuseTimes：一条连接最多被复用几次，复用该次数后将不会被分配新的代理请求，将在内部最后一条代理请求关闭后断开。默认值 0，即不限制，支持填写范围，每次随机。
+
+
+
+
+
+
+hMaxRequestTimes： [https://github.com/xqzr] @xqzr 发现 Nginx 默认最多允许每条 TCP/QUIC 连接累计承载 1000 个 HTTP 请求，XMUX 全为 0 时该项默认值为 "600-900" 取随机，否则该项默认 0 即不限制。该项基于 HTTP 请求计数，一般来说 stream-one 只产生一个 HTTP 请求，stream-up 是两个，packet-up 则是 N 个。该项计数不严谨，且 Golang 的 GET 请求有自动重试，故不建议顶格填写，那些 CDN 什么的要试出来。其中 packet-up 上行循环 POST 时若超过该值会自动切换到另一个 TCP/QUIC 连接，占它一个 reuseTimes 但不占 concurrency。 其实按 XMUX 的三项默认值，stream-* 不会超限，就 packet-up 会超，而它是 H3 的默认 mode，所以新增该项又主要是利好了 H3。
+
+
+
+
+
+
+hMaxReusableSecs： [https://github.com/xqzr] @xqzr 发现 Nginx 默认最多允许每条 TCP/QUIC 连接被复用一个小时，XMUX 全为 0 时该项默认值为 "1800-3000" 取随机，否则该项默认 0 即不限制。TCP/QUIC 连接持续该时间后将不会被分配新的 HTTP 请求，将在内部最后一个 HTTP 请求关闭后断开。其中 packet-up 上行循环 POST 时若超过该值会自动切换到另一个 TCP/QUIC 连接，占它一个 reuseTimes 但不占 concurrency。
+
+
+
+
+
+
+hKeepAlivePeriod：H2 / H3 连接空闲时客户端每隔多少秒发一次保活包，默认 0，即 Chrome H2 的 45 秒，或 quic-go H3 的 10 秒。它是 XMUX 里唯一不允许填范围（该项取随机才是特征）且允许填负数（比如填 -1 关掉空闲保活包）的项，建议留 0。
+
+
+
+
+
+XMUX 提供的这些参数可以组合出各种用法，比如多线程测速前需要设 "maxConcurrency" 1，而“无限”复用可以设 "maxConnections" 1。即使你懒得研究也没事，当这些值全为 0 时就会取到上面写的三个默认值，相当于隔段时间就换个新的 H2/H3 主连接，相当丝滑，不会有 gRPC、HTTP 传输层始终复用同一条连接导致的“断流”体验。同样，这些参数都可以通过 extra 下发给客户端。
+
+
+注：全不填也相当于全为零，会取到三个默认值，但若填了任一项，其它项就没有默认值了，全都要自己填，除前两项外其它项均可同时填。
+
+
+此外，使用 XHTTP 时不要启用 mux.cool，并且新版 Xray 服务端已有检查，只接受纯 XUDP。
+
+
+关于 XMUX 的默认值，一些摘录：
+
+
+
+
+
+我特地选了两个在 TLS 外不太能看出来的选项即 maxConcurrency 加 cMaxReuseTimes（而不是 maxConnections 加 cMaxLifetimeMs），并且这两个选项的默认值都是 range 取随机，最大程度上消除了潜在特征。
+
+
+我选择 maxConcurrency 而不是 maxConnections，就是为了防止连接数成为 fixed pattern，当然如果你喜欢后者也可以手动设置
+
+
+
+
+
+
+
+
+XMUX 和 Nginx 的计数对象不同，maxConcurrency 和 cMaxReuseTimes 都是基于“被代理连接”计数的，只有 stream-one 会产生一个 HTTP 请求，而 stream-up 一个上行一个下行是两个，packet-up 则是 N 个
+
+
+不过我不确定 stream-one 会不会在某些情况下自动多产生一个 HTTP 请求，还有我觉得追求一条连接复用到底没有太大的意义，因为你是运营商的话你也会限速、清理旧的连接，不然资源都被旧连接慢慢占完了，所以 XMUX 的默认参数就是限制复用+定期换连接
+
+
+
+
+
+文章下方还有讨论一些 Nginx 参数。
+
+
+STREAM-UP/ONE
+
+
+终于轮到 XHTTP 的另一个重要模式了：“流式上行、流式下行”的 stream-up，顾名思义这种模式的上行也是流式的，从而不会牺牲上行效率。 它本来是为 REALITY 而开发的，直到我们发现加个 gRPC header 伪装 H2 就能穿透 CF（需要在面板中开启 gRPC 支持），并且 Nginx 等反代软件的支持也不错（Nginx 推荐 grpc_pass，简单省事），所以 mode 默认值 "auto" 的行为是：
+
+
+
+客户端：TLS H2 时 stream-up，REALITY 时 stream-one（有 downloadSettings 时 stream-up），否则 packet-up
+
+
+服务端：默认同时接受三种模式，若设为具体的模式就是仅接受它，"stream-up" 是例外，它还接受 stream-one
+
+
+
+
+
+stream-up 比 stream-one 兼容性好一些，有群友说 CFT 开了流式上行就能用 stream-up，但还得再开个选项才能用 stream-one（可能是 SSE 伪装的锅？），还看到有个 CDN（忘了啥名字）用 stream-one 会被严重限速，但用 stream-up 不会
+
+
+
+
+它们的实现方式是（非开发者可以跳过）：
+
+
+
+对于 stream-up，把 packet-up 的分包上行改为流式的 POST /yourpath/sameUUID 即可，也有 Referer: ...?x_padding=XXX...
+
+
+对于 stream-one，POST /yourpath/ 即可，响应即为下行，双向流式，请求头、响应头均有 header padding
+
+
+注意 stream-one 如果填 /yourpath，实际请求的是 /yourpath/，若末尾没有 / 会自动补上
+
+
+上行均默认有 Content-Type: application/grpc 以伪装成 gRPC（可以设置 noGRPCHeader 以关闭）
+
+
+下行的服务端响应头与 packet-up 的 1 完全一致，stream-one 会出现以 SSE 回应 gRPC 的奇观，若遇到问题可尝试 noSSEHeader
+
+
+
+
+
+ [https://github.com/XTLS/Xray-core/discussions/4113#discussioncomment-11682833] #4113 (comment) 的相关测试发现 CF 会掐断下行 100 秒无实际数据的 HTTP，导致 stream-up 的上行方向被掐断，所以这个  [https://github.com/XTLS/Xray-core/pull/4306] PR 为服务端添加了 scStreamUpServerSecs，默认值 "20-80" 取随机，服务端每隔这段时间就会发 xPaddingBytes 个字节以保活
+
+
+可以设置 "scStreamUpServerSecs": -1 以关闭该机制，此时服务端甚至不会及时发 response header，和以前版本的行为相同
+
+
+
+
+那么经常使用 gRPC 的朋友就会问了：stream-up 比 gRPC 传输层有什么优势呢？
+
+
+
+前者无需任何 gRPC 库，性能更好
+
+
+前者的下行流量是独立的 GET 请求，不会受到 CDN 对 gRPC 的流量限制
+
+
+前者还有 header padding、XMUX、上下行分离 等增强，且已经引入了 extra 机制，所有参数均可分享，更成熟
+
+
+
+当然，XHTTP 相较于 WebSocket、HTTPUpgrade 的优势，除了“没有 ALPN 为 http/1.1 的显著特征”外，相信你都看到这里了，心里也早已有了答案，我就不一一列举了，主要是太多了也不好列。
+
+
+上下行分离
+
+
+压轴登场的当然是又一个崭新的时代：上下行分离。 我们大概知道，现在 GFW 针对 TLS in TLS 等流量特征的检测是基于单条连接，那么如果我们把上下行拆分到不同的审查系统，比如上行跑 IPv4 的 TCP，下行跑 IPv6 的 UDP，GFW 就会一时反应不过来。而由于 XHTTP 服务端仅基于 path 中随机生成的 UUID 关联上下行，packet-up 和 stream-up 天生就具有真正的上下行分离能力，且由于 XHTTP 可以穿透各种 CDN、可以搭配 REALITY 等，可选姿势也无限多。对于客户端，需要设置 downloadSettings：
+
+
+"xhttpSettings": {
+    "host": "example.com",
+    "path": "/yourpath", // must be the same
+    "mode": "auto",
+    "extra": {
+        "headers": {
+            // "key": "value"
+        },
+        "xPaddingBytes": "100-1000",
+        "noGRPCHeader": false, // stream-up/one, client only
+        "noSSEHeader": false, // server only
+        "scMaxEachPostBytes": 1000000, // packet-up only
+        "scMinPostsIntervalMs": 30, // packet-up, client only
+        "scMaxBufferedPosts": 30, // packet-up, server only
+        "scStreamUpServerSecs": "20-80", // stream-up, server only
+        "xmux": { // h2/h3 mainly, client only
+            "maxConcurrency": "16-32",
+            "maxConnections": 0,
+            "cMaxReuseTimes": 0,
+            "hMaxRequestTimes": "600-900",
+            "hMaxReusableSecs": "1800-3000",
+            "hKeepAlivePeriod": 0
+        },
+        "downloadSettings": { // client only
+            "address": "", // another domain/IP
+            "port": 443,
+            "network": "xhttp",
+            "security": "tls",
+            "tlsSettings": {
+                ...
+            },
+            "xhttpSettings": {
+                "path": "/yourpath", // must be the same
+                ...
+            },
+            "sockopt": {} // will be replaced by upload's "sockopt" the latter's "penetrate" is true
+        }
+    }
+}
+
+
+可以看出，downloadSettings 其实就是一套全新的 streamSettings，但是多了类似于 VLESS 出站中的 address 和 port 以指向另一个入口。显然其中 network 必须为 "xhttp"（不可省略），security 可以为 "tls" 或 "reality"。sockopt 项也可被分享，但接收方可以在上行的 sockopt 里将 penetrate 设为 true 以覆盖下行，适合打 mark 的情况。除该特例外，上下行分离时下行配置是完全独立的，不会继承上行的任何配置，而且比如，即使上下行均未填 XMUX 从而取默认值时，它们分别在 range 内 roll 出的确定值也是相互独立、无关的，这样随着时间的推移，上下行的复用完全不对称，切换主连接的时间点也不同，反分析效果更好。因为 GFW 若要对上下行分离动手，“主连接发起的时间点相同”肯定是最重要的切入点，所以以后 XHTTP 还会允许一开始就以不同的时间点发起上下行连接。
+
+
+其实如果你套了 CDN，甚至不需要修改服务端配置就可以玩转上下行分离，比如你可以优选出一个 IPv4 跑 TLS H2，再优选出一个 IPv6 跑 QUIC H3。而且 CDN 基本都支持“同域域前置”，比如上行 serverName 填 "a.example.com"，下行 serverName 填 "b.example.com"，上下行 host 均填 "c.example.com"，实现外部 SNI 看起来也不同，当然如果你本来就有两个域名就更好了。如果你没有任何域名的话，也可以开两台 VPS、开两个 REALITY 玩上下行分离：无论是 CDN 加反代，还是 REALITY 加回落，只要最终以同一 path 抵达同一 VPS 上的同一 XHTTP 入站即可。总之由于 XHTTP 到处都能用，可随意搭配出来的组合是无限的，唯一的问题是脑洞够不够大。
+
+
+比如上下行分离问世后，很多人的用法其实是把上行分给去程优的线路、把下行分给回程优的线路，这样也挺实用的。
+
+
+比如你可以再给上行设 "maxConnections": 1，给下行设 "maxConcurrency": 1，实现上行的少量数据都走同一条底层连接，而下行的大量数据分散到不同的底层连接上，同时兼具反审查、低延迟、高速度，有点像 Switch，搭配 Vision Seed 食用效果更佳。
+
+
+上面贴出了一份涵盖了所有参数的配置示例，主要是为了让大家知道每一项应该写在哪，并说明一下前文中没怎么解释的参数：
+
+
+
+
+
+extra 是 host、path、mode 以外的所有参数的原始 JSON 分享方案，当 extra 存在时，只有该四项会生效。且分享链接中只有这四项，GUI 一般也只有这四项，因为 extra 中的参数都相对低频，且应当由服务发布者直接下发给客户端，不应该让客户端随意改。
+
+补充说明：“下发”的意思是“人去下发”，就是服务发布者写好 extra 后整个放进分享链接，客户端直接作为自己的 extra 就可以用。
+
+
+
+
+
+
+host 的行为与 Xray 其它基于 HTTP 的传输层一致，客户端发送 host 的优先级为 host > serverName > address。服务端若设了 host，将会检查客户端发来的值是否一致，否则不会检查，建议没事别设。host 不可填在 headers 内。
+
+
+
+
+
+
+
+如果你要确认 Xray 客户端实际使用的 HTTP 版本、host，以及 XHTTP mode、上下行分离等信息，将日志调至 "info" 级别即可。
+
+
+
+
+Beyond REALITY
+
+
+去年初我回归并写了秒天秒地秒空气的 REALITY，一举解决了多个痛点，然后就天天泡夜店没怎么管了，连文章都鸽到了现在还没完成，XUDP UoT Migration 更可惜，去年文章快写完了都没发，不知不觉 REALITY 已悄然成长为直连主力，经常能看到 XX 被封了下面的评论是推荐换 REALITY，口碑是有目共睹的，甚至因为过于稳定，这里都没以前热闹了。虽然 Xray 也为其它 transports 做出过大量优化、改进，但 XHTTP 是第一个 Xray 原生的传输层，第一个就整了波大的，当你看完这篇文章，也清楚 XHTTP 可以和 REALITY 一起用：
+
+
+Beyond REALITY 的意思并非是取代 REALITY，而是流行程度超越 REALITY。毫不夸张地说，正如 Xray 一贯的风格，XHTTP 的出现使得其它基于 HTTP 的传输层全部黯然失色，这就是 XHTTP 全场景通吃的时代。它将会比上一个成功的协议 REALITY 更加流行，因为 XHTTP 的特性就已经决定了它的覆盖面会更广。
+
+
+最后，希望 XHTTP 的出现能够给大家带来一点小小的震撼，正如 Xray 历史上多次做到的那样：变革、推陈出新，始终是 Xray 的信仰。
+
+
+若本文对你有所帮助，支持一个  [https://opensea.io/assets/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/2] REALITY NFT：
+
+
+
+总数一千个，首发一百个的售价为 0.01 ETH，此后的售价会涨，抢到首发就是纯捡漏
+
+
+一篇介绍 REALITY 的文章将于接下来几天发布 变成了介绍 XHTTP
+
+
+持有 REALITY NFT 可获得一个新的 Xray 客户端的早期内测资格，以及下一个 NFT 的空投，就像
+
+
+2025.1.1 时持有 Project X NFT 将获赠两个 REALITY NFT
+
+
+
+在大家的支持下，Project X NFT 已翻五六倍，对于 Project X NFT 首发时观望的朋友，这是一次弥补遗憾的好机会。
+
+
+当然若你有余力，能支持个  [https://github.com/XTLS/Xray-core/discussions/3633] Project X NFT 就更感谢了：
+
+
+
+ETH/USDT/USDC：0xDc3Fe44F0f25D13CACb1C4896CD0D321df3146Ee
+
+
+Project X NFT： [https://github.com/XTLS/Xray-core/discussions/3633] Announcement of NFTs by Project X #3633
+
+
+REALITY NFT： [https://opensea.io/assets/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/2] https://opensea.io/assets/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/2
+
+
+有时 ETH 的 gas 费高得离谱，你可以先点个 favorite，等 gas 费相对正常时再买
+
+
+
+若还有哪里不清楚请在下方留言，我会更新文章，建议不要过早出翻译版。
+
+    

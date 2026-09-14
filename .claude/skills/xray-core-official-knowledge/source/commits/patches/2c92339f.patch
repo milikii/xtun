@@ -1,0 +1,1020 @@
+commit 2c92339f95fe9aa493b6ae51d3b07017a44c4014
+Author:     RPRX <63339210+RPRX@users.noreply.github.com>
+AuthorDate: Fri Jan 30 22:15:46 2026 +0000
+Commit:     RPRX <63339210+RPRX@users.noreply.github.com>
+CommitDate: Sat Jan 31 09:32:51 2026 +0000
+
+    TLS config: `allowInsecure`->`pinnedPeerCertSha256`; `verifyPeerCertInNames`->`verifyPeerCertByName`
+    
+    And use `,` as the separator instead of `~`/array
+    
+    https://github.com/XTLS/Xray-core/pull/5567#issuecomment-3766081805
+    https://t.me/projectXtls/1464
+    https://t.me/projectXtls/1465
+    https://t.me/projectXtls/1466
+    https://github.com/XTLS/Xray-core/pull/5625#issuecomment-3824855736
+
+diff --git a/common/protocol/tls/cert/cert.go b/common/protocol/tls/cert/cert.go
+index 00498579..0a581e07 100644
+--- a/common/protocol/tls/cert/cert.go
++++ b/common/protocol/tls/cert/cert.go
+@@ -6,6 +6,7 @@ import (
+ 	"crypto/elliptic"
+ 	"crypto/rand"
+ 	"crypto/rsa"
++	"crypto/sha256"
+ 	"crypto/x509"
+ 	"encoding/asn1"
+ 	"encoding/pem"
+@@ -87,10 +88,10 @@ func Organization(org string) Option {
+ 	}
+ }
+ 
+-func MustGenerate(parent *Certificate, opts ...Option) *Certificate {
++func MustGenerate(parent *Certificate, opts ...Option) (*Certificate, [32]byte) {
+ 	cert, err := Generate(parent, opts...)
+ 	common.Must(err)
+-	return cert
++	return cert, sha256.Sum256(cert.Certificate)
+ }
+ 
+ func publicKey(priv interface{}) interface{} {
+diff --git a/infra/conf/transport_internet.go b/infra/conf/transport_internet.go
+index c23ed8dc..a451a310 100644
+--- a/infra/conf/transport_internet.go
++++ b/infra/conf/transport_internet.go
+@@ -568,7 +568,7 @@ func (c *TLSCertConfig) Build() (*tls.Certificate, error) {
+ }
+ 
+ type TLSConfig struct {
+-	Insecure                bool             `json:"allowInsecure"`
++	AllowInsecure           bool             `json:"allowInsecure"`
+ 	Certs                   []*TLSCertConfig `json:"certificates"`
+ 	ServerName              string           `json:"serverName"`
+ 	ALPN                    *StringList      `json:"alpn"`
+@@ -579,10 +579,10 @@ type TLSConfig struct {
+ 	CipherSuites            string           `json:"cipherSuites"`
+ 	Fingerprint             string           `json:"fingerprint"`
+ 	RejectUnknownSNI        bool             `json:"rejectUnknownSni"`
+-	PinnedPeerCertSha256    string           `json:"pinnedPeerCertSha256"`
+ 	CurvePreferences        *StringList      `json:"curvePreferences"`
+ 	MasterKeyLog            string           `json:"masterKeyLog"`
+-	ServerNameToVerify      string           `json:"serverNameToVerify"`
++	PinnedPeerCertSha256    string           `json:"pinnedPeerCertSha256"`
++	VerifyPeerCertByName    string           `json:"verifyPeerCertByName"`
+ 	VerifyPeerCertInNames   []string         `json:"verifyPeerCertInNames"`
+ 	ECHServerKeys           string           `json:"echServerKeys"`
+ 	ECHConfigList           string           `json:"echConfigList"`
+@@ -602,10 +602,6 @@ func (c *TLSConfig) Build() (proto.Message, error) {
+ 		config.Certificate[idx] = cert
+ 	}
+ 	serverName := c.ServerName
+-	config.AllowInsecure = c.Insecure
+-	if config.AllowInsecure {
+-		errors.PrintDeprecatedFeatureWarning("allowInsecure", "pinnedPeerCertSha256")
+-	}
+ 	if len(c.ServerName) > 0 {
+ 		config.ServerName = serverName
+ 	}
+@@ -632,12 +628,13 @@ func (c *TLSConfig) Build() (proto.Message, error) {
+ 		return nil, errors.New(`unknown "fingerprint": `, config.Fingerprint)
+ 	}
+ 	config.RejectUnknownSni = c.RejectUnknownSNI
++	config.MasterKeyLog = c.MasterKeyLog
+ 
++	if c.AllowInsecure {
++		return nil, errors.PrintRemovedFeatureError(`"allowInsecure"`, `"pinnedPeerCertSha256"`)
++	}
+ 	if c.PinnedPeerCertSha256 != "" {
+-		config.PinnedPeerCertSha256 = [][]byte{}
+-		// Split by tilde separator
+-		hashes := strings.Split(c.PinnedPeerCertSha256, "~")
+-		for _, v := range hashes {
++		for v := range strings.SplitSeq(c.PinnedPeerCertSha256, ",") {
+ 			v = strings.TrimSpace(v)
+ 			if v == "" {
+ 				continue
+@@ -650,12 +647,18 @@ func (c *TLSConfig) Build() (proto.Message, error) {
+ 		}
+ 	}
+ 
+-	config.MasterKeyLog = c.MasterKeyLog
+-
+-	if c.ServerNameToVerify != "" {
+-		return nil, errors.PrintRemovedFeatureError(`"serverNameToVerify"`, `"verifyPeerCertInNames"`)
++	if c.VerifyPeerCertInNames != nil {
++		return nil, errors.PrintRemovedFeatureError(`"verifyPeerCertInNames"`, `"verifyPeerCertByName"`)
++	}
++	if c.VerifyPeerCertByName != "" {
++		for v := range strings.SplitSeq(c.VerifyPeerCertByName, ",") {
++			v = strings.TrimSpace(v)
++			if v == "" {
++				continue
++			}
++			config.VerifyPeerCertByName = append(config.VerifyPeerCertByName, v)
++		}
+ 	}
+-	config.VerifyPeerCertInNames = c.VerifyPeerCertInNames
+ 
+ 	if c.ECHServerKeys != "" {
+ 		EchPrivateKey, err := base64.StdEncoding.DecodeString(c.ECHServerKeys)
+diff --git a/testing/scenarios/tls_test.go b/testing/scenarios/tls_test.go
+index 69b38288..1a2f9661 100644
+--- a/testing/scenarios/tls_test.go
++++ b/testing/scenarios/tls_test.go
+@@ -36,6 +36,8 @@ func TestSimpleTLSConnection(t *testing.T) {
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	userID := protocol.NewID(uuid.New())
+ 	serverPort := tcp.PickPort()
+ 	serverConfig := &core.Config{
+@@ -48,7 +50,7 @@ func TestSimpleTLSConnection(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
++								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+ 							}),
+ 						},
+ 					},
+@@ -104,7 +106,7 @@ func TestSimpleTLSConnection(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
++								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 							}),
+ 						},
+ 					},
+@@ -247,6 +249,8 @@ func TestTLSOverKCP(t *testing.T) {
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	userID := protocol.NewID(uuid.New())
+ 	serverPort := udp.PickPort()
+ 	serverConfig := &core.Config{
+@@ -260,7 +264,7 @@ func TestTLSOverKCP(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
++								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+ 							}),
+ 						},
+ 					},
+@@ -317,7 +321,7 @@ func TestTLSOverKCP(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
++								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 							}),
+ 						},
+ 					},
+@@ -343,6 +347,8 @@ func TestTLSOverWebSocket(t *testing.T) {
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	userID := protocol.NewID(uuid.New())
+ 	serverPort := tcp.PickPort()
+ 	serverConfig := &core.Config{
+@@ -356,7 +362,7 @@ func TestTLSOverWebSocket(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
++								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+ 							}),
+ 						},
+ 					},
+@@ -419,7 +425,7 @@ func TestTLSOverWebSocket(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
++								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 							}),
+ 						},
+ 					},
+@@ -449,6 +455,8 @@ func TestGRPC(t *testing.T) {
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	userID := protocol.NewID(uuid.New())
+ 	serverPort := tcp.PickPort()
+ 	serverConfig := &core.Config{
+@@ -468,7 +476,7 @@ func TestGRPC(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
++								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+ 							}),
+ 						},
+ 					},
+@@ -531,7 +539,7 @@ func TestGRPC(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
++								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 							}),
+ 						},
+ 					},
+@@ -561,6 +569,8 @@ func TestGRPCMultiMode(t *testing.T) {
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	userID := protocol.NewID(uuid.New())
+ 	serverPort := tcp.PickPort()
+ 	serverConfig := &core.Config{
+@@ -580,7 +590,7 @@ func TestGRPCMultiMode(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
++								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+ 							}),
+ 						},
+ 					},
+@@ -643,7 +653,7 @@ func TestGRPCMultiMode(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
++								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 							}),
+ 						},
+ 					},
+@@ -672,7 +682,7 @@ func TestSimpleTLSConnectionPinned(t *testing.T) {
+ 	dest, err := tcpServer.Start()
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+-	certificateDer := cert.MustGenerate(nil)
++	certificateDer, _ := cert.MustGenerate(nil)
+ 	certificate := tls.ParseCertificate(certificateDer)
+ 	certHash := tls.GenerateCertHash(certificateDer.Certificate)
+ 	userID := protocol.NewID(uuid.New())
+@@ -743,7 +753,6 @@ func TestSimpleTLSConnectionPinned(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure:        true,
+ 								PinnedPeerCertSha256: [][]byte{certHash},
+ 							}),
+ 						},
+@@ -769,7 +778,7 @@ func TestSimpleTLSConnectionPinnedWrongCert(t *testing.T) {
+ 	dest, err := tcpServer.Start()
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+-	certificateDer := cert.MustGenerate(nil)
++	certificateDer, _ := cert.MustGenerate(nil)
+ 	certificate := tls.ParseCertificate(certificateDer)
+ 	certHash := tls.GenerateCertHash(certificateDer.Certificate)
+ 	certHash[1] += 1
+@@ -841,7 +850,6 @@ func TestSimpleTLSConnectionPinnedWrongCert(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure:        true,
+ 								PinnedPeerCertSha256: [][]byte{certHash},
+ 							}),
+ 						},
+@@ -867,7 +875,7 @@ func TestUTLSConnectionPinned(t *testing.T) {
+ 	dest, err := tcpServer.Start()
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+-	certificateDer := cert.MustGenerate(nil)
++	certificateDer, _ := cert.MustGenerate(nil)
+ 	certificate := tls.ParseCertificate(certificateDer)
+ 	certHash := tls.GenerateCertHash(certificateDer.Certificate)
+ 	userID := protocol.NewID(uuid.New())
+@@ -939,7 +947,6 @@ func TestUTLSConnectionPinned(t *testing.T) {
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+ 								Fingerprint:          "random",
+-								AllowInsecure:        true,
+ 								PinnedPeerCertSha256: [][]byte{certHash},
+ 							}),
+ 						},
+@@ -965,7 +972,7 @@ func TestUTLSConnectionPinnedWrongCert(t *testing.T) {
+ 	dest, err := tcpServer.Start()
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+-	certificateDer := cert.MustGenerate(nil)
++	certificateDer, _ := cert.MustGenerate(nil)
+ 	certificate := tls.ParseCertificate(certificateDer)
+ 	certHash := tls.GenerateCertHash(certificateDer.Certificate)
+ 	certHash[1] += 1
+@@ -1038,7 +1045,6 @@ func TestUTLSConnectionPinnedWrongCert(t *testing.T) {
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+ 								Fingerprint:          "random",
+-								AllowInsecure:        true,
+ 								PinnedPeerCertSha256: [][]byte{certHash},
+ 							}),
+ 						},
+diff --git a/testing/scenarios/vless_test.go b/testing/scenarios/vless_test.go
+index b699f497..446ce7b9 100644
+--- a/testing/scenarios/vless_test.go
++++ b/testing/scenarios/vless_test.go
+@@ -97,7 +97,7 @@ func TestVless(t *testing.T) {
+ 					Vnext: &protocol.ServerEndpoint{
+ 						Address: net.NewIPOrDomain(net.LocalHostIP),
+ 						Port:    uint32(serverPort),
+-						User:    &protocol.User{
++						User: &protocol.User{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id: userID.String(),
+ 							}),
+@@ -129,6 +129,8 @@ func TestVlessTls(t *testing.T) {
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	userID := protocol.NewID(uuid.New())
+ 	serverPort := tcp.PickPort()
+ 	serverConfig := &core.Config{
+@@ -148,7 +150,7 @@ func TestVlessTls(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
++								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+ 							}),
+ 						},
+ 					},
+@@ -198,7 +200,7 @@ func TestVlessTls(t *testing.T) {
+ 					Vnext: &protocol.ServerEndpoint{
+ 						Address: net.NewIPOrDomain(net.LocalHostIP),
+ 						Port:    uint32(serverPort),
+-						User:    &protocol.User{
++						User: &protocol.User{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id: userID.String(),
+ 							}),
+@@ -217,7 +219,7 @@ func TestVlessTls(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
++								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 							}),
+ 						},
+ 					},
+@@ -247,6 +249,8 @@ func TestVlessXtlsVision(t *testing.T) {
+ 	common.Must(err)
+ 	defer tcpServer.Close()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	userID := protocol.NewID(uuid.New())
+ 	serverPort := tcp.PickPort()
+ 	serverConfig := &core.Config{
+@@ -266,7 +270,7 @@ func TestVlessXtlsVision(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								Certificate: []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil))},
++								Certificate: []*tls.Certificate{tls.ParseCertificate(ct)},
+ 							}),
+ 						},
+ 					},
+@@ -317,7 +321,7 @@ func TestVlessXtlsVision(t *testing.T) {
+ 					Vnext: &protocol.ServerEndpoint{
+ 						Address: net.NewIPOrDomain(net.LocalHostIP),
+ 						Port:    uint32(serverPort),
+-						User:    &protocol.User{
++						User: &protocol.User{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id:   userID.String(),
+ 								Flow: vless.XRV,
+@@ -337,7 +341,7 @@ func TestVlessXtlsVision(t *testing.T) {
+ 						SecurityType: serial.GetMessageType(&tls.Config{}),
+ 						SecuritySettings: []*serial.TypedMessage{
+ 							serial.ToTypedMessage(&tls.Config{
+-								AllowInsecure: true,
++								PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 							}),
+ 						},
+ 					},
+@@ -447,7 +451,7 @@ func TestVlessXtlsVisionReality(t *testing.T) {
+ 					Vnext: &protocol.ServerEndpoint{
+ 						Address: net.NewIPOrDomain(net.LocalHostIP),
+ 						Port:    uint32(serverPort),
+-						User:    &protocol.User{
++						User: &protocol.User{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id:   userID.String(),
+ 								Flow: vless.XRV,
+diff --git a/transport/internet/httpupgrade/httpupgrade_test.go b/transport/internet/httpupgrade/httpupgrade_test.go
+index a8108fe6..c0310b95 100644
+--- a/transport/internet/httpupgrade/httpupgrade_test.go
++++ b/transport/internet/httpupgrade/httpupgrade_test.go
+@@ -182,6 +182,8 @@ func Test_listenHTTPUpgradeAndDial_TLS(t *testing.T) {
+ 
+ 	start := time.Now()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	streamSettings := &internet.MemoryStreamConfig{
+ 		ProtocolName: "httpupgrade",
+ 		ProtocolSettings: &Config{
+@@ -189,8 +191,8 @@ func Test_listenHTTPUpgradeAndDial_TLS(t *testing.T) {
+ 		},
+ 		SecurityType: "tls",
+ 		SecuritySettings: &tls.Config{
+-			AllowInsecure: true,
+-			Certificate:   []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil, cert.CommonName("localhost")))},
++			Certificate:          []*tls.Certificate{tls.ParseCertificate(ct)},
++			PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 		},
+ 	}
+ 	listen, err := ListenHTTPUpgrade(context.Background(), net.LocalHostIP, listenPort, streamSettings, func(conn stat.Connection) {
+diff --git a/transport/internet/splithttp/splithttp_test.go b/transport/internet/splithttp/splithttp_test.go
+index c1bb8580..ab02b619 100644
+--- a/transport/internet/splithttp/splithttp_test.go
++++ b/transport/internet/splithttp/splithttp_test.go
+@@ -132,6 +132,8 @@ func Test_ListenXHAndDial_TLS(t *testing.T) {
+ 
+ 	start := time.Now()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	streamSettings := &internet.MemoryStreamConfig{
+ 		ProtocolName: "splithttp",
+ 		ProtocolSettings: &Config{
+@@ -139,8 +141,8 @@ func Test_ListenXHAndDial_TLS(t *testing.T) {
+ 		},
+ 		SecurityType: "tls",
+ 		SecuritySettings: &tls.Config{
+-			AllowInsecure: true,
+-			Certificate:   []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil, cert.CommonName("localhost")))},
++			Certificate:          []*tls.Certificate{tls.ParseCertificate(ct)},
++			PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 		},
+ 	}
+ 	listen, err := ListenXH(context.Background(), net.LocalHostIP, listenPort, streamSettings, func(conn stat.Connection) {
+@@ -228,6 +230,8 @@ func Test_ListenXHAndDial_QUIC(t *testing.T) {
+ 
+ 	start := time.Now()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	streamSettings := &internet.MemoryStreamConfig{
+ 		ProtocolName: "splithttp",
+ 		ProtocolSettings: &Config{
+@@ -235,9 +239,9 @@ func Test_ListenXHAndDial_QUIC(t *testing.T) {
+ 		},
+ 		SecurityType: "tls",
+ 		SecuritySettings: &tls.Config{
+-			AllowInsecure: true,
+-			Certificate:   []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil, cert.CommonName("localhost")))},
+-			NextProtocol:  []string{"h3"},
++			Certificate:          []*tls.Certificate{tls.ParseCertificate(ct)},
++			PinnedPeerCertSha256: [][]byte{ctHash[:]},
++			NextProtocol:         []string{"h3"},
+ 		},
+ 	}
+ 
+diff --git a/transport/internet/tcp/dialer.go b/transport/internet/tcp/dialer.go
+index 65bacf3a..5b966a00 100644
+--- a/transport/internet/tcp/dialer.go
++++ b/transport/internet/tcp/dialer.go
+@@ -35,23 +35,23 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
+ 		}
+ 
+ 		isFromMitmVerify := false
+-		if r, ok := tlsConfig.Rand.(*tls.RandCarrier); ok && len(r.VerifyPeerCertInNames) > 0 {
+-			for i, name := range r.VerifyPeerCertInNames {
++		if r, ok := tlsConfig.Rand.(*tls.RandCarrier); ok && len(r.VerifyPeerCertByName) > 0 {
++			for i, name := range r.VerifyPeerCertByName {
+ 				if tls.IsFromMitm(name) {
+ 					isFromMitmVerify = true
+-					r.VerifyPeerCertInNames[0], r.VerifyPeerCertInNames[i] = r.VerifyPeerCertInNames[i], r.VerifyPeerCertInNames[0]
+-					r.VerifyPeerCertInNames = r.VerifyPeerCertInNames[1:]
++					r.VerifyPeerCertByName[0], r.VerifyPeerCertByName[i] = r.VerifyPeerCertByName[i], r.VerifyPeerCertByName[0]
++					r.VerifyPeerCertByName = r.VerifyPeerCertByName[1:]
+ 					after := mitmServerName
+ 					for {
+ 						if len(after) > 0 {
+-							r.VerifyPeerCertInNames = append(r.VerifyPeerCertInNames, after)
++							r.VerifyPeerCertByName = append(r.VerifyPeerCertByName, after)
+ 						}
+ 						_, after, _ = strings.Cut(after, ".")
+ 						if !strings.Contains(after, ".") {
+ 							break
+ 						}
+ 					}
+-					slices.Reverse(r.VerifyPeerCertInNames)
++					slices.Reverse(r.VerifyPeerCertByName)
+ 					break
+ 				}
+ 			}
+diff --git a/transport/internet/tls/config.go b/transport/internet/tls/config.go
+index a68ad9a5..1b80f439 100644
+--- a/transport/internet/tls/config.go
++++ b/transport/internet/tls/config.go
+@@ -294,7 +294,7 @@ func (r *RandCarrier) verifyPeerCert(rawCerts [][]byte, verifiedChains [][]*x509
+ 	}
+ 
+ 	// directly return success if pinned cert is leaf
+-	// or replace RootCAs if pinned cert is CA (and can be used in VerifyPeerCertInNames)
++	// or replace RootCAs if pinned cert is CA (and can be used in VerifyPeerCertByName)
+ 	CAs := r.RootCAs
+ 	var verifyResult verifyResult
+ 	var verifiedCert *x509.Certificate
+@@ -302,7 +302,7 @@ func (r *RandCarrier) verifyPeerCert(rawCerts [][]byte, verifiedChains [][]*x509
+ 		verifyResult, verifiedCert = verifyChain(certs, r.PinnedPeerCertSha256)
+ 		switch verifyResult {
+ 		case certNotFound:
+-			return errors.New("peer cert is unrecognized (againsts pinnedPeerCertSha256)")
++			return errors.New("peer cert is unrecognized (against pinnedPeerCertSha256)")
+ 		case foundLeaf:
+ 			return nil
+ 		case foundCA:
+@@ -313,7 +313,7 @@ func (r *RandCarrier) verifyPeerCert(rawCerts [][]byte, verifiedChains [][]*x509
+ 		}
+ 	}
+ 
+-	if r.VerifyPeerCertInNames != nil { // RAW's Dial() may make it empty but not nil
++	if r.VerifyPeerCertByName != nil { // RAW's Dial() may make it empty but not nil
+ 		opts := x509.VerifyOptions{
+ 			Roots:         CAs,
+ 			CurrentTime:   time.Now(),
+@@ -322,15 +322,15 @@ func (r *RandCarrier) verifyPeerCert(rawCerts [][]byte, verifiedChains [][]*x509
+ 		for _, cert := range certs[1:] {
+ 			opts.Intermediates.AddCert(cert)
+ 		}
+-		for _, opts.DNSName = range r.VerifyPeerCertInNames {
++		for _, opts.DNSName = range r.VerifyPeerCertByName {
+ 			if _, err := certs[0].Verify(opts); err == nil {
+ 				return nil
+ 			}
+ 		}
+ 		if verifyResult == foundCA {
+-			errors.New("peer cert is invalid (againsts pinned CA and verifyPeerCertInNames)")
++			errors.New("peer cert is invalid (against pinned CA and verifyPeerCertByName)")
+ 		}
+-		return errors.New("peer cert is invalid (againsts root CAs and verifyPeerCertInNames)")
++		return errors.New("peer cert is invalid (against root CAs and verifyPeerCertByName)")
+ 	}
+ 
+ 	if verifyResult == foundCA { // if found CA, we need to verify here
+@@ -346,17 +346,17 @@ func (r *RandCarrier) verifyPeerCert(rawCerts [][]byte, verifiedChains [][]*x509
+ 		if _, err := certs[0].Verify(opts); err == nil {
+ 			return nil
+ 		}
+-		return errors.New("peer cert is invalid (againsts pinned CA and serverName)")
++		return errors.New("peer cert is invalid (against pinned CA and serverName)")
+ 	}
+ 
+-	return nil // len(r.PinnedPeerCertSha256)==nil && len(r.VerifyPeerCertInNames)==nil
++	return nil // r.PinnedPeerCertSha256==nil && r.verifyPeerCertByName==nil
+ }
+ 
+ type RandCarrier struct {
+-	Config                *tls.Config
+-	RootCAs               *x509.CertPool
+-	VerifyPeerCertInNames []string
+-	PinnedPeerCertSha256  [][]byte
++	Config               *tls.Config
++	RootCAs              *x509.CertPool
++	VerifyPeerCertByName []string
++	PinnedPeerCertSha256 [][]byte
+ }
+ 
+ func (r *RandCarrier) Read(p []byte) (n int, err error) {
+@@ -374,31 +374,28 @@ func (c *Config) GetTLSConfig(opts ...Option) *tls.Config {
+ 		return &tls.Config{
+ 			ClientSessionCache:     globalSessionCache,
+ 			RootCAs:                root,
+-			InsecureSkipVerify:     false,
+-			NextProtos:             nil,
+ 			SessionTicketsDisabled: true,
+ 		}
+ 	}
+ 
+ 	randCarrier := &RandCarrier{
+-		RootCAs:               root,
+-		VerifyPeerCertInNames: slices.Clone(c.VerifyPeerCertInNames),
+-		PinnedPeerCertSha256:  c.PinnedPeerCertSha256,
++		RootCAs:              root,
++		VerifyPeerCertByName: slices.Clone(c.VerifyPeerCertByName),
++		PinnedPeerCertSha256: c.PinnedPeerCertSha256,
+ 	}
+ 	config := &tls.Config{
+ 		Rand:                   randCarrier,
+ 		ClientSessionCache:     globalSessionCache,
+ 		RootCAs:                root,
+-		InsecureSkipVerify:     c.AllowInsecure,
+ 		NextProtos:             slices.Clone(c.NextProtocol),
+ 		SessionTicketsDisabled: !c.EnableSessionResumption,
+ 		VerifyPeerCertificate:  randCarrier.verifyPeerCert,
+ 	}
+ 	randCarrier.Config = config
+-	if len(c.VerifyPeerCertInNames) > 0 {
++	if len(c.VerifyPeerCertByName) > 0 {
+ 		config.InsecureSkipVerify = true
+ 	} else {
+-		randCarrier.VerifyPeerCertInNames = nil
++		randCarrier.VerifyPeerCertByName = nil
+ 	}
+ 	if len(c.PinnedPeerCertSha256) > 0 {
+ 		config.InsecureSkipVerify = true
+diff --git a/transport/internet/tls/config.pb.go b/transport/internet/tls/config.pb.go
+index 2abd0c3e..764ad33d 100644
+--- a/transport/internet/tls/config.pb.go
++++ b/transport/internet/tls/config.pb.go
+@@ -181,8 +181,6 @@ type Config struct {
+ 	sizeCache     protoimpl.SizeCache
+ 	unknownFields protoimpl.UnknownFields
+ 
+-	// Whether or not to allow self-signed certificates.
+-	AllowInsecure bool `protobuf:"varint,1,opt,name=allow_insecure,json=allowInsecure,proto3" json:"allow_insecure,omitempty"`
+ 	// List of certificates to be served on server.
+ 	Certificate []*Certificate `protobuf:"bytes,2,rep,name=certificate,proto3" json:"certificate,omitempty"`
+ 	// Override server name.
+@@ -203,26 +201,15 @@ type Config struct {
+ 	// TLS Client Hello fingerprint (uTLS).
+ 	Fingerprint      string `protobuf:"bytes,11,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
+ 	RejectUnknownSni bool   `protobuf:"varint,12,opt,name=reject_unknown_sni,json=rejectUnknownSni,proto3" json:"reject_unknown_sni,omitempty"`
+-	// @Document Some certificate chain sha256 hashes.
+-	// @Document After normal validation or allow_insecure, if the server's cert chain hash does not match any of these values, the connection will be aborted.
+-	// @Critical
+-	PinnedPeerCertificateChainSha256 [][]byte `protobuf:"bytes,13,rep,name=pinned_peer_certificate_chain_sha256,json=pinnedPeerCertificateChainSha256,proto3" json:"pinned_peer_certificate_chain_sha256,omitempty"`
+-	// @Document Some certificate public key sha256 hashes.
+-	// @Document After normal validation (required), if one of certs in verified chain matches one of these values, the connection will be eventually accepted.
+-	// @Critical
+-	PinnedPeerCertificatePublicKeySha256 [][]byte `protobuf:"bytes,14,rep,name=pinned_peer_certificate_public_key_sha256,json=pinnedPeerCertificatePublicKeySha256,proto3" json:"pinned_peer_certificate_public_key_sha256,omitempty"`
+-	MasterKeyLog                         string   `protobuf:"bytes,15,opt,name=master_key_log,json=masterKeyLog,proto3" json:"master_key_log,omitempty"`
++	MasterKeyLog     string `protobuf:"bytes,15,opt,name=master_key_log,json=masterKeyLog,proto3" json:"master_key_log,omitempty"`
+ 	// Lists of string as CurvePreferences values.
+-	CurvePreferences []string `protobuf:"bytes,16,rep,name=curve_preferences,json=curvePreferences,proto3" json:"curve_preferences,omitempty"`
+-	// @Document Replaces server_name to verify the peer cert.
+-	// @Document After allow_insecure (automatically), if the server's cert can't be verified by any of these names, pinned_peer_certificate_chain_sha256 will be tried.
+-	// @Critical
+-	VerifyPeerCertInNames []string               `protobuf:"bytes,17,rep,name=verify_peer_cert_in_names,json=verifyPeerCertInNames,proto3" json:"verify_peer_cert_in_names,omitempty"`
+-	EchServerKeys         []byte                 `protobuf:"bytes,18,opt,name=ech_server_keys,json=echServerKeys,proto3" json:"ech_server_keys,omitempty"`
+-	EchConfigList         string                 `protobuf:"bytes,19,opt,name=ech_config_list,json=echConfigList,proto3" json:"ech_config_list,omitempty"`
+-	EchForceQuery         string                 `protobuf:"bytes,20,opt,name=ech_force_query,json=echForceQuery,proto3" json:"ech_force_query,omitempty"`
+-	EchSocketSettings     *internet.SocketConfig `protobuf:"bytes,21,opt,name=ech_socket_settings,json=echSocketSettings,proto3" json:"ech_socket_settings,omitempty"`
+-	PinnedPeerCertSha256  [][]byte               `protobuf:"bytes,22,rep,name=pinned_peer_cert_sha256,json=pinnedPeerCertSha256,proto3" json:"pinned_peer_cert_sha256,omitempty"`
++	CurvePreferences     []string               `protobuf:"bytes,16,rep,name=curve_preferences,json=curvePreferences,proto3" json:"curve_preferences,omitempty"`
++	VerifyPeerCertByName []string               `protobuf:"bytes,17,rep,name=verify_peer_cert_by_name,json=verifyPeerCertByName,proto3" json:"verify_peer_cert_by_name,omitempty"`
++	EchServerKeys        []byte                 `protobuf:"bytes,18,opt,name=ech_server_keys,json=echServerKeys,proto3" json:"ech_server_keys,omitempty"`
++	EchConfigList        string                 `protobuf:"bytes,19,opt,name=ech_config_list,json=echConfigList,proto3" json:"ech_config_list,omitempty"`
++	EchForceQuery        string                 `protobuf:"bytes,20,opt,name=ech_force_query,json=echForceQuery,proto3" json:"ech_force_query,omitempty"`
++	EchSocketSettings    *internet.SocketConfig `protobuf:"bytes,21,opt,name=ech_socket_settings,json=echSocketSettings,proto3" json:"ech_socket_settings,omitempty"`
++	PinnedPeerCertSha256 [][]byte               `protobuf:"bytes,22,rep,name=pinned_peer_cert_sha256,json=pinnedPeerCertSha256,proto3" json:"pinned_peer_cert_sha256,omitempty"`
+ }
+ 
+ func (x *Config) Reset() {
+@@ -255,13 +242,6 @@ func (*Config) Descriptor() ([]byte, []int) {
+ 	return file_transport_internet_tls_config_proto_rawDescGZIP(), []int{1}
+ }
+ 
+-func (x *Config) GetAllowInsecure() bool {
+-	if x != nil {
+-		return x.AllowInsecure
+-	}
+-	return false
+-}
+-
+ func (x *Config) GetCertificate() []*Certificate {
+ 	if x != nil {
+ 		return x.Certificate
+@@ -332,20 +312,6 @@ func (x *Config) GetRejectUnknownSni() bool {
+ 	return false
+ }
+ 
+-func (x *Config) GetPinnedPeerCertificateChainSha256() [][]byte {
+-	if x != nil {
+-		return x.PinnedPeerCertificateChainSha256
+-	}
+-	return nil
+-}
+-
+-func (x *Config) GetPinnedPeerCertificatePublicKeySha256() [][]byte {
+-	if x != nil {
+-		return x.PinnedPeerCertificatePublicKeySha256
+-	}
+-	return nil
+-}
+-
+ func (x *Config) GetMasterKeyLog() string {
+ 	if x != nil {
+ 		return x.MasterKeyLog
+@@ -360,9 +326,9 @@ func (x *Config) GetCurvePreferences() []string {
+ 	return nil
+ }
+ 
+-func (x *Config) GetVerifyPeerCertInNames() []string {
++func (x *Config) GetVerifyPeerCertByName() []string {
+ 	if x != nil {
+-		return x.VerifyPeerCertInNames
++		return x.VerifyPeerCertByName
+ 	}
+ 	return nil
+ }
+@@ -435,81 +401,68 @@ var file_transport_internet_tls_config_proto_rawDesc = []byte{
+ 	0x45, 0x4e, 0x43, 0x49, 0x50, 0x48, 0x45, 0x52, 0x4d, 0x45, 0x4e, 0x54, 0x10, 0x00, 0x12, 0x14,
+ 	0x0a, 0x10, 0x41, 0x55, 0x54, 0x48, 0x4f, 0x52, 0x49, 0x54, 0x59, 0x5f, 0x56, 0x45, 0x52, 0x49,
+ 	0x46, 0x59, 0x10, 0x01, 0x12, 0x13, 0x0a, 0x0f, 0x41, 0x55, 0x54, 0x48, 0x4f, 0x52, 0x49, 0x54,
+-	0x59, 0x5f, 0x49, 0x53, 0x53, 0x55, 0x45, 0x10, 0x02, 0x22, 0xa0, 0x08, 0x0a, 0x06, 0x43, 0x6f,
+-	0x6e, 0x66, 0x69, 0x67, 0x12, 0x25, 0x0a, 0x0e, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x5f, 0x69, 0x6e,
+-	0x73, 0x65, 0x63, 0x75, 0x72, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0d, 0x61, 0x6c,
+-	0x6c, 0x6f, 0x77, 0x49, 0x6e, 0x73, 0x65, 0x63, 0x75, 0x72, 0x65, 0x12, 0x4a, 0x0a, 0x0b, 0x63,
+-	0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b,
+-	0x32, 0x28, 0x2e, 0x78, 0x72, 0x61, 0x79, 0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72,
+-	0x74, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x74, 0x6c, 0x73, 0x2e, 0x43,
+-	0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65, 0x52, 0x0b, 0x63, 0x65, 0x72, 0x74,
+-	0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65, 0x12, 0x1f, 0x0a, 0x0b, 0x73, 0x65, 0x72, 0x76, 0x65,
+-	0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x73, 0x65,
+-	0x72, 0x76, 0x65, 0x72, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x6e, 0x65, 0x78, 0x74,
+-	0x5f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x18, 0x04, 0x20, 0x03, 0x28, 0x09, 0x52,
+-	0x0c, 0x6e, 0x65, 0x78, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x12, 0x3a, 0x0a,
+-	0x19, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x5f, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x5f,
+-	0x72, 0x65, 0x73, 0x75, 0x6d, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x05, 0x20, 0x01, 0x28, 0x08,
+-	0x52, 0x17, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x52,
+-	0x65, 0x73, 0x75, 0x6d, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2e, 0x0a, 0x13, 0x64, 0x69, 0x73,
+-	0x61, 0x62, 0x6c, 0x65, 0x5f, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x5f, 0x72, 0x6f, 0x6f, 0x74,
+-	0x18, 0x06, 0x20, 0x01, 0x28, 0x08, 0x52, 0x11, 0x64, 0x69, 0x73, 0x61, 0x62, 0x6c, 0x65, 0x53,
+-	0x79, 0x73, 0x74, 0x65, 0x6d, 0x52, 0x6f, 0x6f, 0x74, 0x12, 0x1f, 0x0a, 0x0b, 0x6d, 0x69, 0x6e,
+-	0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x07, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a,
+-	0x6d, 0x69, 0x6e, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x1f, 0x0a, 0x0b, 0x6d, 0x61,
+-	0x78, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x08, 0x20, 0x01, 0x28, 0x09, 0x52,
+-	0x0a, 0x6d, 0x61, 0x78, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x23, 0x0a, 0x0d, 0x63,
+-	0x69, 0x70, 0x68, 0x65, 0x72, 0x5f, 0x73, 0x75, 0x69, 0x74, 0x65, 0x73, 0x18, 0x09, 0x20, 0x01,
+-	0x28, 0x09, 0x52, 0x0c, 0x63, 0x69, 0x70, 0x68, 0x65, 0x72, 0x53, 0x75, 0x69, 0x74, 0x65, 0x73,
+-	0x12, 0x20, 0x0a, 0x0b, 0x66, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x18,
+-	0x0b, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x66, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69,
+-	0x6e, 0x74, 0x12, 0x2c, 0x0a, 0x12, 0x72, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x5f, 0x75, 0x6e, 0x6b,
+-	0x6e, 0x6f, 0x77, 0x6e, 0x5f, 0x73, 0x6e, 0x69, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x08, 0x52, 0x10,
+-	0x72, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x55, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x53, 0x6e, 0x69,
+-	0x12, 0x4e, 0x0a, 0x24, 0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x5f, 0x70, 0x65, 0x65, 0x72, 0x5f,
+-	0x63, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65, 0x5f, 0x63, 0x68, 0x61, 0x69,
+-	0x6e, 0x5f, 0x73, 0x68, 0x61, 0x32, 0x35, 0x36, 0x18, 0x0d, 0x20, 0x03, 0x28, 0x0c, 0x52, 0x20,
+-	0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x50, 0x65, 0x65, 0x72, 0x43, 0x65, 0x72, 0x74, 0x69, 0x66,
+-	0x69, 0x63, 0x61, 0x74, 0x65, 0x43, 0x68, 0x61, 0x69, 0x6e, 0x53, 0x68, 0x61, 0x32, 0x35, 0x36,
+-	0x12, 0x57, 0x0a, 0x29, 0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x5f, 0x70, 0x65, 0x65, 0x72, 0x5f,
+-	0x63, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65, 0x5f, 0x70, 0x75, 0x62, 0x6c,
+-	0x69, 0x63, 0x5f, 0x6b, 0x65, 0x79, 0x5f, 0x73, 0x68, 0x61, 0x32, 0x35, 0x36, 0x18, 0x0e, 0x20,
+-	0x03, 0x28, 0x0c, 0x52, 0x24, 0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x50, 0x65, 0x65, 0x72, 0x43,
+-	0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65, 0x50, 0x75, 0x62, 0x6c, 0x69, 0x63,
+-	0x4b, 0x65, 0x79, 0x53, 0x68, 0x61, 0x32, 0x35, 0x36, 0x12, 0x24, 0x0a, 0x0e, 0x6d, 0x61, 0x73,
++	0x59, 0x5f, 0x49, 0x53, 0x53, 0x55, 0x45, 0x10, 0x02, 0x22, 0xce, 0x06, 0x0a, 0x06, 0x43, 0x6f,
++	0x6e, 0x66, 0x69, 0x67, 0x12, 0x4a, 0x0a, 0x0b, 0x63, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63,
++	0x61, 0x74, 0x65, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x28, 0x2e, 0x78, 0x72, 0x61, 0x79,
++	0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72,
++	0x6e, 0x65, 0x74, 0x2e, 0x74, 0x6c, 0x73, 0x2e, 0x43, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63,
++	0x61, 0x74, 0x65, 0x52, 0x0b, 0x63, 0x65, 0x72, 0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65,
++	0x12, 0x1f, 0x0a, 0x0b, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18,
++	0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x4e, 0x61, 0x6d,
++	0x65, 0x12, 0x23, 0x0a, 0x0d, 0x6e, 0x65, 0x78, 0x74, 0x5f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63,
++	0x6f, 0x6c, 0x18, 0x04, 0x20, 0x03, 0x28, 0x09, 0x52, 0x0c, 0x6e, 0x65, 0x78, 0x74, 0x50, 0x72,
++	0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x12, 0x3a, 0x0a, 0x19, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65,
++	0x5f, 0x73, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x5f, 0x72, 0x65, 0x73, 0x75, 0x6d, 0x70, 0x74,
++	0x69, 0x6f, 0x6e, 0x18, 0x05, 0x20, 0x01, 0x28, 0x08, 0x52, 0x17, 0x65, 0x6e, 0x61, 0x62, 0x6c,
++	0x65, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x75, 0x6d, 0x70, 0x74, 0x69,
++	0x6f, 0x6e, 0x12, 0x2e, 0x0a, 0x13, 0x64, 0x69, 0x73, 0x61, 0x62, 0x6c, 0x65, 0x5f, 0x73, 0x79,
++	0x73, 0x74, 0x65, 0x6d, 0x5f, 0x72, 0x6f, 0x6f, 0x74, 0x18, 0x06, 0x20, 0x01, 0x28, 0x08, 0x52,
++	0x11, 0x64, 0x69, 0x73, 0x61, 0x62, 0x6c, 0x65, 0x53, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x52, 0x6f,
++	0x6f, 0x74, 0x12, 0x1f, 0x0a, 0x0b, 0x6d, 0x69, 0x6e, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f,
++	0x6e, 0x18, 0x07, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x6d, 0x69, 0x6e, 0x56, 0x65, 0x72, 0x73,
++	0x69, 0x6f, 0x6e, 0x12, 0x1f, 0x0a, 0x0b, 0x6d, 0x61, 0x78, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69,
++	0x6f, 0x6e, 0x18, 0x08, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x6d, 0x61, 0x78, 0x56, 0x65, 0x72,
++	0x73, 0x69, 0x6f, 0x6e, 0x12, 0x23, 0x0a, 0x0d, 0x63, 0x69, 0x70, 0x68, 0x65, 0x72, 0x5f, 0x73,
++	0x75, 0x69, 0x74, 0x65, 0x73, 0x18, 0x09, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x63, 0x69, 0x70,
++	0x68, 0x65, 0x72, 0x53, 0x75, 0x69, 0x74, 0x65, 0x73, 0x12, 0x20, 0x0a, 0x0b, 0x66, 0x69, 0x6e,
++	0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b,
++	0x66, 0x69, 0x6e, 0x67, 0x65, 0x72, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x12, 0x2c, 0x0a, 0x12, 0x72,
++	0x65, 0x6a, 0x65, 0x63, 0x74, 0x5f, 0x75, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x5f, 0x73, 0x6e,
++	0x69, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x08, 0x52, 0x10, 0x72, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x55,
++	0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x53, 0x6e, 0x69, 0x12, 0x24, 0x0a, 0x0e, 0x6d, 0x61, 0x73,
+ 	0x74, 0x65, 0x72, 0x5f, 0x6b, 0x65, 0x79, 0x5f, 0x6c, 0x6f, 0x67, 0x18, 0x0f, 0x20, 0x01, 0x28,
+ 	0x09, 0x52, 0x0c, 0x6d, 0x61, 0x73, 0x74, 0x65, 0x72, 0x4b, 0x65, 0x79, 0x4c, 0x6f, 0x67, 0x12,
+ 	0x2b, 0x0a, 0x11, 0x63, 0x75, 0x72, 0x76, 0x65, 0x5f, 0x70, 0x72, 0x65, 0x66, 0x65, 0x72, 0x65,
+ 	0x6e, 0x63, 0x65, 0x73, 0x18, 0x10, 0x20, 0x03, 0x28, 0x09, 0x52, 0x10, 0x63, 0x75, 0x72, 0x76,
+-	0x65, 0x50, 0x72, 0x65, 0x66, 0x65, 0x72, 0x65, 0x6e, 0x63, 0x65, 0x73, 0x12, 0x38, 0x0a, 0x19,
++	0x65, 0x50, 0x72, 0x65, 0x66, 0x65, 0x72, 0x65, 0x6e, 0x63, 0x65, 0x73, 0x12, 0x36, 0x0a, 0x18,
+ 	0x76, 0x65, 0x72, 0x69, 0x66, 0x79, 0x5f, 0x70, 0x65, 0x65, 0x72, 0x5f, 0x63, 0x65, 0x72, 0x74,
+-	0x5f, 0x69, 0x6e, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x73, 0x18, 0x11, 0x20, 0x03, 0x28, 0x09, 0x52,
+-	0x15, 0x76, 0x65, 0x72, 0x69, 0x66, 0x79, 0x50, 0x65, 0x65, 0x72, 0x43, 0x65, 0x72, 0x74, 0x49,
+-	0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x73, 0x12, 0x26, 0x0a, 0x0f, 0x65, 0x63, 0x68, 0x5f, 0x73, 0x65,
+-	0x72, 0x76, 0x65, 0x72, 0x5f, 0x6b, 0x65, 0x79, 0x73, 0x18, 0x12, 0x20, 0x01, 0x28, 0x0c, 0x52,
+-	0x0d, 0x65, 0x63, 0x68, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x4b, 0x65, 0x79, 0x73, 0x12, 0x26,
+-	0x0a, 0x0f, 0x65, 0x63, 0x68, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x5f, 0x6c, 0x69, 0x73,
+-	0x74, 0x18, 0x13, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x65, 0x63, 0x68, 0x43, 0x6f, 0x6e, 0x66,
+-	0x69, 0x67, 0x4c, 0x69, 0x73, 0x74, 0x12, 0x26, 0x0a, 0x0f, 0x65, 0x63, 0x68, 0x5f, 0x66, 0x6f,
+-	0x72, 0x63, 0x65, 0x5f, 0x71, 0x75, 0x65, 0x72, 0x79, 0x18, 0x14, 0x20, 0x01, 0x28, 0x09, 0x52,
+-	0x0d, 0x65, 0x63, 0x68, 0x46, 0x6f, 0x72, 0x63, 0x65, 0x51, 0x75, 0x65, 0x72, 0x79, 0x12, 0x55,
+-	0x0a, 0x13, 0x65, 0x63, 0x68, 0x5f, 0x73, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x5f, 0x73, 0x65, 0x74,
+-	0x74, 0x69, 0x6e, 0x67, 0x73, 0x18, 0x15, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x78, 0x72,
+-	0x61, 0x79, 0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2e, 0x69, 0x6e, 0x74,
+-	0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x53, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x43, 0x6f, 0x6e, 0x66,
+-	0x69, 0x67, 0x52, 0x11, 0x65, 0x63, 0x68, 0x53, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x53, 0x65, 0x74,
+-	0x74, 0x69, 0x6e, 0x67, 0x73, 0x12, 0x35, 0x0a, 0x17, 0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x5f,
+-	0x70, 0x65, 0x65, 0x72, 0x5f, 0x63, 0x65, 0x72, 0x74, 0x5f, 0x73, 0x68, 0x61, 0x32, 0x35, 0x36,
+-	0x18, 0x16, 0x20, 0x03, 0x28, 0x0c, 0x52, 0x14, 0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x50, 0x65,
+-	0x65, 0x72, 0x43, 0x65, 0x72, 0x74, 0x53, 0x68, 0x61, 0x32, 0x35, 0x36, 0x42, 0x73, 0x0a, 0x1f,
+-	0x63, 0x6f, 0x6d, 0x2e, 0x78, 0x72, 0x61, 0x79, 0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f,
+-	0x72, 0x74, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x74, 0x6c, 0x73, 0x50,
+-	0x01, 0x5a, 0x30, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x78, 0x74,
+-	0x6c, 0x73, 0x2f, 0x78, 0x72, 0x61, 0x79, 0x2d, 0x63, 0x6f, 0x72, 0x65, 0x2f, 0x74, 0x72, 0x61,
+-	0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2f,
+-	0x74, 0x6c, 0x73, 0xaa, 0x02, 0x1b, 0x58, 0x72, 0x61, 0x79, 0x2e, 0x54, 0x72, 0x61, 0x6e, 0x73,
+-	0x70, 0x6f, 0x72, 0x74, 0x2e, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x54, 0x6c,
+-	0x73, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
++	0x5f, 0x62, 0x79, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x11, 0x20, 0x03, 0x28, 0x09, 0x52, 0x14,
++	0x76, 0x65, 0x72, 0x69, 0x66, 0x79, 0x50, 0x65, 0x65, 0x72, 0x43, 0x65, 0x72, 0x74, 0x42, 0x79,
++	0x4e, 0x61, 0x6d, 0x65, 0x12, 0x26, 0x0a, 0x0f, 0x65, 0x63, 0x68, 0x5f, 0x73, 0x65, 0x72, 0x76,
++	0x65, 0x72, 0x5f, 0x6b, 0x65, 0x79, 0x73, 0x18, 0x12, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x0d, 0x65,
++	0x63, 0x68, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x4b, 0x65, 0x79, 0x73, 0x12, 0x26, 0x0a, 0x0f,
++	0x65, 0x63, 0x68, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x5f, 0x6c, 0x69, 0x73, 0x74, 0x18,
++	0x13, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x65, 0x63, 0x68, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67,
++	0x4c, 0x69, 0x73, 0x74, 0x12, 0x26, 0x0a, 0x0f, 0x65, 0x63, 0x68, 0x5f, 0x66, 0x6f, 0x72, 0x63,
++	0x65, 0x5f, 0x71, 0x75, 0x65, 0x72, 0x79, 0x18, 0x14, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x65,
++	0x63, 0x68, 0x46, 0x6f, 0x72, 0x63, 0x65, 0x51, 0x75, 0x65, 0x72, 0x79, 0x12, 0x55, 0x0a, 0x13,
++	0x65, 0x63, 0x68, 0x5f, 0x73, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x5f, 0x73, 0x65, 0x74, 0x74, 0x69,
++	0x6e, 0x67, 0x73, 0x18, 0x15, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x78, 0x72, 0x61, 0x79,
++	0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72,
++	0x6e, 0x65, 0x74, 0x2e, 0x53, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67,
++	0x52, 0x11, 0x65, 0x63, 0x68, 0x53, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x53, 0x65, 0x74, 0x74, 0x69,
++	0x6e, 0x67, 0x73, 0x12, 0x35, 0x0a, 0x17, 0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x5f, 0x70, 0x65,
++	0x65, 0x72, 0x5f, 0x63, 0x65, 0x72, 0x74, 0x5f, 0x73, 0x68, 0x61, 0x32, 0x35, 0x36, 0x18, 0x16,
++	0x20, 0x03, 0x28, 0x0c, 0x52, 0x14, 0x70, 0x69, 0x6e, 0x6e, 0x65, 0x64, 0x50, 0x65, 0x65, 0x72,
++	0x43, 0x65, 0x72, 0x74, 0x53, 0x68, 0x61, 0x32, 0x35, 0x36, 0x42, 0x73, 0x0a, 0x1f, 0x63, 0x6f,
++	0x6d, 0x2e, 0x78, 0x72, 0x61, 0x79, 0x2e, 0x74, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f, 0x72, 0x74,
++	0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x74, 0x6c, 0x73, 0x50, 0x01, 0x5a,
++	0x30, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x78, 0x74, 0x6c, 0x73,
++	0x2f, 0x78, 0x72, 0x61, 0x79, 0x2d, 0x63, 0x6f, 0x72, 0x65, 0x2f, 0x74, 0x72, 0x61, 0x6e, 0x73,
++	0x70, 0x6f, 0x72, 0x74, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2f, 0x74, 0x6c,
++	0x73, 0xaa, 0x02, 0x1b, 0x58, 0x72, 0x61, 0x79, 0x2e, 0x54, 0x72, 0x61, 0x6e, 0x73, 0x70, 0x6f,
++	0x72, 0x74, 0x2e, 0x49, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x65, 0x74, 0x2e, 0x54, 0x6c, 0x73, 0x62,
++	0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+ }
+ 
+ var (
+diff --git a/transport/internet/tls/config.proto b/transport/internet/tls/config.proto
+index cb7a225e..225206b2 100644
+--- a/transport/internet/tls/config.proto
++++ b/transport/internet/tls/config.proto
+@@ -38,9 +38,6 @@ message Certificate {
+ }
+ 
+ message Config {
+-  // Whether or not to allow self-signed certificates.
+-  bool allow_insecure = 1;
+-
+   // List of certificates to be served on server.
+   repeated Certificate certificate = 2;
+ 
+@@ -70,29 +67,13 @@ message Config {
+   string fingerprint = 11;
+ 
+   bool reject_unknown_sni = 12;
+-  
+-  /* @Document Some certificate chain sha256 hashes.
+-     @Document After normal validation or allow_insecure, if the server's cert chain hash does not match any of these values, the connection will be aborted.
+-     @Critical
+-  */
+-  repeated bytes pinned_peer_certificate_chain_sha256 = 13;
+-
+-  /* @Document Some certificate public key sha256 hashes.
+-     @Document After normal validation (required), if one of certs in verified chain matches one of these values, the connection will be eventually accepted.
+-     @Critical
+-  */
+-  repeated bytes pinned_peer_certificate_public_key_sha256 = 14;
+ 
+   string master_key_log = 15;
+ 
+   // Lists of string as CurvePreferences values.
+   repeated string curve_preferences = 16;
+ 
+-  /* @Document Replaces server_name to verify the peer cert.
+-     @Document After allow_insecure (automatically), if the server's cert can't be verified by any of these names, pinned_peer_certificate_chain_sha256 will be tried.
+-     @Critical
+-  */
+-  repeated string verify_peer_cert_in_names = 17;
++  repeated string verify_peer_cert_by_name = 17;
+ 
+   bytes ech_server_keys = 18;
+ 
+diff --git a/transport/internet/tls/config_test.go b/transport/internet/tls/config_test.go
+index bc23add3..7265ed27 100644
+--- a/transport/internet/tls/config_test.go
++++ b/transport/internet/tls/config_test.go
+@@ -12,7 +12,8 @@ import (
+ )
+ 
+ func TestCertificateIssuing(t *testing.T) {
+-	certificate := ParseCertificate(cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign)))
++	ct, _ := cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign))
++	certificate := ParseCertificate(ct)
+ 	certificate.Usage = Certificate_AUTHORITY_ISSUE
+ 
+ 	c := &Config{
+@@ -35,8 +36,8 @@ func TestCertificateIssuing(t *testing.T) {
+ }
+ 
+ func TestExpiredCertificate(t *testing.T) {
+-	caCert := cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign))
+-	expiredCert := cert.MustGenerate(caCert, cert.NotAfter(time.Now().Add(time.Minute*-2)), cert.CommonName("www.example.com"), cert.DNSNames("www.example.com"))
++	caCert, _ := cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign))
++	expiredCert, _ := cert.MustGenerate(caCert, cert.NotAfter(time.Now().Add(time.Minute*-2)), cert.CommonName("www.example.com"), cert.DNSNames("www.example.com"))
+ 
+ 	certificate := ParseCertificate(caCert)
+ 	certificate.Usage = Certificate_AUTHORITY_ISSUE
+@@ -73,7 +74,8 @@ func TestInsecureCertificates(t *testing.T) {
+ }
+ 
+ func BenchmarkCertificateIssuing(b *testing.B) {
+-	certificate := ParseCertificate(cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign)))
++	ct, _ := cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign))
++	certificate := ParseCertificate(ct)
+ 	certificate.Usage = Certificate_AUTHORITY_ISSUE
+ 
+ 	c := &Config{
+diff --git a/transport/internet/tls/pin_test.go b/transport/internet/tls/pin_test.go
+index a13b12da..50568df6 100644
+--- a/transport/internet/tls/pin_test.go
++++ b/transport/internet/tls/pin_test.go
+@@ -100,16 +100,14 @@ uI6HqHFD3iEct8fBkYfQiwH2e1eu9OwgujiWHsutyK8VvzVB3/YnhQ/TzciRjPqz
+ }
+ 
+ func TestVerifyPeerLeafCert(t *testing.T) {
+-	leafCert := cert.MustGenerate(nil, cert.DNSNames("example.com"))
++	leafCert, leafHash := cert.MustGenerate(nil, cert.DNSNames("example.com"))
+ 	leaf := common.Must2(x509.ParseCertificate(leafCert.Certificate))
+ 
+-	caHash := GenerateCertHash(leafCert.Certificate)
+-
+ 	r := &RandCarrier{
+ 		Config: &tls.Config{
+ 			ServerName: "example.com",
+ 		},
+-		PinnedPeerCertSha256: [][]byte{caHash},
++		PinnedPeerCertSha256: [][]byte{leafHash[:]},
+ 	}
+ 
+ 	rawCerts := [][]byte{leaf.Raw}
+@@ -127,19 +125,17 @@ func TestVerifyPeerLeafCert(t *testing.T) {
+ }
+ 
+ func TestVerifyPeerCACert(t *testing.T) {
+-	caCert := cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign))
++	caCert, caHash := cert.MustGenerate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageCertSign))
+ 	ca := common.Must2(x509.ParseCertificate(caCert.Certificate))
+ 
+-	leafCert := cert.MustGenerate(caCert, cert.DNSNames("example.com"))
++	leafCert, _ := cert.MustGenerate(caCert, cert.DNSNames("example.com"))
+ 	leaf := common.Must2(x509.ParseCertificate(leafCert.Certificate))
+ 
+-	caHash := GenerateCertHash(ca)
+-
+ 	r := &RandCarrier{
+ 		Config: &tls.Config{
+ 			ServerName: "example.com",
+ 		},
+-		PinnedPeerCertSha256: [][]byte{caHash},
++		PinnedPeerCertSha256: [][]byte{caHash[:]},
+ 	}
+ 
+ 	rawCerts := [][]byte{leaf.Raw, ca.Raw}
+diff --git a/transport/internet/websocket/ws_test.go b/transport/internet/websocket/ws_test.go
+index a9a2b885..aab28af6 100644
+--- a/transport/internet/websocket/ws_test.go
++++ b/transport/internet/websocket/ws_test.go
+@@ -123,6 +123,8 @@ func Test_listenWSAndDial_TLS(t *testing.T) {
+ 
+ 	start := time.Now()
+ 
++	ct, ctHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
++
+ 	streamSettings := &internet.MemoryStreamConfig{
+ 		ProtocolName: "websocket",
+ 		ProtocolSettings: &Config{
+@@ -130,8 +132,8 @@ func Test_listenWSAndDial_TLS(t *testing.T) {
+ 		},
+ 		SecurityType: "tls",
+ 		SecuritySettings: &tls.Config{
+-			AllowInsecure: true,
+-			Certificate:   []*tls.Certificate{tls.ParseCertificate(cert.MustGenerate(nil, cert.CommonName("localhost")))},
++			Certificate:          []*tls.Certificate{tls.ParseCertificate(ct)},
++			PinnedPeerCertSha256: [][]byte{ctHash[:]},
+ 		},
+ 	}
+ 	listen, err := ListenWS(context.Background(), net.LocalHostIP, listenPort, streamSettings, func(conn stat.Connection) {

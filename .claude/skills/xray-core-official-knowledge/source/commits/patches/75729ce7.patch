@@ -1,0 +1,41 @@
+commit 75729ce77902d3da2b95c53bb3c87676a6482dff
+Author:     RPRX <63339210+RPRX@users.noreply.github.com>
+AuthorDate: Sat Oct 5 00:13:46 2024 +0000
+Commit:     GitHub <noreply@github.com>
+CommitDate: Sat Oct 5 00:13:46 2024 +0000
+
+    REALITY config: Add `target` as an alias of `dest`
+    
+    https://t.me/projectXtls/364
+
+diff --git a/infra/conf/transport_internet.go b/infra/conf/transport_internet.go
+index 19a0f7a5..838438a4 100644
+--- a/infra/conf/transport_internet.go
++++ b/infra/conf/transport_internet.go
+@@ -474,6 +474,7 @@ type REALITYConfig struct {
+ 	Show         bool            `json:"show"`
+ 	MasterKeyLog string          `json:"masterKeyLog"`
+ 	Dest         json.RawMessage `json:"dest"`
++	Target       json.RawMessage `json:"target"`
+ 	Type         string          `json:"type"`
+ 	Xver         uint64          `json:"xver"`
+ 	ServerNames  []string        `json:"serverNames"`
+@@ -495,6 +496,9 @@ func (c *REALITYConfig) Build() (proto.Message, error) {
+ 	config.Show = c.Show
+ 	config.MasterKeyLog = c.MasterKeyLog
+ 	var err error
++	if c.Dest == nil {
++		c.Dest = c.Target
++	}
+ 	if c.Dest != nil {
+ 		var i uint16
+ 		var s string
+@@ -522,7 +526,7 @@ func (c *REALITYConfig) Build() (proto.Message, error) {
+ 			}
+ 		}
+ 		if c.Type == "" {
+-			return nil, errors.New(`please fill in a valid value for "dest"`)
++			return nil, errors.New(`please fill in a valid value for "dest" or "target"`)
+ 		}
+ 		if c.Xver > 2 {
+ 			return nil, errors.New(`invalid PROXY protocol version, "xver" only accepts 0, 1, 2`)

@@ -1,129 +1,87 @@
 name: TLSConfig
 component: transport/internet/tls
-version_introduced: v1.0.0
-version_deprecated: ""
-version_removed: ""
-status: stable
-server_client: depends
+verified_version: v26.9.9
+track: prerelease
+coverage: Selected fields, not a complete schema
 source:
-  docs: https://xtls.github.io/config/transport.html#tlssettings
-  code: infra/conf/transport_security.go
-  commit: current
+  docs: https://xtls.github.io/config/transports/tls.html
+  commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+  local:
+  - source/config/transport_security.go
+  - source/transport/internet/tls/config.go
+  - source/transport/internet/tls/tls.go
+  - source/transport/internet/tls/ech.go
+notes: 稳定版应改查 source/stable/v26.3.27/；官网 allowInsecure 旧说明的冲突见 references/source-conflicts.md。
 fields:
-  - name: certificates
-    type: []TLSCertConfig
-    required: false
-    server_client: server-only (mostly)
-    notes: >
-      证书列表。服务端必须提供；客户端在验证服务端证书时不需要。
-      包含 certificateFile/certificate, keyFile/key, usage, ocspStapling, oneTimeLoading, buildChain。
-
-  - name: serverName
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: >
-      服务端：留空则使用入站地址；
-      客户端：用于验证服务端证书和发送 SNI。
-
-  - name: alpn
-    type: []string
-    required: false
-    server_client: server-and-client
-    notes: >
-      应用层协议协商列表。若包含 fromMitm 相关值，则只能有一个元素。
-
-  - name: enableSessionResumption
-    type: bool
-    required: false
-    default: false
-    server_client: server-and-client
-    notes: 是否启用会话恢复。
-
-  - name: disableSystemRoot
-    type: bool
-    required: false
-    default: false
-    server_client: client-only (typical)
-    notes: 禁用系统根证书。
-
-  - name: minVersion / maxVersion
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: TLS 最低/最高版本，如 "1.2", "1.3"。
-
-  - name: cipherSuites
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: 密码套件列表。
-
-  - name: fingerprint
-    type: string
-    required: false
-    server_client: client-only (typical)
-    notes: >
-      TLS 指纹。客户端使用。不能为 "unsafe"。
-      服务端也可设置但通常不需要。
-
-  - name: rejectUnknownSni
-    type: bool
-    required: false
-    default: false
-    server_client: server-only
-    notes: 服务端拒绝未知 SNI 连接。
-
-  - name: curvePreferences
-    type: []string
-    required: false
-    server_client: server-and-client
-    notes: 椭圆曲线偏好列表。
-
-  - name: masterKeyLog
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: NSS 密钥日志文件路径（调试用）。
-
-  - name: allowInsecure
-    type: bool
-    required: false
-    server_client: client-only
-    notes: >
-      **已移除**。源码中若设为 true 会报错并提示使用
-      pinnedPeerCertSha256(pcs) 或 verifyPeerCertByName(vcn)。
-
-  - name: pinnedPeerCertSha256
-    type: string (逗号分隔的 SHA256 十六进制)
-    required: false
-    server_client: client-only
-    notes: >
-      固定对端证书 SHA256。可用于替代 allowInsecure。
-      每项长度必须为 32 字节（64 十六进制字符）。
-
-  - name: verifyPeerCertByName
-    type: string (逗号分隔)
-    required: false
-    server_client: client-only
-    notes: 按名称验证对端证书。
-
-  - name: echServerKeys
-    type: string (base64.StdEncoding)
-    required: false
-    server_client: server-only
-    notes: ECH 服务端私钥。
-
-  - name: echConfigList
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: ECH 配置列表。
-
-  - name: echSockopt
-    type: SocketConfig
-    required: false
-    server_client: server-only
-    notes: ECH 套接字选项。
-
+- name: certificates
+  type: array of TLSCertConfig
+  server_client: server-and-client
+  notes: 服务端证书及可选客户端信任/签发材料；用途由 usage 等字段决定，不概括为仅服务端。
+- name: serverName
+  type: string
+  server_client: client-only
+  notes: 用于客户端证书名称验证与 SNI；未指定时结合出站目标等运行上下文推导，不是服务端监听地址的默认值。
+- name: alpn
+  type: array of string
+  server_client: server-and-client
+  notes: ALPN 列表；指纹与传输可能影响实际生效范围，见 GetTLSConfig / UClient。
+- name: enableSessionResumption
+  type: boolean
+  server_client: server-and-client
+  notes: 会话恢复开关。
+  default: false
+- name: disableSystemRoot
+  type: boolean
+  server_client: client-only
+  notes: 禁用系统 CA 根证书。
+  default: false
+- name: minVersion / maxVersion
+  type: string
+  server_client: server-and-client
+  notes: TLS 版本边界；指纹模式下需核对哪些选项实际应用。
+- name: cipherSuites / curvePreferences
+  type: string / array of string
+  server_client: server-and-client
+  notes: 密码套件及曲线配置；不把原生 TLS 参数的效果直接套用到所有 uTLS 指纹。
+- name: fingerprint
+  type: string
+  server_client: client-only
+  notes: 空字符串通过 GetFingerprint 选择 Chrome；unsafe 使用原生 Go TLS。REALITY 不允许 unsafe/hellogolang。
+  default: chrome
+- name: rejectUnknownSni
+  type: boolean
+  server_client: server-only
+  notes: 对无法匹配配置证书的 SNI 拒绝连接。
+  default: false
+- name: allowInsecure
+  type: boolean
+  server_client: client-only
+  notes: true 在 Build 阶段返回已移除错误；false 被接受但不启用跳过证书校验。字段仍存在不能证明功能仍可用。
+  default: false
+  status: removed-when-true
+  first_rejected_release: v26.1.31
+- name: pinnedPeerCertSha256
+  type: comma-separated SHA-256 hex string
+  server_client: client-only
+  notes: 固定叶证书或 CA 的 SHA-256；允许冒号分隔的 OpenSSL 格式，空白项跳过。CA 固定仍涉及证书名称验证。
+- name: verifyPeerCertByName
+  type: comma-separated string
+  server_client: client-only
+  notes: 替换证书验证所用名称；不等于禁用验证，也不直接等同于发送的 SNI。
+- name: echServerKeys
+  type: base64 string
+  server_client: server-only
+  notes: ECH 服务端密钥。
+- name: echConfigList
+  type: string
+  server_client: client-only
+  notes: ECH 客户端配置或查询来源；v26.5.3 起配置 ECH 后强制使用，不能引用旧 echForceQuery 默认值。
+- name: echSockopt
+  type: SocketConfig
+  server_client: client-only
+  notes: 获取 ECH 配置时的查询连接选项；见 ApplyECH 与 ECH 查询逻辑，不是服务端监听配置。
+- name: masterKeyLog
+  type: string
+  server_client: server-and-client
+  notes: 调试用 NSS 密钥日志路径。
 confidence: source-confirmed

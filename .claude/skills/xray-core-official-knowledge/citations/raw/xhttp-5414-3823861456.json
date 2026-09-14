@@ -1,0 +1,7 @@
+{
+  "html_url": "https://github.com/XTLS/Xray-core/pull/5414#issuecomment-3823861456",
+  "created_at": "2026-01-30T13:49:24Z",
+  "updated_at": "2026-01-30T13:49:24Z",
+  "body": "上下行分离的配置是无关的，请不要改变这个定义，比如你上行过某个 CDN、下行过另一个 CDN，但它们适用不同的 XHTTP 变体",
+  "author": "RPRX"
+}

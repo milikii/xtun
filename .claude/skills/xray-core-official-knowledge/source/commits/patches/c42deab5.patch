@@ -1,0 +1,449 @@
+commit c42deab55cc0dcc73eca5487206446fb76c5f79e
+Author:     Meow <197331664+Meo597@users.noreply.github.com>
+AuthorDate: Thu May 7 19:10:48 2026 +0800
+Commit:     RPRX <63339210+RPRX@users.noreply.github.com>
+CommitDate: Thu May 7 14:13:05 2026 +0000
+
+    Config: Rename inbounds' `clients`/`accounts` to `users` (#6083)
+    
+    https://github.com/XTLS/Xray-core/pull/6055#issuecomment-4363896372
+    https://github.com/XTLS/Xray-core/pull/6082#issuecomment-4384523482
+
+diff --git a/infra/conf/http.go b/infra/conf/http.go
+index 7da8f3f5..449b2bf2 100644
+--- a/infra/conf/http.go
++++ b/infra/conf/http.go
+@@ -23,6 +23,7 @@ func (v *HTTPAccount) Build() *http.Account {
+ }
+ 
+ type HTTPServerConfig struct {
++	Users       []*HTTPAccount `json:"users"`
+ 	Accounts    []*HTTPAccount `json:"accounts"`
+ 	Transparent bool           `json:"allowTransparent"`
+ 	UserLevel   uint32         `json:"userLevel"`
+@@ -34,9 +35,13 @@ func (c *HTTPServerConfig) Build() (proto.Message, error) {
+ 		UserLevel:        c.UserLevel,
+ 	}
+ 
+-	if len(c.Accounts) > 0 {
++	if c.Accounts != nil {
++		c.Users = c.Accounts
++	}
++	// TODO: PB
++	if len(c.Users) > 0 {
+ 		config.Accounts = make(map[string]string)
+-		for _, account := range c.Accounts {
++		for _, account := range c.Users {
+ 			config.Accounts[account.Username] = account.Password
+ 		}
+ 	}
+@@ -51,8 +56,8 @@ type HTTPRemoteConfig struct {
+ }
+ 
+ type HTTPClientConfig struct {
+-	Address  *Address          	 `json:"address"`
+-	Port     uint16            	 `json:"port"`
++	Address  *Address            `json:"address"`
++	Port     uint16              `json:"port"`
+ 	Level    uint32              `json:"level"`
+ 	Email    string              `json:"email"`
+ 	Username string              `json:"user"`
+diff --git a/infra/conf/hysteria.go b/infra/conf/hysteria.go
+index 2c2bede5..744338d7 100644
+--- a/infra/conf/hysteria.go
++++ b/infra/conf/hysteria.go
+@@ -39,12 +39,16 @@ type HysteriaUserConfig struct {
+ 
+ type HysteriaServerConfig struct {
+ 	Version int32                 `json:"version"`
+-	Users   []*HysteriaUserConfig `json:"clients"`
++	Users   []*HysteriaUserConfig `json:"users"`
++	Clients []*HysteriaUserConfig `json:"clients"`
+ }
+ 
+ func (c *HysteriaServerConfig) Build() (proto.Message, error) {
+ 	config := new(hysteria.ServerConfig)
+ 
++	if c.Clients != nil {
++		c.Users = c.Clients
++	}
+ 	if len(c.Users) > 0 {
+ 		config.Users = make([]*protocol.User, len(c.Users))
+ 		processUser := func(idx int) error {
+diff --git a/infra/conf/shadowsocks.go b/infra/conf/shadowsocks.go
+index 3b542303..30a7fd65 100644
+--- a/infra/conf/shadowsocks.go
++++ b/infra/conf/shadowsocks.go
+@@ -45,13 +45,18 @@ type ShadowsocksServerConfig struct {
+ 	Password    string                   `json:"password"`
+ 	Level       byte                     `json:"level"`
+ 	Email       string                   `json:"email"`
+-	Users       []*ShadowsocksUserConfig `json:"clients"`
++	Users       []*ShadowsocksUserConfig `json:"users"`
++	Clients     []*ShadowsocksUserConfig `json:"clients"`
+ 	NetworkList *NetworkList             `json:"network"`
+ }
+ 
+ func (v *ShadowsocksServerConfig) Build() (proto.Message, error) {
+ 	errors.PrintNonRemovalDeprecatedFeatureWarning("Shadowsocks (with no Forward Secrecy, etc.)", "VLESS Encryption")
+ 
++	if v.Clients != nil {
++		v.Users = v.Clients
++	}
++
+ 	if C.Contains(shadowaead_2022.List, v.Cipher) {
+ 		return buildShadowsocks2022(v)
+ 	}
+diff --git a/infra/conf/socks.go b/infra/conf/socks.go
+index d0d68d81..828584f1 100644
+--- a/infra/conf/socks.go
++++ b/infra/conf/socks.go
+@@ -29,6 +29,7 @@ const (
+ 
+ type SocksServerConfig struct {
+ 	AuthMethod string          `json:"auth"`
++	Users      []*SocksAccount `json:"users"`
+ 	Accounts   []*SocksAccount `json:"accounts"`
+ 	UDP        bool            `json:"udp"`
+ 	Host       *Address        `json:"ip"`
+@@ -47,9 +48,13 @@ func (v *SocksServerConfig) Build() (proto.Message, error) {
+ 		config.AuthType = socks.AuthType_NO_AUTH
+ 	}
+ 
+-	if len(v.Accounts) > 0 {
+-		config.Accounts = make(map[string]string, len(v.Accounts))
+-		for _, account := range v.Accounts {
++	if v.Accounts != nil {
++		v.Users = v.Accounts
++	}
++	// TODO: PB
++	if len(v.Users) > 0 {
++		config.Accounts = make(map[string]string, len(v.Users))
++		for _, account := range v.Users {
+ 			config.Accounts[account.Username] = account.Password
+ 		}
+ 	}
+diff --git a/infra/conf/trojan.go b/infra/conf/trojan.go
+index 97f1b79f..08481372 100644
+--- a/infra/conf/trojan.go
++++ b/infra/conf/trojan.go
+@@ -112,6 +112,7 @@ type TrojanUserConfig struct {
+ 
+ // TrojanServerConfig is Inbound configuration
+ type TrojanServerConfig struct {
++	Users     []*TrojanUserConfig      `json:"users"`
+ 	Clients   []*TrojanUserConfig      `json:"clients"`
+ 	Fallbacks []*TrojanInboundFallback `json:"fallbacks"`
+ }
+@@ -120,12 +121,16 @@ type TrojanServerConfig struct {
+ func (c *TrojanServerConfig) Build() (proto.Message, error) {
+ 	errors.PrintNonRemovalDeprecatedFeatureWarning("Trojan (with no Flow, etc.)", "VLESS with Flow & Seed")
+ 
++	if c.Clients != nil {
++		c.Users = c.Clients
++	}
++
+ 	config := &trojan.ServerConfig{
+-		Users: make([]*protocol.User, len(c.Clients)),
++		Users: make([]*protocol.User, len(c.Users)),
+ 	}
+ 
+ 	processClient := func(idx int) error {
+-		rawUser := c.Clients[idx]
++		rawUser := c.Users[idx]
+ 		if rawUser.Flow != "" {
+ 			return errors.PrintRemovedFeatureError(`Flow for Trojan`, ``)
+ 		}
+@@ -139,7 +144,7 @@ func (c *TrojanServerConfig) Build() (proto.Message, error) {
+ 		}
+ 		return nil
+ 	}
+-	if err := task.ParallelForN(len(c.Clients), processClient); err != nil {
++	if err := task.ParallelForN(len(c.Users), processClient); err != nil {
+ 		return nil, err
+ 	}
+ 
+diff --git a/infra/conf/vless.go b/infra/conf/vless.go
+index 669be539..1c8ababf 100644
+--- a/infra/conf/vless.go
++++ b/infra/conf/vless.go
+@@ -31,6 +31,7 @@ type VLessInboundFallback struct {
+ }
+ 
+ type VLessInboundConfig struct {
++	Users      []json.RawMessage       `json:"users"`
+ 	Clients    []json.RawMessage       `json:"clients"`
+ 	Decryption string                  `json:"decryption"`
+ 	Fallbacks  []*VLessInboundFallback `json:"fallbacks"`
+@@ -41,21 +42,25 @@ type VLessInboundConfig struct {
+ // Build implements Buildable
+ func (c *VLessInboundConfig) Build() (proto.Message, error) {
+ 	config := new(inbound.Config)
+-	config.Clients = make([]*protocol.User, len(c.Clients))
++
++	if c.Clients != nil {
++		c.Users = c.Clients
++	}
++	config.Users = make([]*protocol.User, len(c.Users))
+ 	switch c.Flow {
+ 	case vless.XRV, "":
+ 	default:
+ 		return nil, errors.New(`VLESS "settings.flow" doesn't support "` + c.Flow + `" in this version`)
+ 	}
+ 	processClient := func(idx int) error {
+-		rawUser := c.Clients[idx]
++		rawUser := c.Users[idx]
+ 		user := new(protocol.User)
+ 		if err := json.Unmarshal(rawUser, user); err != nil {
+-			return errors.New(`VLESS clients: invalid user`).Base(err)
++			return errors.New(`VLESS users: invalid user`).Base(err)
+ 		}
+ 		account := new(vless.Account)
+ 		if err := json.Unmarshal(rawUser, account); err != nil {
+-			return errors.New(`VLESS clients: invalid user`).Base(err)
++			return errors.New(`VLESS users: invalid user`).Base(err)
+ 		}
+ 
+ 		u, err := uuid.ParseString(account.Id)
+@@ -69,7 +74,7 @@ func (c *VLessInboundConfig) Build() (proto.Message, error) {
+ 			account.Flow = c.Flow
+ 		case vless.XRV:
+ 		default:
+-			return errors.New(`VLESS clients: "flow" doesn't support "` + account.Flow + `" in this version`)
++			return errors.New(`VLESS users: "flow" doesn't support "` + account.Flow + `" in this version`)
+ 		}
+ 
+ 		if len(account.Testseed) < 4 {
+@@ -77,24 +82,24 @@ func (c *VLessInboundConfig) Build() (proto.Message, error) {
+ 		}
+ 
+ 		if account.Encryption != "" {
+-			return errors.New(`VLESS clients: "encryption" should not be in inbound settings`)
++			return errors.New(`VLESS users: "encryption" should not be in inbound settings`)
+ 		}
+ 
+ 		if account.Reverse != nil {
+ 			if account.Reverse.Tag == "" {
+-				return errors.New(`VLESS clients: "tag" can't be empty for "reverse"`)
++				return errors.New(`VLESS users: "tag" can't be empty for "reverse"`)
+ 			}
+ 			if account.Reverse.Sniffing != nil { // may not be reached: error json unmarshal
+-				return errors.New(`VLESS clients: inbound's "reverse" can't have "sniffing"`)
++				return errors.New(`VLESS users: inbound's "reverse" can't have "sniffing"`)
+ 			}
+ 		}
+ 
+ 		user.Account = serial.ToTypedMessage(account)
+-		config.Clients[idx] = user
++		config.Users[idx] = user
+ 		return nil
+ 	}
+ 
+-	if err := task.ParallelForN(len(c.Clients), processClient); err != nil {
++	if err := task.ParallelForN(len(c.Users), processClient); err != nil {
+ 		return nil, err
+ 	}
+ 
+diff --git a/infra/conf/vless_test.go b/infra/conf/vless_test.go
+index 2fd97915..8c85fdeb 100644
+--- a/infra/conf/vless_test.go
++++ b/infra/conf/vless_test.go
+@@ -119,7 +119,7 @@ func TestVLessInbound(t *testing.T) {
+ 			}`,
+ 			Parser: loadJSON(creator),
+ 			Output: &inbound.Config{
+-				Clients: []*protocol.User{
++				Users: []*protocol.User{
+ 					{
+ 						Account: serial.ToTypedMessage(&vless.Account{
+ 							Id:   "27848739-7e62-4138-9fd3-098a63964b6b",
+diff --git a/infra/conf/vmess.go b/infra/conf/vmess.go
+index cb982254..a73883b6 100644
+--- a/infra/conf/vmess.go
++++ b/infra/conf/vmess.go
+@@ -59,7 +59,8 @@ func (c *VMessDefaultConfig) Build() *inbound.DefaultConfig {
+ }
+ 
+ type VMessInboundConfig struct {
+-	Users    []json.RawMessage   `json:"clients"`
++	Users    []json.RawMessage   `json:"users"`
++	Clients  []json.RawMessage   `json:"clients"`
+ 	Defaults *VMessDefaultConfig `json:"default"`
+ }
+ 
+@@ -73,6 +74,9 @@ func (c *VMessInboundConfig) Build() (proto.Message, error) {
+ 		config.Default = c.Defaults.Build()
+ 	}
+ 
++	if c.Clients != nil {
++		c.Users = c.Clients
++	}
+ 	config.User = make([]*protocol.User, len(c.Users))
+ 	processUser := func(idx int) error {
+ 		rawData := c.Users[idx]
+diff --git a/main/commands/all/api/inbound_user_add.go b/main/commands/all/api/inbound_user_add.go
+index 9f9acf7e..759bf596 100644
+--- a/main/commands/all/api/inbound_user_add.go
++++ b/main/commands/all/api/inbound_user_add.go
+@@ -80,7 +80,7 @@ func extractInboundUsers(inb *core.InboundHandlerConfig) []*protocol.User {
+ 	case *vmessin.Config:
+ 		return ty.User
+ 	case *vlessin.Config:
+-		return ty.Clients
++		return ty.Users
+ 	case *trojan.ServerConfig:
+ 		return ty.Users
+ 	case *shadowsocks.ServerConfig:
+diff --git a/proxy/vless/inbound/config.pb.go b/proxy/vless/inbound/config.pb.go
+index e65249a3..6dce5f73 100644
+--- a/proxy/vless/inbound/config.pb.go
++++ b/proxy/vless/inbound/config.pb.go
+@@ -108,7 +108,7 @@ func (x *Fallback) GetXver() uint64 {
+ 
+ type Config struct {
+ 	state         protoimpl.MessageState `protogen:"open.v1"`
+-	Clients       []*protocol.User       `protobuf:"bytes,1,rep,name=clients,proto3" json:"clients,omitempty"`
++	Users         []*protocol.User       `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+ 	Fallbacks     []*Fallback            `protobuf:"bytes,2,rep,name=fallbacks,proto3" json:"fallbacks,omitempty"`
+ 	Decryption    string                 `protobuf:"bytes,3,opt,name=decryption,proto3" json:"decryption,omitempty"`
+ 	XorMode       uint32                 `protobuf:"varint,4,opt,name=xorMode,proto3" json:"xorMode,omitempty"`
+@@ -149,9 +149,9 @@ func (*Config) Descriptor() ([]byte, []int) {
+ 	return file_proxy_vless_inbound_config_proto_rawDescGZIP(), []int{1}
+ }
+ 
+-func (x *Config) GetClients() []*protocol.User {
++func (x *Config) GetUsers() []*protocol.User {
+ 	if x != nil {
+-		return x.Clients
++		return x.Users
+ 	}
+ 	return nil
+ }
+@@ -209,9 +209,9 @@ const file_proxy_vless_inbound_config_proto_rawDesc = "" +
+ 	"\x04path\x18\x03 \x01(\tR\x04path\x12\x12\n" +
+ 	"\x04type\x18\x04 \x01(\tR\x04type\x12\x12\n" +
+ 	"\x04dest\x18\x05 \x01(\tR\x04dest\x12\x12\n" +
+-	"\x04xver\x18\x06 \x01(\x04R\x04xver\"\x96\x02\n" +
+-	"\x06Config\x124\n" +
+-	"\aclients\x18\x01 \x03(\v2\x1a.xray.common.protocol.UserR\aclients\x12@\n" +
++	"\x04xver\x18\x06 \x01(\x04R\x04xver\"\x92\x02\n" +
++	"\x06Config\x120\n" +
++	"\x05users\x18\x01 \x03(\v2\x1a.xray.common.protocol.UserR\x05users\x12@\n" +
+ 	"\tfallbacks\x18\x02 \x03(\v2\".xray.proxy.vless.inbound.FallbackR\tfallbacks\x12\x1e\n" +
+ 	"\n" +
+ 	"decryption\x18\x03 \x01(\tR\n" +
+@@ -242,7 +242,7 @@ var file_proxy_vless_inbound_config_proto_goTypes = []any{
+ 	(*protocol.User)(nil), // 2: xray.common.protocol.User
+ }
+ var file_proxy_vless_inbound_config_proto_depIdxs = []int32{
+-	2, // 0: xray.proxy.vless.inbound.Config.clients:type_name -> xray.common.protocol.User
++	2, // 0: xray.proxy.vless.inbound.Config.users:type_name -> xray.common.protocol.User
+ 	0, // 1: xray.proxy.vless.inbound.Config.fallbacks:type_name -> xray.proxy.vless.inbound.Fallback
+ 	2, // [2:2] is the sub-list for method output_type
+ 	2, // [2:2] is the sub-list for method input_type
+diff --git a/proxy/vless/inbound/config.proto b/proxy/vless/inbound/config.proto
+index 5a7e3e19..a0e72b55 100644
+--- a/proxy/vless/inbound/config.proto
++++ b/proxy/vless/inbound/config.proto
+@@ -18,7 +18,7 @@ message Fallback {
+ }
+ 
+ message Config {
+-  repeated xray.common.protocol.User clients = 1;
++  repeated xray.common.protocol.User users = 1;
+   repeated Fallback fallbacks = 2;
+ 
+   string decryption = 3;
+diff --git a/proxy/vless/inbound/inbound.go b/proxy/vless/inbound/inbound.go
+index 02dc947d..0301fb78 100644
+--- a/proxy/vless/inbound/inbound.go
++++ b/proxy/vless/inbound/inbound.go
+@@ -58,7 +58,7 @@ func init() {
+ 		c := config.(*Config)
+ 
+ 		validator := new(vless.MemoryValidator)
+-		for _, user := range c.Clients {
++		for _, user := range c.Users {
+ 			u, err := user.ToMemoryUser()
+ 			if err != nil {
+ 				return nil, errors.New("failed to get VLESS user").Base(err).AtError()
+diff --git a/testing/scenarios/vless_test.go b/testing/scenarios/vless_test.go
+index b644881c..08cb6384 100644
+--- a/testing/scenarios/vless_test.go
++++ b/testing/scenarios/vless_test.go
+@@ -54,7 +54,7 @@ func TestVless(t *testing.T) {
+ 					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+ 				}),
+ 				ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-					Clients: []*protocol.User{
++					Users: []*protocol.User{
+ 						{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id: userID.String(),
+@@ -159,7 +159,7 @@ func TestVlessTls(t *testing.T) {
+ 					},
+ 				}),
+ 				ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-					Clients: []*protocol.User{
++					Users: []*protocol.User{
+ 						{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id: userID.String(),
+@@ -281,7 +281,7 @@ func TestVlessXtlsVision(t *testing.T) {
+ 					},
+ 				}),
+ 				ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-					Clients: []*protocol.User{
++					Users: []*protocol.User{
+ 						{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id:   userID.String(),
+@@ -413,7 +413,7 @@ func TestVlessXtlsVisionReality(t *testing.T) {
+ 					},
+ 				}),
+ 				ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-					Clients: []*protocol.User{
++					Users: []*protocol.User{
+ 						{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id:   userID.String(),
+@@ -553,7 +553,7 @@ func TestVlessRealityFingerprints(t *testing.T) {
+ 						},
+ 					}),
+ 					ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-						Clients: []*protocol.User{
++						Users: []*protocol.User{
+ 							{
+ 								Account: serial.ToTypedMessage(&vless.Account{
+ 									Id: userID.String(),
+diff --git a/transport/internet/finalmask/sudoku/sudoku_test.go b/transport/internet/finalmask/sudoku/sudoku_test.go
+index 16fe0a3d..1861606e 100644
+--- a/transport/internet/finalmask/sudoku/sudoku_test.go
++++ b/transport/internet/finalmask/sudoku/sudoku_test.go
+@@ -267,7 +267,7 @@ func runVLESSRealityCase(t *testing.T, bin string, mode trafficMode, payloadSize
+ 					},
+ 				}),
+ 				ProxySettings: serial.ToTypedMessage(&vin.Config{
+-					Clients: []*protocol.User{
++					Users: []*protocol.User{
+ 						{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id: userID.String(),
+@@ -501,7 +501,7 @@ func runVLesseEncCase(t *testing.T, bin string, mode trafficMode, payloadSize in
+ 					},
+ 				}),
+ 				ProxySettings: serial.ToTypedMessage(&vin.Config{
+-					Clients: []*protocol.User{
++					Users: []*protocol.User{
+ 						{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id: userID.String(),
+@@ -605,7 +605,7 @@ func runVLESSXHTTPCase(t *testing.T, bin string, mode trafficMode, payloadSize i
+ 					},
+ 				}),
+ 				ProxySettings: serial.ToTypedMessage(&vin.Config{
+-					Clients: []*protocol.User{
++					Users: []*protocol.User{
+ 						{
+ 							Account: serial.ToTypedMessage(&vless.Account{
+ 								Id: userID.String(),

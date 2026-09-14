@@ -1,177 +1,139 @@
-name: SplitHTTPConfig (XHTTP)
+name: SplitHTTPConfig
 component: transport/internet/splithttp
-version_introduced: unknown (SplitHTTP added mid-2024, several minor releases after REALITY's v1.8.0; exact release not verifiable from this snapshot)
-version_deprecated: ""
-version_removed: ""
-status: stable
-server_client: server-and-client
+verified_version: v26.9.9
+track: prerelease
+coverage: Selected fields, not a complete schema
 source:
-  docs: https://xtls.github.io/config/transports/splithttp.html
-  code: infra/conf/transport_method.go, transport/internet/splithttp/*.go
-  commit: current
-notes: >
-  SplitHTTP 是 XHTTP 传输的实现。源码中 mode 默认 "auto"。
-  服务端和客户端很多字段含义不同或仅一方有效。
-
+  docs: https://github.com/XTLS/Xray-core/discussions/4113
+  commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+  local:
+  - source/config/transport_method.go
+  - source/config/common.go
+  - source/transport/internet/splithttp/config.go
+  - source/transport/internet/splithttp/xpadding.go
+  - source/transport/internet/splithttp/dialer.go
+  - source/transport/internet/splithttp/hub.go
+notes: Int32Range 的 JSON 形式是数字或 from-to 字符串，不是 {from,to}。作者早期文章的 XMUX 默认值不适用于所有版本。
 fields:
-  - name: host
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: >
-      HTTP Host 头。客户端优先级：host > serverName > address。
-      不能放在 headers 中重复设置。
-
-  - name: path
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: HTTP 请求路径。
-
-  - name: mode
-    type: string
-    required: false
-    default: "auto"
-    server_client: server-and-client
-    notes: >
-      传输模式。可选值：auto, packet-up, stream-up, stream-one。
-      "auto" 为默认值。
-
-  - name: headers
-    type: map[string]string
-    required: false
-    server_client: server-and-client
-    notes: >
-      额外 HTTP 头。不能包含 "host"（大小写不敏感），否则报错。
-
-  - name: xPaddingBytes
-    type: Int32Range {From, To}
-    required: false
-    default: {From:1, To:1} (implicit via protobuf, but source enforces >0 if set)
-    server_client: server-and-client
-    notes: >
-      X-Padding 头字节数范围。若设置则 From/To 必须 >0，不能禁用。
-      若未设置，则由底层决定。
-
-  - name: xPaddingObfsMode
-    type: bool
-    required: false
-    server_client: server-and-client
-    notes: X-Padding 混淆模式。
-
-  - name: xPaddingKey
-    type: string
-    required: false
-    default: "x_padding"
-    server_client: server-and-client
-    notes: X-Padding 密钥。
-
-  - name: xPaddingHeader
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: X-Padding 使用的 header 名称。
-
-  - name: xPaddingPlacement
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: X-Padding 放置位置。
-
-  - name: xPaddingMethod
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: X-Padding 方法。
-
-  - name: uplinkHTTPMethod
-    type: string
-    required: false
-    server_client: server-and-client
-    notes: 上行 HTTP 方法。
-
-  - name: sessionIDPlacement / sessionIDKey / sessionIDTable / sessionIDLength
-    type: varies
-    required: false
-    server_client: server-and-client
-    notes: 会话 ID 相关设置。
-
-  - name: seqPlacement / seqKey
-    type: varies
-    required: false
-    server_client: server-and-client
-    notes: 序列号相关设置。
-
-  - name: uplinkDataPlacement / uplinkDataKey / uplinkChunkSize
-    type: varies
-    required: false
-    server_client: server-and-client
-    notes: 上行数据相关设置。
-
-  - name: noGRPCHeader
-    type: bool
-    required: false
-    server_client: server-and-client
-    notes: 禁用 gRPC 头。
-
-  - name: noSSEHeader
-    type: bool
-    required: false
-    server_client: server-and-client
-    notes: 禁用 SSE 头。
-
-  - name: scMaxEachPostBytes
-    type: Int32Range
-    required: false
-    server_client: server-and-client
-    notes: >
-      Stream-Up 模式下每个 POST 的最大字节数。
-
-  - name: scMinPostsIntervalMs
-    type: Int32Range
-    required: false
-    server_client: server-and-client
-    notes: >
-      Stream-Up 模式下 POST 之间的最小间隔（毫秒）。
-
-  - name: scMaxBufferedPosts
-    type: int64
-    required: false
-    server_client: server-and-client
-    notes: 服务端最大缓冲 POST 数。
-
-  - name: scStreamUpServerSecs
-    type: Int32Range
-    required: false
-    server_client: server-and-client
-    notes: Stream-Up 服务端超时秒数。
-
-  - name: serverMaxHeaderBytes
-    type: int32
-    required: false
-    server_client: server-only
-    notes: 服务端最大 header 字节数。
-
-  - name: xmux
-    type: XmuxConfig
-    required: false
-    server_client: client-only (mostly)
-    notes: >
-      连接复用配置。包含 maxConcurrency, maxConnections,
-      cMaxReuseTimes, hMaxRequestTimes, hMaxReusableSecs, hKeepAlivePeriod。
-
-  - name: downloadSettings
-    type: StreamConfig
-    required: false
-    server_client: client-only
-    notes: 独立的下载连接配置。
-
-  - name: extra
-    type: json.RawMessage
-    required: false
-    server_client: server-and-client
-    notes: >
-      额外配置。若提供，会反序列化并覆盖除 Host/Path/Mode 外的字段。
-      用于高级自定义。
-
+- name: host
+  type: string
+  server_client: server-and-client
+  notes: 客户端优先级 host > serverName > address；不得放进 headers 重复设置。
+- name: path
+  type: string
+  server_client: server-and-client
+  notes: HTTP 路径；运行层会补前导 /，当 sessionID 或 seq 放在 path 时还会补尾部 /。
+- name: mode
+  type: string
+  server_client: server-and-client
+  notes: auto 由运行上下文选择模式；服务端和客户端职责不同。
+  default: auto
+  values:
+  - auto
+  - packet-up
+  - stream-up
+  - stream-one
+- name: headers
+  type: map of string to string
+  server_client: server-and-client
+  notes: 额外 HTTP 头；大小写不敏感地禁止 host。
+- name: xPaddingBytes
+  type: Int32Range
+  server_client: server-and-client
+  notes: 实际归一化默认值由 xpadding.go 提供。JSON 使用整数或范围字符串；非零配置的端点必须为正，0/未填回到默认而非禁用。
+  default: 100-1000
+- name: xPaddingObfsMode
+  type: boolean
+  server_client: server-and-client
+  notes: 启用可配置 padding 混淆；两端格式与上下行独立配置必须按实现匹配。
+  default: false
+- name: xPaddingKey
+  type: string
+  server_client: server-and-client
+  notes: Padding 参数名称，不是密码学密钥。
+  default: x_padding
+- name: xPaddingHeader
+  type: string
+  server_client: server-and-client
+  notes: Padding 头部配置名称。
+  default: X-Padding
+- name: xPaddingPlacement
+  type: string
+  server_client: server-and-client
+  notes: 可选 cookie/header/query/queryInHeader。
+  default: queryInHeader
+- name: xPaddingMethod
+  type: string
+  server_client: server-and-client
+  notes: 可选 repeat-x/tokenish。
+  default: repeat-x
+- name: uplinkHTTPMethod
+  type: string
+  server_client: server-and-client
+  notes: 转为大写；GET 仅允许显式 packet-up。
+  default: POST
+- name: sessionIDPlacement / seqPlacement
+  type: string
+  server_client: server-and-client
+  notes: 可选 path/cookie/header/query；非 path 的默认 key 按放置位置生成。
+  default: path
+- name: sessionIDKey / seqKey / sessionIDTable / sessionIDLength
+  type: string / Int32Range
+  server_client: server-and-client
+  notes: 自定义会话与序号编码；字符表必须 ASCII，空间大小与长度接受校验。
+- name: uplinkDataPlacement / uplinkDataKey / uplinkChunkSize
+  type: string / Int32Range
+  server_client: server-and-client
+  notes: 数据放置 cookie/header 仅允许显式 packet-up；实际分块大小由运行归一化函数处理。
+- name: noGRPCHeader
+  type: boolean
+  server_client: client-only
+  default: false
+  notes: 客户端 stream-up/stream-one 请求的 gRPC 伪装头开关。
+- name: noSSEHeader
+  type: boolean
+  server_client: server-only
+  default: false
+  notes: 服务端流式响应的 SSE Content-Type 伪装头开关。
+- name: scMaxEachPostBytes
+  type: Int32Range
+  server_client: server-and-client
+  notes: packet-up 分包上行单个 POST 数据上限；客户端选取范围值，服务端以范围上界拒绝超限数据。
+  default: 1000000
+- name: scMinPostsIntervalMs
+  type: Int32Range milliseconds
+  server_client: client-only
+  notes: packet-up 中每个代理请求发起 POST 的最小间隔。
+  default: 30
+- name: scMaxBufferedPosts
+  type: integer
+  server_client: server-only
+  notes: 每个会话上传队列最大缓存分包数。
+  default: 30
+- name: scStreamUpServerSecs
+  type: Int32Range seconds
+  server_client: server-only
+  notes: stream-up 服务端持续回复 padding 的时间间隔范围；启用条件见 hub.go，不是整个连接的总超时。
+  default: 20-80
+- name: serverMaxHeaderBytes
+  type: integer bytes
+  server_client: server-only
+  notes: HTTP header 字节上限；未填或 0 由运行层归一化为 8192。
+  default: 8192
+- name: xmux
+  type: XmuxConfig
+  server_client: client-only
+  notes: 全零/未填时才注入整组默认值；maxConnections 与 maxConcurrency 不能同时为正。其余项的零值/条件默认见版本表。
+  default:
+    maxConnections: 3
+    hMaxRequestTimes: 600-900
+    hMaxReusableSecs: 1800-3000
+- name: downloadSettings
+  type: StreamConfig
+  server_client: client-only
+  notes: 独立下行配置；上下行的 XHTTP 变体和安全/传输设置可以不同。
+- name: extra
+  type: object
+  server_client: server-and-client
+  notes: 给定时按独立 SplitHTTPConfig 重新反序列化，仅从外层保留 host/path/mode；外层其它字段不会逐项合并进入 extra。
 confidence: source-confirmed

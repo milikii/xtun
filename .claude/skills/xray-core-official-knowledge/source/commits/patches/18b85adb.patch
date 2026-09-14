@@ -1,0 +1,36 @@
+commit 18b85adb4e288f49a7894351c6e0f2428c0beef6
+Author:     RPRX <63339210+RPRX@users.noreply.github.com>
+AuthorDate: Sat Jun 27 12:41:39 2026 +0000
+Commit:     GitHub <noreply@github.com>
+CommitDate: Sat Jun 27 12:41:39 2026 +0000
+
+    XHTTP client: Change default `maxConnections` to 6 for anti-RKN
+    
+    "xmux": {
+        "maxConcurrency": 0,
+        "maxConnections": "6",
+        "cMaxReuseTimes": 0,
+        "hMaxRequestTimes": "600-900",
+        "hMaxReusableSecs": "1800-3000",
+        "hKeepAlivePeriod": 0
+    }
+    
+    Replaces https://github.com/XTLS/Xray-core/commit/9cc7907234a8297a87a0ff77fc40db373b74a0f2 and https://github.com/XTLS/Xray-core/commit/4ce65fc74c4c50919b10b3faff9725f75bba5d73
+    
+    Closes https://github.com/XTLS/Xray-core/issues/6376#issuecomment-4817033592
+
+diff --git a/infra/conf/transport_internet.go b/infra/conf/transport_internet.go
+index 5a8d4f89..a6052ff9 100644
+--- a/infra/conf/transport_internet.go
++++ b/infra/conf/transport_internet.go
+@@ -404,8 +404,8 @@ func (c *SplitHTTPConfig) Build() (proto.Message, error) {
+ 		return nil, errors.New("maxConnections cannot be specified together with maxConcurrency")
+ 	}
+ 	if c.Xmux == (XmuxConfig{}) {
+-		c.Xmux.MaxConcurrency.From = 1
+-		c.Xmux.MaxConcurrency.To = 1
++		c.Xmux.MaxConnections.From = 6
++		c.Xmux.MaxConnections.To = 6
+ 		c.Xmux.HMaxRequestTimes.From = 600
+ 		c.Xmux.HMaxRequestTimes.To = 900
+ 		c.Xmux.HMaxReusableSecs.From = 1800

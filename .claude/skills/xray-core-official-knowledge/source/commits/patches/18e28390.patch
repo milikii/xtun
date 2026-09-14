@@ -1,0 +1,27 @@
+commit 18e283909ca253d4220136eccca0a27006ea709f
+Author:     RPRX <63339210+RPRX@users.noreply.github.com>
+AuthorDate: Tue Jul 28 07:42:44 2026 +0000
+Commit:     RPRX <63339210+RPRX@users.noreply.github.com>
+CommitDate: Tue Jul 28 07:57:55 2026 +0000
+
+    XHTTP client: Reduce default `maxConnections` from 6 to 3 for anti-TSPU
+    
+    https://github.com/XTLS/Xray-core/issues/6376#issuecomment-5101210849
+    
+    Replaces https://github.com/XTLS/Xray-core/commit/18b85adb4e288f49a7894351c6e0f2428c0beef6
+
+diff --git a/infra/conf/transport_method.go b/infra/conf/transport_method.go
+index 2b3a238d..19cb496e 100644
+--- a/infra/conf/transport_method.go
++++ b/infra/conf/transport_method.go
+@@ -450,8 +450,8 @@ func (c *SplitHTTPConfig) Build() (proto.Message, error) {
+ 		return nil, errors.New("maxConnections cannot be specified together with maxConcurrency")
+ 	}
+ 	if c.Xmux == (XmuxConfig{}) {
+-		c.Xmux.MaxConnections.From = 6
+-		c.Xmux.MaxConnections.To = 6
++		c.Xmux.MaxConnections.From = 3
++		c.Xmux.MaxConnections.To = 3
+ 		c.Xmux.HMaxRequestTimes.From = 600
+ 		c.Xmux.HMaxRequestTimes.To = 900
+ 		c.Xmux.HMaxReusableSecs.From = 1800

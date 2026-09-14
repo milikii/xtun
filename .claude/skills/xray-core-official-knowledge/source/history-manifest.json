@@ -1,0 +1,385 @@
+{
+  "schema_version": 1,
+  "files": {
+    "source/releases/v26.9.9.md": {
+      "sha256": "4a83fd6904962c737dfab2fa54f1f0f6642df8d9cc07eaf2a25484b7291d24a9",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.9.9",
+      "commit": "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120"
+    },
+    "source/releases/v26.9.8.md": {
+      "sha256": "4ae84e437ea63fb2ebed58efca1918879b55de7f97e2b70988994eab390b6768",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.9.8",
+      "commit": "37ceb8b4b65ee919fb772a8034e572f76a6e87a2"
+    },
+    "source/releases/v26.7.28.md": {
+      "sha256": "8d4ee8d6ae4b9b799377318409aacec082859529ab2dd3e6ac1d95d4aced740a",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.7.28",
+      "commit": "5ca6f4b7d4dc20a881d4330e498892697627ec0c"
+    },
+    "source/releases/v26.7.11.md": {
+      "sha256": "90e872f64892cba89e0ae12558aa6524882dada2d84e1c015e58b405e0b9dc6c",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.7.11",
+      "commit": "50231eaff98ccc31b5cbd247a721c16e97fe5ec1"
+    },
+    "source/releases/v26.6.27.md": {
+      "sha256": "4f7cf04d2557ded6379a7da4f0823d34a89096e7f6100d8ce3a20f96a80174c6",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.6.27",
+      "commit": "45cf2898ab12e97a55dd8f1f3d78d903340bdc9e"
+    },
+    "source/releases/v26.6.22.md": {
+      "sha256": "5ba22f280dfe1ac5fb2dc4fb2e849be400d26f6a80f852d53bf5a59f2c676e02",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.6.22",
+      "commit": "b99c3e56574fb0317608c49dd1dd9af816db7a9e"
+    },
+    "source/releases/v26.6.1.md": {
+      "sha256": "9ff65746263b926b04b0738acfc4451ff724271883dc090b789783e07be64825",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.6.1",
+      "commit": "94ffd50060f1cfd5d7482ec90a23a92bdefdff68"
+    },
+    "source/releases/v26.5.9.md": {
+      "sha256": "f5f37a1e11f9a71a9f6adfc0b964bbc0428a729a9dd0675bb515b4eb60471e5c",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.5.9",
+      "commit": "1bdb488c9ec09ea51e6899697d5b7437f3cf6eb2"
+    },
+    "source/releases/v26.5.3.md": {
+      "sha256": "1a50bc73c83da2a10a40fde524b4ab20ad659c547d803fdc1b56734dbff38155",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.5.3",
+      "commit": "228f1e13aa22739b0d6b9adbdb2b600f1e2018e1"
+    },
+    "source/releases/v26.4.25.md": {
+      "sha256": "35411c94a8651739fa98b597bcd9e92821096603d42e4b3dfa81f969859516ac",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.25",
+      "commit": "b4f08981becb71eaa995fa98ed2098ade92566bb"
+    },
+    "source/releases/v26.4.17.md": {
+      "sha256": "433e6b98d8f373c3ba58d288f0f0c4853024b6e66e7a494e554cdbcea9bddf43",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.17",
+      "commit": "b4650360d6a05c2842d2c7157fb8cb864bba637a"
+    },
+    "source/releases/v26.4.15.md": {
+      "sha256": "b71ac056db5877ca122fb6ade9f1ee3ee1504c681929a493c99ce15ddf21d4c9",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.15",
+      "commit": "c5edc122b70ec56e24ea8038e727da6f823e34be"
+    },
+    "source/releases/v26.4.13.md": {
+      "sha256": "7ac65fdfd694a10010e7e33b55987df1024d028cf35560c5b193ffc742798b0e",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.13",
+      "commit": "14e8ecfacf3343dc3da032f45f5b78f87cb76c21"
+    },
+    "source/releases/v26.3.27.md": {
+      "sha256": "5263ead1c0237b49cffaa12b334afef2078ee019840bf48e40e133506f083d14",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.3.27",
+      "commit": "d2758a023cd7f4174a5a5fa4ff66e487d4342ba0"
+    },
+    "source/releases/v26.3.23.md": {
+      "sha256": "a0892ba2293773eb883aaf4e40dfab249585acb679ceed2f24bb3d41c266e8d2",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.3.23",
+      "commit": "cb7bfeb54c79d7e81ee1f9d8c6a7e0a2125ab898"
+    },
+    "source/releases/v26.2.6.md": {
+      "sha256": "dda3816bad884e206fb3ea9b39599113ce66789e5a7c83dbd430d71e7f8d8236",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.2.6",
+      "commit": "12ee51e4bb1d02ece4ef4b7114efa2bcdc130995"
+    },
+    "source/releases/v26.2.4.md": {
+      "sha256": "d94083fda34d21da5d10e9f32f6428bd1a5bf30adf686867f0090b8666b4be57",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.2.4",
+      "commit": "8c3f246dcbf3d15324a3e903c96ff77fc75003e2"
+    },
+    "source/releases/v26.2.2.md": {
+      "sha256": "3dc5a932689dd28ce8a9f16776a40c4a735bde33ee49ed3590a7e207bd0f4da8",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.2.2",
+      "commit": "af2f0484b9c7e9ca0cfaaf79c20c647f80017cfc"
+    },
+    "source/releases/v26.1.31.md": {
+      "sha256": "ebd4745e5fa7344cbc393f15b30967133221c9173d42ee2b6d8fb55602711544",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.31",
+      "commit": "20cf00c27159aea831584ffa08db63c54fbc5f54"
+    },
+    "source/releases/v26.1.23.md": {
+      "sha256": "be5ea224ee004327150b0951b8573d3feea8542c476e94c76377c802f24bfd83",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.23",
+      "commit": "0a42dba13e33153ac7714771454c8b201661645d"
+    },
+    "source/releases/v26.1.18.md": {
+      "sha256": "a66f40a19dfd1b1800fe38894a7f8545c5aee862c465c1e633a44566842b0fce",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.18",
+      "commit": "7ff06f65eccdcd2f5722ee369d23b699aeb5cc0f"
+    },
+    "source/releases/v26.1.13.md": {
+      "sha256": "5d374bb3f77f3e5ba524701cb0d44ea6c30ca0d9183b6b8a0b905bc4e7f0b452",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.13",
+      "commit": "9a121a489b01b1af46f43cfb060fe88c89f1570b"
+    },
+    "source/releases/v25.12.8.md": {
+      "sha256": "4e149703b61ae44b4ef67402ca51ee8f79c8b0902486b299f2b12c39371b47b7",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.12.8",
+      "commit": "81f8f398c7b2b845853b1e85087c6122acc6db0b"
+    },
+    "source/releases/v25.12.2.md": {
+      "sha256": "cb193887c27c2efb0a71a62b3a7cf09ec5e4a186d2e6a3755a4cf9c1125f8ec8",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.12.2",
+      "commit": "e403abe360ffd5bd6e44e0bb362fb4d1a84d7c0b"
+    },
+    "source/releases/v25.12.1.md": {
+      "sha256": "97703fcc0347d3420e6313381cc3de14cce69f037b850254ca548c662091528b",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.12.1",
+      "commit": "36cb0f00bd06212feeb73c3f3e47c3806849ef63"
+    },
+    "source/releases/v25.10.15.md": {
+      "sha256": "89e9a6a6ff4f7005168b4142b9a95c6ad7c27a15ed68d2438b1575a82d176982",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.10.15",
+      "commit": "b69a376aa1b61ad94c9c05b2c2cd263567b8cc23"
+    },
+    "source/releases/v25.9.11.md": {
+      "sha256": "83a447ea44a7de49a32f30798c0d70c21dff203492e7a94206c1444f59ca5fa1",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.9.11",
+      "commit": "3edfb0e33557330ac721862adb2e4be89ee7412a"
+    },
+    "source/releases/v25.9.10.md": {
+      "sha256": "d9ba328e996d777e4efc7df155e27c803742a49a6e2b719392838af68a06ae8e",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.9.10",
+      "commit": "cced1477a0acc12eaf22e01447e97319987ab050"
+    },
+    "source/releases/v25.9.5.md": {
+      "sha256": "8b3b2b6612964fb17c8d5d7dcc1afd0564b81d17cb337dbb902154783d6ec10a",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.9.5",
+      "commit": "118131fcafaece59af1b9f4341d924dfcc9838b3"
+    },
+    "source/releases/v25.8.31.md": {
+      "sha256": "8d5748079966acf6752ab4986d5aa512934a4d7d35c4245a38ba513b9a71cbb6",
+      "kind": "release-api-body",
+      "url": "https://github.com/XTLS/Xray-core/releases/tag/v25.8.31",
+      "commit": "6830089d3c42483512842369c908f9de75da2eaa"
+    },
+    "source/releases/index.json": {
+      "sha256": "4d6962c0c829dda598f8a0d7ee6d08b6eb88e483e6929576f898299abae74704",
+      "kind": "release-api-records",
+      "url": "https://api.github.com/repos/XTLS/Xray-core/releases"
+    },
+    "source/commits/v26.3.27.md": {
+      "sha256": "6c9f522aa97b8252c99f367b59a32db5f6c23caa088a0279a4f26981af4597c3",
+      "kind": "git-commit-range",
+      "base": "12ee51e4bb1d02ece4ef4b7114efa2bcdc130995",
+      "head": "d2758a023cd7f4174a5a5fa4ff66e487d4342ba0",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.4.13.md": {
+      "sha256": "931d0fefe2355d316501c476e62e273e45ec2fa7142cb86359f11272862655ba",
+      "kind": "git-commit-range",
+      "base": "d2758a023cd7f4174a5a5fa4ff66e487d4342ba0",
+      "head": "14e8ecfacf3343dc3da032f45f5b78f87cb76c21",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.4.15.md": {
+      "sha256": "aefd0ed38e780eeeacd8fd25c709428257d5ebd0bb0a879c9f46013f74530e53",
+      "kind": "git-commit-range",
+      "base": "14e8ecfacf3343dc3da032f45f5b78f87cb76c21",
+      "head": "c5edc122b70ec56e24ea8038e727da6f823e34be",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.4.17.md": {
+      "sha256": "d7c7d9febd879c2a1fc61eef7a6abfc9e4b5d65715642ad0c1a8fd8759428e00",
+      "kind": "git-commit-range",
+      "base": "c5edc122b70ec56e24ea8038e727da6f823e34be",
+      "head": "b4650360d6a05c2842d2c7157fb8cb864bba637a",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.4.25.md": {
+      "sha256": "bac504d3d1c99ca77790cde3803a1c562262824cc18a1de16ae8fb9c1eeb55c6",
+      "kind": "git-commit-range",
+      "base": "b4650360d6a05c2842d2c7157fb8cb864bba637a",
+      "head": "b4f08981becb71eaa995fa98ed2098ade92566bb",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.5.3.md": {
+      "sha256": "95351dcf4fa017791ba43266fc19f203d0fc5d4a51d6c7167f8f319b779d08bd",
+      "kind": "git-commit-range",
+      "base": "b4f08981becb71eaa995fa98ed2098ade92566bb",
+      "head": "228f1e13aa22739b0d6b9adbdb2b600f1e2018e1",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.5.9.md": {
+      "sha256": "041e5b0ab93523b98f98047e66b361fb18d2642650b9f8a988c67e4cd208ef10",
+      "kind": "git-commit-range",
+      "base": "228f1e13aa22739b0d6b9adbdb2b600f1e2018e1",
+      "head": "1bdb488c9ec09ea51e6899697d5b7437f3cf6eb2",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.6.1.md": {
+      "sha256": "88e31c54a9b41478be56069a25653016da4d71cb719b97577b97893eefa3fe1d",
+      "kind": "git-commit-range",
+      "base": "1bdb488c9ec09ea51e6899697d5b7437f3cf6eb2",
+      "head": "94ffd50060f1cfd5d7482ec90a23a92bdefdff68",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.6.22.md": {
+      "sha256": "d9ade8a48ff68340b034a1c154059d7d86fde4cb90504acea733f6df3f486e29",
+      "kind": "git-commit-range",
+      "base": "94ffd50060f1cfd5d7482ec90a23a92bdefdff68",
+      "head": "b99c3e56574fb0317608c49dd1dd9af816db7a9e",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.6.27.md": {
+      "sha256": "6071b4c54de79cf74cc956bd4b070addf2d2b171e60a021d5c46706a8875486f",
+      "kind": "git-commit-range",
+      "base": "b99c3e56574fb0317608c49dd1dd9af816db7a9e",
+      "head": "45cf2898ab12e97a55dd8f1f3d78d903340bdc9e",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.7.11.md": {
+      "sha256": "63b7524bdad43db710da57e7cf31adbea3f1c08db345230a80e787136c741d54",
+      "kind": "git-commit-range",
+      "base": "45cf2898ab12e97a55dd8f1f3d78d903340bdc9e",
+      "head": "50231eaff98ccc31b5cbd247a721c16e97fe5ec1",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.7.28.md": {
+      "sha256": "325d887692b3bccdd8c3966e2c2641367fde79b4622c3e87ecfccc860c5ad9d6",
+      "kind": "git-commit-range",
+      "base": "50231eaff98ccc31b5cbd247a721c16e97fe5ec1",
+      "head": "5ca6f4b7d4dc20a881d4330e498892697627ec0c",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.9.8.md": {
+      "sha256": "376db4557bb7d5ae6ed0b0bb432dec875b78c71de2d2a46cc73c27f38fb30130",
+      "kind": "git-commit-range",
+      "base": "5ca6f4b7d4dc20a881d4330e498892697627ec0c",
+      "head": "37ceb8b4b65ee919fb772a8034e572f76a6e87a2",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/v26.9.9.md": {
+      "sha256": "bd3982ba6a6dd0961f7ad59954568e093afe7d69439fc02e70b9c91eb830167e",
+      "kind": "git-commit-range",
+      "base": "37ceb8b4b65ee919fb772a8034e572f76a6e87a2",
+      "head": "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/dev-after-v26.9.9.md": {
+      "sha256": "b3331f560362de9710dcc6c024b6208f0003154dd6796a817e4a599b3e1b3a6c",
+      "kind": "git-commit-range",
+      "base": "52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120",
+      "head": "c412e77a9b712082ac9ebf27fa793951cb5a7d85",
+      "repository": "XTLS/Xray-core"
+    },
+    "source/commits/patches/2c92339f.patch": {
+      "sha256": "df58470a1e855a99be147f8b737406cdde0b875b23b228c3b1909cd22f4e6ba5",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "2c92339f95fe9aa493b6ae51d3b07017a44c4014"
+    },
+    "source/commits/patches/9a953c07.patch": {
+      "sha256": "6a2f4fb88b4c5cf05ac88e148f1f7ecc69ad80a0d8516ac178e4f1652c85f80e",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "9a953c070f9c3bd2b7f255fb50f076ae8ece7bce"
+    },
+    "source/commits/patches/ae62a0fb.patch": {
+      "sha256": "5b69fc51b197d1ade29136b9a7eb4158aa9ae6934466441c8782bd1d82a55c93",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "ae62a0fb526f2faa0aa8b3fbce5a566187059090"
+    },
+    "source/commits/patches/dde0a4f2.patch": {
+      "sha256": "13bf7b51aea330889313388cc49e58533331ea183d1d59be41ad836cbe8bdb4a",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "dde0a4f2729d9c56c0b7c7581b77d98f8f46e108"
+    },
+    "source/commits/patches/75729ce7.patch": {
+      "sha256": "f22422bf88b6a123a6fea972d88b6c092fdd3a994b8575fdecf12e5b30da4ac3",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "75729ce77902d3da2b95c53bb3c87676a6482dff"
+    },
+    "source/commits/patches/18b85adb.patch": {
+      "sha256": "d08a91d730c857f81b619231c7b53ad5042ee4d8389d5a553dbde8ed79a79731",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "18b85adb4e288f49a7894351c6e0f2428c0beef6"
+    },
+    "source/commits/patches/18e28390.patch": {
+      "sha256": "3a410fd82e8698e271474632aee181f741e118db5d1634f8a8b04e4a72f1df54",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "18e283909ca253d4220136eccca0a27006ea709f"
+    },
+    "source/commits/patches/47cfe999.patch": {
+      "sha256": "c6d6f32d6c4ac586aa280f12e5edaa88eb05a29d5c252dfa6a38343e96fbafc0",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "47cfe9994a6b39b1f673ba35e62b091bcce15a71"
+    },
+    "source/commits/patches/af7eb680.patch": {
+      "sha256": "0318d41bc7db094b9b58c7c0d58c92eeece3f0d1391edb4d2300081c3ef9378b",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770"
+    },
+    "source/commits/patches/fb548f54.patch": {
+      "sha256": "9c657ec3da7f395e4a76ab490977c5cdb098b32e561002b55afd1a425b36f32e",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "fb548f54d22856446e883c6d13b32d60f0dda9bd"
+    },
+    "source/commits/patches/c42deab5.patch": {
+      "sha256": "0a9847476ed85418bacb0d46fbf3812b832f1afe638abbf7593414b35885583e",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "c42deab55cc0dcc73eca5487206446fb76c5f79e"
+    },
+    "source/commits/patches/d7fa2076.patch": {
+      "sha256": "44a664ab70dc78fa30e3c1bf241aee889bb81a73778400bb0da195356f58abbb",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "d7fa2076c3e5401173bf9b58f7b07f9aa5174443"
+    },
+    "source/commits/patches/3e2f040c.patch": {
+      "sha256": "1e2840ae7b125ed097beeb9428201ac9e14b1a49e96cdc01c311b1da4f6103f4",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "3e2f040cd80b33197d358da6bf0d859fae58f180"
+    },
+    "source/commits/patches/c26d2eda.patch": {
+      "sha256": "2243d83aa1e3753f998167730030a737327b8025bd7f95a90b12de6edb993b36",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "c26d2eda240f521cd215ef9ff8ef17f323d29452"
+    },
+    "source/commits/patches/18a1b504.patch": {
+      "sha256": "1529276df67a48d34e15e2931cc4c028dc3cf647df4cccdb4e361b102313f408",
+      "kind": "git-show",
+      "repository": "XTLS/Xray-core",
+      "commit": "18a1b5042ad47ed71f01ae58f95ded4884aaba5e"
+    }
+  }
+}

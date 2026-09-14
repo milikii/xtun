@@ -1,51 +1,39 @@
 name: VLessInboundConfig
 component: proxy/vless/inbound
-version_introduced: v1.0.0
-version_deprecated: ""
-version_removed: ""
-status: stable
-server_client: server-only
+verified_version: v26.9.9
+track: prerelease
+coverage: Selected fields, not a complete schema
 source:
   docs: https://xtls.github.io/config/inbounds/vless.html
-  code: infra/conf/vless.go
-  commit: current
+  commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+  local:
+  - source/config/vless.go
+  - source/runtime/proxy/vless/inbound/inbound.go
+notes: VLESS Encryption 已有官方实现，不能同时声称必须设 none 又支持另一种加密。加密格式与 reverse 等完整细节继续查源码/文档。
 fields:
-  - name: clients
-    type: []json.RawMessage (users)
-    required: true
-    server_client: server-only
-    notes: 服务端用户列表，每个用户需包含 id(UUID) 和 flow。
-
-  - name: decryption
-    type: string
-    required: true
-    default: none
-    server_client: server-only
-    notes: >
-      必须设置为 "none"。若使用 mlkem768x25519plus 加密前缀（实验性），
-      则按特定格式填写，不能与 fallbacks 同时使用。
-
-  - name: fallbacks
-    type: []*VLessInboundFallback
-    required: false
-    server_client: server-only
-    notes: >
-      回落配置。与 decryption != "none" 不能同时存在。
-      每个 fallback 包含 name, alpn, path, type, dest, xver。
-
-  - name: flow
-    type: string
-    required: false
-    default: ""
-    server_client: server-only
-    notes: >
-      当前仅支持空字符串或 "xtls-rprx-vision"（源码中常量 vless.XRV）。
-      若为空，则继承到每个用户的 account.Flow。
-
-  - name: testseed
-    type: []uint32
-    required: false
-    server_client: server-only
-    notes: 实验性字段，内部测试用途。
-
+- name: users
+  type: array of user objects
+  server_client: server-only
+  notes: 当前用户列表名称；clients 是兼容旧名且非 nil 时覆盖 users。每个用户需要可解析的 id；flow 可省略。
+  aliases:
+  - clients
+  alias_introduced: v26.5.9
+- name: decryption
+  type: string
+  server_client: server-only
+  notes: 必须显式提供 none 或有效 mlkem768x25519plus.* 格式；省略并不自动等于 none。
+  required: true
+- name: fallbacks
+  type: array of fallback objects
+  server_client: server-only
+  notes: 只允许 decryption 为 none；name/alpn/path/dest 的行为查具体回落实现。
+- name: flow
+  type: string
+  server_client: server-only
+  notes: 允许空值或 xtls-rprx-vision；用户 flow 为空时继承这个入站默认值。
+  default: ''
+- name: testseed
+  type: array of integer
+  server_client: server-only
+  notes: Vision padding 调整；用户值不足四项时继承入站值，按对应版本与正式说明使用。
 confidence: source-confirmed

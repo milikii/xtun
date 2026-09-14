@@ -1,0 +1,2516 @@
+commit 18a1b5042ad47ed71f01ae58f95ded4884aaba5e
+Author:     LjhAUMEM <llnu14702@gmail.com>
+AuthorDate: Wed Sep 9 06:15:02 2026 +0800
+Commit:     GitHub <noreply@github.com>
+CommitDate: Tue Sep 8 22:15:02 2026 +0000
+
+    Finalmask: Make "udpHop" a new UDP mask (#6327)
+    
+    https://github.com/XTLS/Xray-core/pull/6327#issuecomment-5592421364
+    
+    ---------
+    
+    Co-authored-by: RPRX <63339210+RPRX@users.noreply.github.com>
+
+diff --git a/common/crypto/crypto.go b/common/crypto/crypto.go
+index 49ce164b..e9320a1c 100644
+--- a/common/crypto/crypto.go
++++ b/common/crypto/crypto.go
+@@ -10,12 +10,12 @@ import (
+ 
+ // [,)
+ func RandBetween(from int64, to int64) int64 {
+-	if from == to {
+-		return from
+-	}
+ 	if from > to {
+ 		from, to = to, from
+ 	}
++	if d := to - from; d == 0 || d == 1 {
++		return from
++	}
+ 	bigInt, _ := rand.Int(rand.Reader, big.NewInt(to-from))
+ 	return from + bigInt.Int64()
+ }
+diff --git a/infra/conf/transport_finalmask.go b/infra/conf/transport_finalmask.go
+index db57fdbb..9dde6ca9 100644
+--- a/infra/conf/transport_finalmask.go
++++ b/infra/conf/transport_finalmask.go
+@@ -14,6 +14,7 @@ import (
+ 	googleuuid "github.com/google/uuid"
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/transport/internet"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/fragment"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/header/custom"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/mkcp/aes128gcm"
+@@ -23,6 +24,7 @@ import (
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/realm"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/salamander"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/sudoku"
++	"github.com/xtls/xray-core/transport/internet/finalmask/udphop"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/xdns"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/xicmp"
+ 	"github.com/xtls/xray-core/transport/internet/finalmask/xmc"
+@@ -83,6 +85,7 @@ var (
+ 		"xdns":          func() interface{} { return new(Xdns) },
+ 		"xicmp":         func() interface{} { return new(Xicmp) },
+ 		"realm":         func() interface{} { return new(Realm) },
++		"udphop":        func() interface{} { return new(UDPHop) },
+ 	}, "type", "settings")
+ )
+ 
+@@ -905,6 +908,62 @@ func (c *Realm) Build() (proto.Message, error) {
+ 	}, nil
+ }
+ 
++type UDPHop struct {
++	Sockopt     *SocketConfig `json:"sockopt"`
++	Mode        string        `json:"mode"`
++	Interval    Int32Range    `json:"interval"`
++	RemotePorts PortList      `json:"remotePorts"`
++	RemoteIPs   []string      `json:"remoteIPs"`
++}
++
++func (c *UDPHop) Build() (proto.Message, error) {
++	var sockopt *internet.SocketConfig
++	if c.Sockopt != nil {
++		var err error
++		sockopt, err = c.Sockopt.Build()
++		if err != nil {
++			return nil, err
++		}
++	}
++	var local, remote, remoteOnce bool
++	for _, mode := range strings.Split(c.Mode, ",") {
++		switch strings.ToLower(mode) {
++		case "intervallocal":
++			local = true
++		case "intervalremote":
++			remote = true
++		case "perconnremote":
++			remoteOnce = true
++		default:
++			return nil, errors.New("invalid mode ", mode)
++		}
++	}
++	var remoteIPs []string
++	for _, ip := range c.RemoteIPs {
++		prefix, err := netip.ParsePrefix(ip)
++		if err == nil {
++			remoteIPs = append(remoteIPs, prefix.String())
++			continue
++		}
++		addr, err := netip.ParseAddr(ip)
++		if err == nil {
++			remoteIPs = append(remoteIPs, netip.PrefixFrom(addr, addr.BitLen()).String())
++			continue
++		}
++		return nil, errors.New("invalid ip ", ip)
++	}
++	return &udphop.Config{
++		Sockopt:     sockopt,
++		Local:       local,
++		Remote:      remote,
++		RemoteOnce:  remoteOnce,
++		IntervalMin: int64(c.Interval.From),
++		IntervalMax: int64(c.Interval.To),
++		RemotePorts: c.RemotePorts.Build().Ports(),
++		RemoteIPs:   remoteIPs,
++	}, nil
++}
++
+ type Mask struct {
+ 	Type     string           `json:"type"`
+ 	Settings *json.RawMessage `json:"settings"`
+@@ -938,7 +997,6 @@ type QuicParamsConfig struct {
+ 	BrutalUp                      Bandwidth `json:"brutalUp"`
+ 	BrutalDown                    Bandwidth `json:"brutalDown"`
+ 	BrutalDisableLossCompensation bool      `json:"brutalDisableLossCompensation"`
+-	UdpHop                        UdpHop    `json:"udpHop"`
+ 	InitStreamReceiveWindow       uint64    `json:"initStreamReceiveWindow"`
+ 	MaxStreamReceiveWindow        uint64    `json:"maxStreamReceiveWindow"`
+ 	InitConnectionReceiveWindow   uint64    `json:"initConnectionReceiveWindow"`
+diff --git a/infra/conf/transport_internet.go b/infra/conf/transport_internet.go
+index 066bf0e0..7b943a05 100644
+--- a/infra/conf/transport_internet.go
++++ b/infra/conf/transport_internet.go
+@@ -253,10 +253,6 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
+ 				return nil, errors.New("unknown congestion control: ", c.FinalMask.QuicParams.Congestion, ", valid values: reno, bbr, brutal, force-brutal")
+ 			}
+ 
+-			if (c.FinalMask.QuicParams.UdpHop.Interval.From != 0 && c.FinalMask.QuicParams.UdpHop.Interval.From < 5) || (c.FinalMask.QuicParams.UdpHop.Interval.To != 0 && c.FinalMask.QuicParams.UdpHop.Interval.To < 5) {
+-				return nil, errors.New("Interval must be at least 5")
+-			}
+-
+ 			if c.FinalMask.QuicParams.InitStreamReceiveWindow > 0 && c.FinalMask.QuicParams.InitStreamReceiveWindow < 16384 {
+ 				return nil, errors.New("InitStreamReceiveWindow must be at least 16384")
+ 			}
+@@ -290,22 +286,17 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
+ 				BrutalUp:                      up,
+ 				BrutalDown:                    down,
+ 				BrutalDisableLossCompensation: c.FinalMask.QuicParams.BrutalDisableLossCompensation,
+-				UdpHop: &internet.UdpHop{
+-					Ports:       c.FinalMask.QuicParams.UdpHop.PortList.Build().Ports(),
+-					IntervalMin: int64(c.FinalMask.QuicParams.UdpHop.Interval.From),
+-					IntervalMax: int64(c.FinalMask.QuicParams.UdpHop.Interval.To),
+-				},
+-				InitStreamReceiveWindow: c.FinalMask.QuicParams.InitStreamReceiveWindow,
+-				MaxStreamReceiveWindow:  c.FinalMask.QuicParams.MaxStreamReceiveWindow,
+-				InitConnReceiveWindow:   c.FinalMask.QuicParams.InitConnectionReceiveWindow,
+-				MaxConnReceiveWindow:    c.FinalMask.QuicParams.MaxConnectionReceiveWindow,
+-				MaxIdleTimeout:          c.FinalMask.QuicParams.MaxIdleTimeout,
+-				KeepAlivePeriod:         c.FinalMask.QuicParams.KeepAlivePeriod,
+-				DisablePathMtuDiscovery: c.FinalMask.QuicParams.DisablePathMTUDiscovery,
+-				DisableChromeParrot:     c.FinalMask.QuicParams.DisableChromeParrot,
+-				DisableGSO:              c.FinalMask.QuicParams.DisableGSO,
+-				MaxIncomingStreams:      c.FinalMask.QuicParams.MaxIncomingStreams,
+-				DisableStatelessReset:   c.FinalMask.QuicParams.DisableStatelessReset,
++				InitStreamReceiveWindow:       c.FinalMask.QuicParams.InitStreamReceiveWindow,
++				MaxStreamReceiveWindow:        c.FinalMask.QuicParams.MaxStreamReceiveWindow,
++				InitConnReceiveWindow:         c.FinalMask.QuicParams.InitConnectionReceiveWindow,
++				MaxConnReceiveWindow:          c.FinalMask.QuicParams.MaxConnectionReceiveWindow,
++				MaxIdleTimeout:                c.FinalMask.QuicParams.MaxIdleTimeout,
++				KeepAlivePeriod:               c.FinalMask.QuicParams.KeepAlivePeriod,
++				DisablePathMtuDiscovery:       c.FinalMask.QuicParams.DisablePathMTUDiscovery,
++				DisableChromeParrot:           c.FinalMask.QuicParams.DisableChromeParrot,
++				DisableGSO:                    c.FinalMask.QuicParams.DisableGSO,
++				MaxIncomingStreams:            c.FinalMask.QuicParams.MaxIncomingStreams,
++				DisableStatelessReset:         c.FinalMask.QuicParams.DisableStatelessReset,
+ 			}
+ 		}
+ 	}
+diff --git a/infra/conf/transport_method.go b/infra/conf/transport_method.go
+index cff77da8..f6ae7ff7 100644
+--- a/infra/conf/transport_method.go
++++ b/infra/conf/transport_method.go
+@@ -1,7 +1,6 @@
+ package conf
+ 
+ import (
+-	"context"
+ 	"encoding/json"
+ 	"math/big"
+ 	"net/url"
+@@ -534,10 +533,6 @@ type KCPConfig struct {
+ 
+ // Build implements Buildable.
+ func (c *KCPConfig) Build() (proto.Message, error) {
+-	if c.HeaderConfig != nil || c.Seed != nil {
+-		return nil, errors.PrintRemovedFeatureError("mkcp header & seed", "finalmask/udp header-* & mkcp-original & mkcp-aes128gcm")
+-	}
+-
+ 	config := common.Must2(internet.CreateTransportConfig(kcp.ProtocolName)).(*kcp.Config)
+ 
+ 	if c.Mtu != nil {
+@@ -560,16 +555,16 @@ func (c *KCPConfig) Build() (proto.Message, error) {
+ 	}
+ 
+ 	if config.Mtu < 21 {
+-		return nil, errors.New("Mtu must be at least 21").AtError()
++		return nil, errors.New("MTU must be at least 21")
+ 	}
+ 	if config.Tti < 10 || config.Tti > 1000 {
+-		return nil, errors.New("invalid mKCP TTI: ", c.Tti).AtError()
++		return nil, errors.New("TTI must be between 10 and 1000")
+ 	}
+ 	if config.CwndMultiplier < 1 {
+-		return nil, errors.New("CwndMultiplier must be at least 1").AtError()
++		return nil, errors.New("CwndMultiplier must be at least 1")
+ 	}
+ 	if config.GetSendingBufferSize() == 0 {
+-		return nil, errors.New("MaxSendingWindow must be >= Mtu").AtError()
++		return nil, errors.New("MaxSendingWindow must be at least ", config.Mtu)
+ 	}
+ 
+ 	return config, nil
+@@ -739,11 +734,6 @@ func (b Bandwidth) Bps() (uint64, error) {
+ 	return uint64(val*float64(mul)) / 8, nil
+ }
+ 
+-type UdpHop struct {
+-	PortList PortList   `json:"ports"`
+-	Interval Int32Range `json:"interval"`
+-}
+-
+ type Masquerade struct {
+ 	Type string `json:"type"`
+ 
+@@ -760,14 +750,8 @@ type Masquerade struct {
+ }
+ 
+ type HysteriaConfig struct {
+-	Version int32  `json:"version"`
+-	Auth    string `json:"auth"`
+-
+-	Congestion *string    `json:"congestion"`
+-	Up         *Bandwidth `json:"up"`
+-	Down       *Bandwidth `json:"down"`
+-	UdpHop     *UdpHop    `json:"udphop"`
+-
++	Version        int32      `json:"version"`
++	Auth           string     `json:"auth"`
+ 	UdpIdleTimeout int64      `json:"udpIdleTimeout"`
+ 	Masquerade     Masquerade `json:"masquerade"`
+ }
+@@ -777,10 +761,6 @@ func (c *HysteriaConfig) Build() (proto.Message, error) {
+ 		return nil, errors.New("version != 2")
+ 	}
+ 
+-	if c.Congestion != nil || c.Up != nil || c.Down != nil || c.UdpHop != nil {
+-		errors.LogWarning(context.Background(), "congestion & up & down & udphop move to finalmask/quicParams")
+-	}
+-
+ 	if c.UdpIdleTimeout != 0 && (c.UdpIdleTimeout < 2 || c.UdpIdleTimeout > 600) {
+ 		return nil, errors.New("UdpIdleTimeout must be between 2 and 600")
+ 	}
+diff --git a/transport/internet/config.pb.go b/transport/internet/config.pb.go
+index ae4004cc..58f7489f 100644
+--- a/transport/internet/config.pb.go
++++ b/transport/internet/config.pb.go
+@@ -206,7 +206,7 @@ func (x SocketConfig_TProxyMode) Number() protoreflect.EnumNumber {
+ 
+ // Deprecated: Use SocketConfig_TProxyMode.Descriptor instead.
+ func (SocketConfig_TProxyMode) EnumDescriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{5, 0}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{4, 0}
+ }
+ 
+ type TransportConfig struct {
+@@ -382,66 +382,6 @@ func (x *StreamConfig) GetSocketSettings() *SocketConfig {
+ 	return nil
+ }
+ 
+-type UdpHop struct {
+-	state         protoimpl.MessageState `protogen:"open.v1"`
+-	Ports         []uint32               `protobuf:"varint,1,rep,packed,name=ports,proto3" json:"ports,omitempty"`
+-	IntervalMin   int64                  `protobuf:"varint,2,opt,name=interval_min,json=intervalMin,proto3" json:"interval_min,omitempty"`
+-	IntervalMax   int64                  `protobuf:"varint,3,opt,name=interval_max,json=intervalMax,proto3" json:"interval_max,omitempty"`
+-	unknownFields protoimpl.UnknownFields
+-	sizeCache     protoimpl.SizeCache
+-}
+-
+-func (x *UdpHop) Reset() {
+-	*x = UdpHop{}
+-	mi := &file_transport_internet_config_proto_msgTypes[2]
+-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+-	ms.StoreMessageInfo(mi)
+-}
+-
+-func (x *UdpHop) String() string {
+-	return protoimpl.X.MessageStringOf(x)
+-}
+-
+-func (*UdpHop) ProtoMessage() {}
+-
+-func (x *UdpHop) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[2]
+-	if x != nil {
+-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+-		if ms.LoadMessageInfo() == nil {
+-			ms.StoreMessageInfo(mi)
+-		}
+-		return ms
+-	}
+-	return mi.MessageOf(x)
+-}
+-
+-// Deprecated: Use UdpHop.ProtoReflect.Descriptor instead.
+-func (*UdpHop) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{2}
+-}
+-
+-func (x *UdpHop) GetPorts() []uint32 {
+-	if x != nil {
+-		return x.Ports
+-	}
+-	return nil
+-}
+-
+-func (x *UdpHop) GetIntervalMin() int64 {
+-	if x != nil {
+-		return x.IntervalMin
+-	}
+-	return 0
+-}
+-
+-func (x *UdpHop) GetIntervalMax() int64 {
+-	if x != nil {
+-		return x.IntervalMax
+-	}
+-	return 0
+-}
+-
+ type QuicParams struct {
+ 	state                         protoimpl.MessageState `protogen:"open.v1"`
+ 	Congestion                    string                 `protobuf:"bytes,1,opt,name=congestion,proto3" json:"congestion,omitempty"`
+@@ -449,25 +389,24 @@ type QuicParams struct {
+ 	BrutalUp                      uint64                 `protobuf:"varint,3,opt,name=brutal_up,json=brutalUp,proto3" json:"brutal_up,omitempty"`
+ 	BrutalDown                    uint64                 `protobuf:"varint,4,opt,name=brutal_down,json=brutalDown,proto3" json:"brutal_down,omitempty"`
+ 	BrutalDisableLossCompensation bool                   `protobuf:"varint,5,opt,name=brutal_disable_loss_compensation,json=brutalDisableLossCompensation,proto3" json:"brutal_disable_loss_compensation,omitempty"`
+-	UdpHop                        *UdpHop                `protobuf:"bytes,6,opt,name=udp_hop,json=udpHop,proto3" json:"udp_hop,omitempty"`
+-	InitStreamReceiveWindow       uint64                 `protobuf:"varint,7,opt,name=init_stream_receive_window,json=initStreamReceiveWindow,proto3" json:"init_stream_receive_window,omitempty"`
+-	MaxStreamReceiveWindow        uint64                 `protobuf:"varint,8,opt,name=max_stream_receive_window,json=maxStreamReceiveWindow,proto3" json:"max_stream_receive_window,omitempty"`
+-	InitConnReceiveWindow         uint64                 `protobuf:"varint,9,opt,name=init_conn_receive_window,json=initConnReceiveWindow,proto3" json:"init_conn_receive_window,omitempty"`
+-	MaxConnReceiveWindow          uint64                 `protobuf:"varint,10,opt,name=max_conn_receive_window,json=maxConnReceiveWindow,proto3" json:"max_conn_receive_window,omitempty"`
+-	MaxIdleTimeout                int64                  `protobuf:"varint,11,opt,name=max_idle_timeout,json=maxIdleTimeout,proto3" json:"max_idle_timeout,omitempty"`
+-	KeepAlivePeriod               int64                  `protobuf:"varint,12,opt,name=keep_alive_period,json=keepAlivePeriod,proto3" json:"keep_alive_period,omitempty"`
+-	DisablePathMtuDiscovery       bool                   `protobuf:"varint,13,opt,name=disable_path_mtu_discovery,json=disablePathMtuDiscovery,proto3" json:"disable_path_mtu_discovery,omitempty"`
+-	DisableChromeParrot           bool                   `protobuf:"varint,14,opt,name=disable_chrome_parrot,json=disableChromeParrot,proto3" json:"disable_chrome_parrot,omitempty"`
+-	DisableGSO                    bool                   `protobuf:"varint,15,opt,name=disableGSO,proto3" json:"disableGSO,omitempty"`
+-	MaxIncomingStreams            int64                  `protobuf:"varint,16,opt,name=max_incoming_streams,json=maxIncomingStreams,proto3" json:"max_incoming_streams,omitempty"`
+-	DisableStatelessReset         bool                   `protobuf:"varint,17,opt,name=disable_stateless_reset,json=disableStatelessReset,proto3" json:"disable_stateless_reset,omitempty"`
++	InitStreamReceiveWindow       uint64                 `protobuf:"varint,6,opt,name=init_stream_receive_window,json=initStreamReceiveWindow,proto3" json:"init_stream_receive_window,omitempty"`
++	MaxStreamReceiveWindow        uint64                 `protobuf:"varint,7,opt,name=max_stream_receive_window,json=maxStreamReceiveWindow,proto3" json:"max_stream_receive_window,omitempty"`
++	InitConnReceiveWindow         uint64                 `protobuf:"varint,8,opt,name=init_conn_receive_window,json=initConnReceiveWindow,proto3" json:"init_conn_receive_window,omitempty"`
++	MaxConnReceiveWindow          uint64                 `protobuf:"varint,9,opt,name=max_conn_receive_window,json=maxConnReceiveWindow,proto3" json:"max_conn_receive_window,omitempty"`
++	MaxIdleTimeout                int64                  `protobuf:"varint,10,opt,name=max_idle_timeout,json=maxIdleTimeout,proto3" json:"max_idle_timeout,omitempty"`
++	KeepAlivePeriod               int64                  `protobuf:"varint,11,opt,name=keep_alive_period,json=keepAlivePeriod,proto3" json:"keep_alive_period,omitempty"`
++	DisablePathMtuDiscovery       bool                   `protobuf:"varint,12,opt,name=disable_path_mtu_discovery,json=disablePathMtuDiscovery,proto3" json:"disable_path_mtu_discovery,omitempty"`
++	DisableChromeParrot           bool                   `protobuf:"varint,13,opt,name=disable_chrome_parrot,json=disableChromeParrot,proto3" json:"disable_chrome_parrot,omitempty"`
++	DisableGSO                    bool                   `protobuf:"varint,14,opt,name=disableGSO,proto3" json:"disableGSO,omitempty"`
++	MaxIncomingStreams            int64                  `protobuf:"varint,15,opt,name=max_incoming_streams,json=maxIncomingStreams,proto3" json:"max_incoming_streams,omitempty"`
++	DisableStatelessReset         bool                   `protobuf:"varint,16,opt,name=disable_stateless_reset,json=disableStatelessReset,proto3" json:"disable_stateless_reset,omitempty"`
+ 	unknownFields                 protoimpl.UnknownFields
+ 	sizeCache                     protoimpl.SizeCache
+ }
+ 
+ func (x *QuicParams) Reset() {
+ 	*x = QuicParams{}
+-	mi := &file_transport_internet_config_proto_msgTypes[3]
++	mi := &file_transport_internet_config_proto_msgTypes[2]
+ 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 	ms.StoreMessageInfo(mi)
+ }
+@@ -479,7 +418,7 @@ func (x *QuicParams) String() string {
+ func (*QuicParams) ProtoMessage() {}
+ 
+ func (x *QuicParams) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[3]
++	mi := &file_transport_internet_config_proto_msgTypes[2]
+ 	if x != nil {
+ 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 		if ms.LoadMessageInfo() == nil {
+@@ -492,7 +431,7 @@ func (x *QuicParams) ProtoReflect() protoreflect.Message {
+ 
+ // Deprecated: Use QuicParams.ProtoReflect.Descriptor instead.
+ func (*QuicParams) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{3}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{2}
+ }
+ 
+ func (x *QuicParams) GetCongestion() string {
+@@ -530,13 +469,6 @@ func (x *QuicParams) GetBrutalDisableLossCompensation() bool {
+ 	return false
+ }
+ 
+-func (x *QuicParams) GetUdpHop() *UdpHop {
+-	if x != nil {
+-		return x.UdpHop
+-	}
+-	return nil
+-}
+-
+ func (x *QuicParams) GetInitStreamReceiveWindow() uint64 {
+ 	if x != nil {
+ 		return x.InitStreamReceiveWindow
+@@ -628,7 +560,7 @@ type CustomSockopt struct {
+ 
+ func (x *CustomSockopt) Reset() {
+ 	*x = CustomSockopt{}
+-	mi := &file_transport_internet_config_proto_msgTypes[4]
++	mi := &file_transport_internet_config_proto_msgTypes[3]
+ 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 	ms.StoreMessageInfo(mi)
+ }
+@@ -640,7 +572,7 @@ func (x *CustomSockopt) String() string {
+ func (*CustomSockopt) ProtoMessage() {}
+ 
+ func (x *CustomSockopt) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[4]
++	mi := &file_transport_internet_config_proto_msgTypes[3]
+ 	if x != nil {
+ 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 		if ms.LoadMessageInfo() == nil {
+@@ -653,7 +585,7 @@ func (x *CustomSockopt) ProtoReflect() protoreflect.Message {
+ 
+ // Deprecated: Use CustomSockopt.ProtoReflect.Descriptor instead.
+ func (*CustomSockopt) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{4}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{3}
+ }
+ 
+ func (x *CustomSockopt) GetSystem() string {
+@@ -733,7 +665,7 @@ type SocketConfig struct {
+ 
+ func (x *SocketConfig) Reset() {
+ 	*x = SocketConfig{}
+-	mi := &file_transport_internet_config_proto_msgTypes[5]
++	mi := &file_transport_internet_config_proto_msgTypes[4]
+ 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 	ms.StoreMessageInfo(mi)
+ }
+@@ -745,7 +677,7 @@ func (x *SocketConfig) String() string {
+ func (*SocketConfig) ProtoMessage() {}
+ 
+ func (x *SocketConfig) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[5]
++	mi := &file_transport_internet_config_proto_msgTypes[4]
+ 	if x != nil {
+ 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 		if ms.LoadMessageInfo() == nil {
+@@ -758,7 +690,7 @@ func (x *SocketConfig) ProtoReflect() protoreflect.Message {
+ 
+ // Deprecated: Use SocketConfig.ProtoReflect.Descriptor instead.
+ func (*SocketConfig) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{5}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{4}
+ }
+ 
+ func (x *SocketConfig) GetMark() int32 {
+@@ -920,7 +852,7 @@ type HappyEyeballsConfig struct {
+ 
+ func (x *HappyEyeballsConfig) Reset() {
+ 	*x = HappyEyeballsConfig{}
+-	mi := &file_transport_internet_config_proto_msgTypes[6]
++	mi := &file_transport_internet_config_proto_msgTypes[5]
+ 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 	ms.StoreMessageInfo(mi)
+ }
+@@ -932,7 +864,7 @@ func (x *HappyEyeballsConfig) String() string {
+ func (*HappyEyeballsConfig) ProtoMessage() {}
+ 
+ func (x *HappyEyeballsConfig) ProtoReflect() protoreflect.Message {
+-	mi := &file_transport_internet_config_proto_msgTypes[6]
++	mi := &file_transport_internet_config_proto_msgTypes[5]
+ 	if x != nil {
+ 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+ 		if ms.LoadMessageInfo() == nil {
+@@ -945,7 +877,7 @@ func (x *HappyEyeballsConfig) ProtoReflect() protoreflect.Message {
+ 
+ // Deprecated: Use HappyEyeballsConfig.ProtoReflect.Descriptor instead.
+ func (*HappyEyeballsConfig) Descriptor() ([]byte, []int) {
+-	return file_transport_internet_config_proto_rawDescGZIP(), []int{6}
++	return file_transport_internet_config_proto_rawDescGZIP(), []int{5}
+ }
+ 
+ func (x *HappyEyeballsConfig) GetPrioritizeIpv6() bool {
+@@ -996,11 +928,7 @@ const file_transport_internet_config_proto_rawDesc = "" +
+ 	"\btcpmasks\x18\v \x03(\v2 .xray.common.serial.TypedMessageR\btcpmasks\x12D\n" +
+ 	"\vquic_params\x18\f \x01(\v2#.xray.transport.internet.QuicParamsR\n" +
+ 	"quicParams\x12N\n" +
+-	"\x0fsocket_settings\x18\x06 \x01(\v2%.xray.transport.internet.SocketConfigR\x0esocketSettings\"d\n" +
+-	"\x06UdpHop\x12\x14\n" +
+-	"\x05ports\x18\x01 \x03(\rR\x05ports\x12!\n" +
+-	"\finterval_min\x18\x02 \x01(\x03R\vintervalMin\x12!\n" +
+-	"\finterval_max\x18\x03 \x01(\x03R\vintervalMax\"\xc7\x06\n" +
++	"\x0fsocket_settings\x18\x06 \x01(\v2%.xray.transport.internet.SocketConfigR\x0esocketSettings\"\x8d\x06\n" +
+ 	"\n" +
+ 	"QuicParams\x12\x1e\n" +
+ 	"\n" +
+@@ -1011,22 +939,21 @@ const file_transport_internet_config_proto_rawDesc = "" +
+ 	"\tbrutal_up\x18\x03 \x01(\x04R\bbrutalUp\x12\x1f\n" +
+ 	"\vbrutal_down\x18\x04 \x01(\x04R\n" +
+ 	"brutalDown\x12G\n" +
+-	" brutal_disable_loss_compensation\x18\x05 \x01(\bR\x1dbrutalDisableLossCompensation\x128\n" +
+-	"\audp_hop\x18\x06 \x01(\v2\x1f.xray.transport.internet.UdpHopR\x06udpHop\x12;\n" +
+-	"\x1ainit_stream_receive_window\x18\a \x01(\x04R\x17initStreamReceiveWindow\x129\n" +
+-	"\x19max_stream_receive_window\x18\b \x01(\x04R\x16maxStreamReceiveWindow\x127\n" +
+-	"\x18init_conn_receive_window\x18\t \x01(\x04R\x15initConnReceiveWindow\x125\n" +
+-	"\x17max_conn_receive_window\x18\n" +
+-	" \x01(\x04R\x14maxConnReceiveWindow\x12(\n" +
+-	"\x10max_idle_timeout\x18\v \x01(\x03R\x0emaxIdleTimeout\x12*\n" +
+-	"\x11keep_alive_period\x18\f \x01(\x03R\x0fkeepAlivePeriod\x12;\n" +
+-	"\x1adisable_path_mtu_discovery\x18\r \x01(\bR\x17disablePathMtuDiscovery\x122\n" +
+-	"\x15disable_chrome_parrot\x18\x0e \x01(\bR\x13disableChromeParrot\x12\x1e\n" +
++	" brutal_disable_loss_compensation\x18\x05 \x01(\bR\x1dbrutalDisableLossCompensation\x12;\n" +
++	"\x1ainit_stream_receive_window\x18\x06 \x01(\x04R\x17initStreamReceiveWindow\x129\n" +
++	"\x19max_stream_receive_window\x18\a \x01(\x04R\x16maxStreamReceiveWindow\x127\n" +
++	"\x18init_conn_receive_window\x18\b \x01(\x04R\x15initConnReceiveWindow\x125\n" +
++	"\x17max_conn_receive_window\x18\t \x01(\x04R\x14maxConnReceiveWindow\x12(\n" +
++	"\x10max_idle_timeout\x18\n" +
++	" \x01(\x03R\x0emaxIdleTimeout\x12*\n" +
++	"\x11keep_alive_period\x18\v \x01(\x03R\x0fkeepAlivePeriod\x12;\n" +
++	"\x1adisable_path_mtu_discovery\x18\f \x01(\bR\x17disablePathMtuDiscovery\x122\n" +
++	"\x15disable_chrome_parrot\x18\r \x01(\bR\x13disableChromeParrot\x12\x1e\n" +
+ 	"\n" +
+-	"disableGSO\x18\x0f \x01(\bR\n" +
++	"disableGSO\x18\x0e \x01(\bR\n" +
+ 	"disableGSO\x120\n" +
+-	"\x14max_incoming_streams\x18\x10 \x01(\x03R\x12maxIncomingStreams\x126\n" +
+-	"\x17disable_stateless_reset\x18\x11 \x01(\bR\x15disableStatelessReset\"\x93\x01\n" +
++	"\x14max_incoming_streams\x18\x0f \x01(\x03R\x12maxIncomingStreams\x126\n" +
++	"\x17disable_stateless_reset\x18\x10 \x01(\bR\x15disableStatelessReset\"\x93\x01\n" +
+ 	"\rCustomSockopt\x12\x16\n" +
+ 	"\x06system\x18\x01 \x01(\tR\x06system\x12\x18\n" +
+ 	"\anetwork\x18\x02 \x01(\tR\anetwork\x12\x14\n" +
+@@ -1110,41 +1037,39 @@ func file_transport_internet_config_proto_rawDescGZIP() []byte {
+ }
+ 
+ var file_transport_internet_config_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+-var file_transport_internet_config_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
++var file_transport_internet_config_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+ var file_transport_internet_config_proto_goTypes = []any{
+ 	(DomainStrategy)(0),          // 0: xray.transport.internet.DomainStrategy
+ 	(AddressPortStrategy)(0),     // 1: xray.transport.internet.AddressPortStrategy
+ 	(SocketConfig_TProxyMode)(0), // 2: xray.transport.internet.SocketConfig.TProxyMode
+ 	(*TransportConfig)(nil),      // 3: xray.transport.internet.TransportConfig
+ 	(*StreamConfig)(nil),         // 4: xray.transport.internet.StreamConfig
+-	(*UdpHop)(nil),               // 5: xray.transport.internet.UdpHop
+-	(*QuicParams)(nil),           // 6: xray.transport.internet.QuicParams
+-	(*CustomSockopt)(nil),        // 7: xray.transport.internet.CustomSockopt
+-	(*SocketConfig)(nil),         // 8: xray.transport.internet.SocketConfig
+-	(*HappyEyeballsConfig)(nil),  // 9: xray.transport.internet.HappyEyeballsConfig
+-	(*serial.TypedMessage)(nil),  // 10: xray.common.serial.TypedMessage
+-	(*net.IPOrDomain)(nil),       // 11: xray.common.net.IPOrDomain
++	(*QuicParams)(nil),           // 5: xray.transport.internet.QuicParams
++	(*CustomSockopt)(nil),        // 6: xray.transport.internet.CustomSockopt
++	(*SocketConfig)(nil),         // 7: xray.transport.internet.SocketConfig
++	(*HappyEyeballsConfig)(nil),  // 8: xray.transport.internet.HappyEyeballsConfig
++	(*serial.TypedMessage)(nil),  // 9: xray.common.serial.TypedMessage
++	(*net.IPOrDomain)(nil),       // 10: xray.common.net.IPOrDomain
+ }
+ var file_transport_internet_config_proto_depIdxs = []int32{
+-	10, // 0: xray.transport.internet.TransportConfig.settings:type_name -> xray.common.serial.TypedMessage
+-	11, // 1: xray.transport.internet.StreamConfig.address:type_name -> xray.common.net.IPOrDomain
++	9,  // 0: xray.transport.internet.TransportConfig.settings:type_name -> xray.common.serial.TypedMessage
++	10, // 1: xray.transport.internet.StreamConfig.address:type_name -> xray.common.net.IPOrDomain
+ 	3,  // 2: xray.transport.internet.StreamConfig.transport_settings:type_name -> xray.transport.internet.TransportConfig
+-	10, // 3: xray.transport.internet.StreamConfig.security_settings:type_name -> xray.common.serial.TypedMessage
+-	10, // 4: xray.transport.internet.StreamConfig.udpmasks:type_name -> xray.common.serial.TypedMessage
+-	10, // 5: xray.transport.internet.StreamConfig.tcpmasks:type_name -> xray.common.serial.TypedMessage
+-	6,  // 6: xray.transport.internet.StreamConfig.quic_params:type_name -> xray.transport.internet.QuicParams
+-	8,  // 7: xray.transport.internet.StreamConfig.socket_settings:type_name -> xray.transport.internet.SocketConfig
+-	5,  // 8: xray.transport.internet.QuicParams.udp_hop:type_name -> xray.transport.internet.UdpHop
+-	2,  // 9: xray.transport.internet.SocketConfig.tproxy:type_name -> xray.transport.internet.SocketConfig.TProxyMode
+-	0,  // 10: xray.transport.internet.SocketConfig.domain_strategy:type_name -> xray.transport.internet.DomainStrategy
+-	7,  // 11: xray.transport.internet.SocketConfig.customSockopt:type_name -> xray.transport.internet.CustomSockopt
+-	1,  // 12: xray.transport.internet.SocketConfig.address_port_strategy:type_name -> xray.transport.internet.AddressPortStrategy
+-	9,  // 13: xray.transport.internet.SocketConfig.happy_eyeballs:type_name -> xray.transport.internet.HappyEyeballsConfig
+-	14, // [14:14] is the sub-list for method output_type
+-	14, // [14:14] is the sub-list for method input_type
+-	14, // [14:14] is the sub-list for extension type_name
+-	14, // [14:14] is the sub-list for extension extendee
+-	0,  // [0:14] is the sub-list for field type_name
++	9,  // 3: xray.transport.internet.StreamConfig.security_settings:type_name -> xray.common.serial.TypedMessage
++	9,  // 4: xray.transport.internet.StreamConfig.udpmasks:type_name -> xray.common.serial.TypedMessage
++	9,  // 5: xray.transport.internet.StreamConfig.tcpmasks:type_name -> xray.common.serial.TypedMessage
++	5,  // 6: xray.transport.internet.StreamConfig.quic_params:type_name -> xray.transport.internet.QuicParams
++	7,  // 7: xray.transport.internet.StreamConfig.socket_settings:type_name -> xray.transport.internet.SocketConfig
++	2,  // 8: xray.transport.internet.SocketConfig.tproxy:type_name -> xray.transport.internet.SocketConfig.TProxyMode
++	0,  // 9: xray.transport.internet.SocketConfig.domain_strategy:type_name -> xray.transport.internet.DomainStrategy
++	6,  // 10: xray.transport.internet.SocketConfig.customSockopt:type_name -> xray.transport.internet.CustomSockopt
++	1,  // 11: xray.transport.internet.SocketConfig.address_port_strategy:type_name -> xray.transport.internet.AddressPortStrategy
++	8,  // 12: xray.transport.internet.SocketConfig.happy_eyeballs:type_name -> xray.transport.internet.HappyEyeballsConfig
++	13, // [13:13] is the sub-list for method output_type
++	13, // [13:13] is the sub-list for method input_type
++	13, // [13:13] is the sub-list for extension type_name
++	13, // [13:13] is the sub-list for extension extendee
++	0,  // [0:13] is the sub-list for field type_name
+ }
+ 
+ func init() { file_transport_internet_config_proto_init() }
+@@ -1158,7 +1083,7 @@ func file_transport_internet_config_proto_init() {
+ 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+ 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_transport_internet_config_proto_rawDesc), len(file_transport_internet_config_proto_rawDesc)),
+ 			NumEnums:      3,
+-			NumMessages:   7,
++			NumMessages:   6,
+ 			NumExtensions: 0,
+ 			NumServices:   0,
+ 		},
+diff --git a/transport/internet/config.proto b/transport/internet/config.proto
+index cbf48bf5..b459887b 100644
+--- a/transport/internet/config.proto
++++ b/transport/internet/config.proto
+@@ -64,30 +64,23 @@ message StreamConfig {
+   SocketConfig socket_settings = 6;
+ }
+ 
+-message UdpHop {
+-  repeated uint32 ports = 1;
+-  int64 interval_min = 2;
+-  int64 interval_max = 3;
+-}
+-
+ message QuicParams {
+   string congestion = 1;
+   string bbr_profile = 2;
+   uint64 brutal_up = 3;
+   uint64 brutal_down = 4;
+   bool brutal_disable_loss_compensation = 5;
+-  UdpHop udp_hop = 6;
+-  uint64 init_stream_receive_window = 7;
+-  uint64 max_stream_receive_window = 8;
+-  uint64 init_conn_receive_window = 9;
+-  uint64 max_conn_receive_window = 10;
+-  int64 max_idle_timeout = 11;
+-  int64 keep_alive_period = 12;
+-  bool disable_path_mtu_discovery = 13;
+-  bool disable_chrome_parrot = 14;
+-  bool disableGSO = 15;
+-  int64 max_incoming_streams = 16;
+-  bool disable_stateless_reset = 17;    
++  uint64 init_stream_receive_window = 6;
++  uint64 max_stream_receive_window = 7;
++  uint64 init_conn_receive_window = 8;
++  uint64 max_conn_receive_window = 9;
++  int64 max_idle_timeout = 10;
++  int64 keep_alive_period = 11;
++  bool disable_path_mtu_discovery = 12;
++  bool disable_chrome_parrot = 13;
++  bool disableGSO = 14;
++  int64 max_incoming_streams = 15;
++  bool disable_stateless_reset = 16;    
+ }
+ 
+ message CustomSockopt {
+diff --git a/transport/internet/finalmask/finalmask.go b/transport/internet/finalmask/finalmask.go
+index 4683082e..db723de5 100644
+--- a/transport/internet/finalmask/finalmask.go
++++ b/transport/internet/finalmask/finalmask.go
+@@ -10,8 +10,6 @@ import (
+ )
+ 
+ type Udpmask interface {
+-	UDP()
+-
+ 	WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error)
+ 	WrapPacketConnServer(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error)
+ }
+@@ -21,15 +19,14 @@ type UdpmaskManager struct {
+ }
+ 
+ func NewUdpmaskManager(udpmasks []Udpmask) *UdpmaskManager {
+-	return &UdpmaskManager{
+-		udpmasks: udpmasks,
+-	}
++	slices.Reverse(udpmasks)
++	return &UdpmaskManager{udpmasks: udpmasks}
+ }
+ 
+ func (m *UdpmaskManager) WrapPacketConnClient(raw net.PacketConn) (net.PacketConn, error) {
+ 	var sizes []int
+ 	var conns []net.PacketConn
+-	for i, mask := range slices.Backward(m.udpmasks) {
++	for i, mask := range m.udpmasks {
+ 		if _, ok := mask.(headerConn); ok {
+ 			conn, err := mask.WrapPacketConnClient(nil, i, len(m.udpmasks)-1)
+ 			if err != nil {
+@@ -62,7 +59,7 @@ func (m *UdpmaskManager) WrapPacketConnClient(raw net.PacketConn) (net.PacketCon
+ func (m *UdpmaskManager) WrapPacketConnServer(raw net.PacketConn) (net.PacketConn, error) {
+ 	var sizes []int
+ 	var conns []net.PacketConn
+-	for i, mask := range slices.Backward(m.udpmasks) {
++	for i, mask := range m.udpmasks {
+ 		if _, ok := mask.(headerConn); ok {
+ 			conn, err := mask.WrapPacketConnServer(nil, i, len(m.udpmasks)-1)
+ 			if err != nil {
+@@ -195,8 +192,6 @@ func (c *headerManagerConn) WriteTo(p []byte, addr net.Addr) (n int, err error)
+ }
+ 
+ type Tcpmask interface {
+-	TCP()
+-
+ 	WrapConnClient(net.Conn) (net.Conn, error)
+ 	WrapConnServer(net.Conn) (net.Conn, error)
+ }
+@@ -206,14 +201,13 @@ type TcpmaskManager struct {
+ }
+ 
+ func NewTcpmaskManager(tcpmasks []Tcpmask) *TcpmaskManager {
+-	return &TcpmaskManager{
+-		tcpmasks: tcpmasks,
+-	}
++	slices.Reverse(tcpmasks)
++	return &TcpmaskManager{tcpmasks: tcpmasks}
+ }
+ 
+ func (m *TcpmaskManager) WrapConnClient(raw net.Conn) (net.Conn, error) {
+ 	var err error
+-	for _, mask := range slices.Backward(m.tcpmasks) {
++	for _, mask := range m.tcpmasks {
+ 		raw, err = mask.WrapConnClient(raw)
+ 		if err != nil {
+ 			return nil, err
+@@ -224,7 +218,7 @@ func (m *TcpmaskManager) WrapConnClient(raw net.Conn) (net.Conn, error) {
+ 
+ func (m *TcpmaskManager) WrapConnServer(raw net.Conn) (net.Conn, error) {
+ 	var err error
+-	for _, mask := range slices.Backward(m.tcpmasks) {
++	for _, mask := range m.tcpmasks {
+ 		raw, err = mask.WrapConnServer(raw)
+ 		if err != nil {
+ 			return nil, err
+diff --git a/transport/internet/finalmask/fragment/config.go b/transport/internet/finalmask/fragment/config.go
+index 165f11ca..9610c059 100644
+--- a/transport/internet/finalmask/fragment/config.go
++++ b/transport/internet/finalmask/fragment/config.go
+@@ -2,9 +2,6 @@ package fragment
+ 
+ import "net"
+ 
+-func (c *Config) TCP() {
+-}
+-
+ func (c *Config) WrapConnClient(raw net.Conn) (net.Conn, error) {
+ 	return NewConnClient(c, raw, false)
+ }
+diff --git a/transport/internet/finalmask/header/custom/config.go b/transport/internet/finalmask/header/custom/config.go
+index c054718b..7e2eaab7 100644
+--- a/transport/internet/finalmask/header/custom/config.go
++++ b/transport/internet/finalmask/header/custom/config.go
+@@ -4,8 +4,6 @@ import (
+ 	"net"
+ )
+ 
+-func (c *TCPConfig) TCP() {}
+-
+ func (c *TCPConfig) WrapConnClient(raw net.Conn) (net.Conn, error) {
+ 	return NewConnClientTCP(c, raw)
+ }
+@@ -14,8 +12,6 @@ func (c *TCPConfig) WrapConnServer(raw net.Conn) (net.Conn, error) {
+ 	return NewConnServerTCP(c, raw)
+ }
+ 
+-func (c *UDPConfig) UDP() {}
+-
+ func (c *UDPConfig) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+ 	return NewConnClientUDP(c, raw)
+ }
+@@ -24,8 +20,6 @@ func (c *UDPConfig) WrapPacketConnServer(raw net.PacketConn, level int, levelCou
+ 	return NewConnServerUDP(c, raw)
+ }
+ 
+-func (c *UDPStandaloneConfig) UDP() {}
+-
+ func (c *UDPStandaloneConfig) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+ 	return NewConnClientUDPStandalone(c, raw)
+ }
+diff --git a/transport/internet/finalmask/mkcp/aes128gcm/config.go b/transport/internet/finalmask/mkcp/aes128gcm/config.go
+index 70d87ae0..d7cd0d41 100644
+--- a/transport/internet/finalmask/mkcp/aes128gcm/config.go
++++ b/transport/internet/finalmask/mkcp/aes128gcm/config.go
+@@ -4,8 +4,6 @@ import (
+ 	"net"
+ )
+ 
+-func (c *Config) UDP() {}
+-
+ func (c *Config) HeaderConn() {}
+ 
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+diff --git a/transport/internet/finalmask/mkcp/header/config.go b/transport/internet/finalmask/mkcp/header/config.go
+index 17774871..0b5c67be 100644
+--- a/transport/internet/finalmask/mkcp/header/config.go
++++ b/transport/internet/finalmask/mkcp/header/config.go
+@@ -4,8 +4,6 @@ import (
+ 	"net"
+ )
+ 
+-func (c *Config) UDP() {}
+-
+ func (c *Config) HeaderConn() {}
+ 
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+diff --git a/transport/internet/finalmask/mkcp/original/config.go b/transport/internet/finalmask/mkcp/original/config.go
+index b6b42c73..98bf964a 100644
+--- a/transport/internet/finalmask/mkcp/original/config.go
++++ b/transport/internet/finalmask/mkcp/original/config.go
+@@ -4,8 +4,6 @@ import (
+ 	"net"
+ )
+ 
+-func (c *Config) UDP() {}
+-
+ func (c *Config) HeaderConn() {}
+ 
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+diff --git a/transport/internet/finalmask/noise/config.go b/transport/internet/finalmask/noise/config.go
+index 1764c0b1..ecb5db29 100644
+--- a/transport/internet/finalmask/noise/config.go
++++ b/transport/internet/finalmask/noise/config.go
+@@ -2,9 +2,6 @@ package noise
+ 
+ import "net"
+ 
+-func (c *Config) UDP() {
+-}
+-
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+ 	return NewConnClient(c, raw)
+ }
+diff --git a/transport/internet/finalmask/realm/config.go b/transport/internet/finalmask/realm/config.go
+index 2604fa8a..4b8232f7 100644
+--- a/transport/internet/finalmask/realm/config.go
++++ b/transport/internet/finalmask/realm/config.go
+@@ -5,15 +5,11 @@ import (
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/transport/internet"
+-	"github.com/xtls/xray-core/transport/internet/hysteria/udphop"
+ )
+ 
+-func (c *Config) UDP() {}
+-
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+ 	_, ok1 := raw.(*internet.FakePacketConn)
+-	_, ok2 := raw.(*udphop.UdpHopPacketConn)
+-	if level != 0 || ok1 || ok2 {
++	if level != 0 || ok1 {
+ 		return nil, errors.New("realm requires being at the outermost level")
+ 	}
+ 	return NewConnClient(c, raw)
+diff --git a/transport/internet/finalmask/salamander/config.go b/transport/internet/finalmask/salamander/config.go
+index 192c466b..7d019141 100644
+--- a/transport/internet/finalmask/salamander/config.go
++++ b/transport/internet/finalmask/salamander/config.go
+@@ -4,8 +4,6 @@ import (
+ 	"net"
+ )
+ 
+-func (c *Config) UDP() {}
+-
+ func (c *Config) HeaderConn() {}
+ 
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+@@ -16,8 +14,6 @@ func (c *Config) WrapPacketConnServer(raw net.PacketConn, level int, levelCount
+ 	return NewSalamanderConnServer(c, raw)
+ }
+ 
+-func (c *GeckoConfig) UDP() {}
+-
+ func (c *GeckoConfig) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+ 	return NewGeckoConnClient(c, raw)
+ }
+diff --git a/transport/internet/finalmask/sudoku/config.go b/transport/internet/finalmask/sudoku/config.go
+index 58a4562f..f160a8b5 100644
+--- a/transport/internet/finalmask/sudoku/config.go
++++ b/transport/internet/finalmask/sudoku/config.go
+@@ -6,12 +6,6 @@ import (
+ 	"github.com/xtls/xray-core/common/errors"
+ )
+ 
+-func (c *Config) TCP() {
+-}
+-
+-func (c *Config) UDP() {
+-}
+-
+ // Sudoku in finalmask mode is a pure appearance transform with no standalone handshake.
+ // TCP always keeps classic sudoku on uplink and uses packed downlink optimization on server writes.
+ func (c *Config) WrapConnClient(raw net.Conn) (net.Conn, error) {
+diff --git a/transport/internet/finalmask/udphop/config.go b/transport/internet/finalmask/udphop/config.go
+new file mode 100644
+index 00000000..5e8fda5f
+--- /dev/null
++++ b/transport/internet/finalmask/udphop/config.go
+@@ -0,0 +1,20 @@
++package udphop
++
++import (
++	"net"
++
++	"github.com/xtls/xray-core/common/errors"
++	"github.com/xtls/xray-core/transport/internet"
++)
++
++func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
++	_, ok1 := raw.(*internet.FakePacketConn)
++	if level != 0 || ok1 {
++		return nil, errors.New("udphop requires being at the outermost level")
++	}
++	return NewUDPHopConn(c, raw)
++}
++
++func (c *Config) WrapPacketConnServer(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
++	return nil, errors.New("udphop: client only")
++}
+diff --git a/transport/internet/finalmask/udphop/config.pb.go b/transport/internet/finalmask/udphop/config.pb.go
+new file mode 100644
+index 00000000..6b4291c9
+--- /dev/null
++++ b/transport/internet/finalmask/udphop/config.pb.go
+@@ -0,0 +1,190 @@
++// Code generated by protoc-gen-go. DO NOT EDIT.
++// versions:
++// 	protoc-gen-go v1.36.11
++// 	protoc        v6.33.5
++// source: transport/internet/finalmask/udphop/config.proto
++
++package udphop
++
++import (
++	internet "github.com/xtls/xray-core/transport/internet"
++	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
++	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
++	reflect "reflect"
++	sync "sync"
++	unsafe "unsafe"
++)
++
++const (
++	// Verify that this generated code is sufficiently up-to-date.
++	_ = protoimpl.EnforceVersion(20 - protoimpl.MinVersion)
++	// Verify that runtime/protoimpl is sufficiently up-to-date.
++	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
++)
++
++type Config struct {
++	state         protoimpl.MessageState `protogen:"open.v1"`
++	Sockopt       *internet.SocketConfig `protobuf:"bytes,1,opt,name=sockopt,proto3" json:"sockopt,omitempty"`
++	Local         bool                   `protobuf:"varint,2,opt,name=local,proto3" json:"local,omitempty"`
++	Remote        bool                   `protobuf:"varint,3,opt,name=remote,proto3" json:"remote,omitempty"`
++	RemoteOnce    bool                   `protobuf:"varint,4,opt,name=remote_once,json=remoteOnce,proto3" json:"remote_once,omitempty"`
++	IntervalMin   int64                  `protobuf:"varint,5,opt,name=interval_min,json=intervalMin,proto3" json:"interval_min,omitempty"`
++	IntervalMax   int64                  `protobuf:"varint,6,opt,name=interval_max,json=intervalMax,proto3" json:"interval_max,omitempty"`
++	RemotePorts   []uint32               `protobuf:"varint,7,rep,packed,name=remote_ports,json=remotePorts,proto3" json:"remote_ports,omitempty"`
++	RemoteIPs     []string               `protobuf:"bytes,8,rep,name=remoteIPs,proto3" json:"remoteIPs,omitempty"`
++	unknownFields protoimpl.UnknownFields
++	sizeCache     protoimpl.SizeCache
++}
++
++func (x *Config) Reset() {
++	*x = Config{}
++	mi := &file_transport_internet_finalmask_udphop_config_proto_msgTypes[0]
++	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++	ms.StoreMessageInfo(mi)
++}
++
++func (x *Config) String() string {
++	return protoimpl.X.MessageStringOf(x)
++}
++
++func (*Config) ProtoMessage() {}
++
++func (x *Config) ProtoReflect() protoreflect.Message {
++	mi := &file_transport_internet_finalmask_udphop_config_proto_msgTypes[0]
++	if x != nil {
++		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
++		if ms.LoadMessageInfo() == nil {
++			ms.StoreMessageInfo(mi)
++		}
++		return ms
++	}
++	return mi.MessageOf(x)
++}
++
++// Deprecated: Use Config.ProtoReflect.Descriptor instead.
++func (*Config) Descriptor() ([]byte, []int) {
++	return file_transport_internet_finalmask_udphop_config_proto_rawDescGZIP(), []int{0}
++}
++
++func (x *Config) GetSockopt() *internet.SocketConfig {
++	if x != nil {
++		return x.Sockopt
++	}
++	return nil
++}
++
++func (x *Config) GetLocal() bool {
++	if x != nil {
++		return x.Local
++	}
++	return false
++}
++
++func (x *Config) GetRemote() bool {
++	if x != nil {
++		return x.Remote
++	}
++	return false
++}
++
++func (x *Config) GetRemoteOnce() bool {
++	if x != nil {
++		return x.RemoteOnce
++	}
++	return false
++}
++
++func (x *Config) GetIntervalMin() int64 {
++	if x != nil {
++		return x.IntervalMin
++	}
++	return 0
++}
++
++func (x *Config) GetIntervalMax() int64 {
++	if x != nil {
++		return x.IntervalMax
++	}
++	return 0
++}
++
++func (x *Config) GetRemotePorts() []uint32 {
++	if x != nil {
++		return x.RemotePorts
++	}
++	return nil
++}
++
++func (x *Config) GetRemoteIPs() []string {
++	if x != nil {
++		return x.RemoteIPs
++	}
++	return nil
++}
++
++var File_transport_internet_finalmask_udphop_config_proto protoreflect.FileDescriptor
++
++const file_transport_internet_finalmask_udphop_config_proto_rawDesc = "" +
++	"\n" +
++	"0transport/internet/finalmask/udphop/config.proto\x12(xray.transport.internet.finalmask.udphop\x1a\x1ftransport/internet/config.proto\"\x9f\x02\n" +
++	"\x06Config\x12?\n" +
++	"\asockopt\x18\x01 \x01(\v2%.xray.transport.internet.SocketConfigR\asockopt\x12\x14\n" +
++	"\x05local\x18\x02 \x01(\bR\x05local\x12\x16\n" +
++	"\x06remote\x18\x03 \x01(\bR\x06remote\x12\x1f\n" +
++	"\vremote_once\x18\x04 \x01(\bR\n" +
++	"remoteOnce\x12!\n" +
++	"\finterval_min\x18\x05 \x01(\x03R\vintervalMin\x12!\n" +
++	"\finterval_max\x18\x06 \x01(\x03R\vintervalMax\x12!\n" +
++	"\fremote_ports\x18\a \x03(\rR\vremotePorts\x12\x1c\n" +
++	"\tremoteIPs\x18\b \x03(\tR\tremoteIPsB\x9a\x01\n" +
++	",com.xray.transport.internet.finalmask.udphopP\x01Z=github.com/xtls/xray-core/transport/internet/finalmask/udphop\xaa\x02(Xray.Transport.Internet.Finalmask.Udphopb\x06proto3"
++
++var (
++	file_transport_internet_finalmask_udphop_config_proto_rawDescOnce sync.Once
++	file_transport_internet_finalmask_udphop_config_proto_rawDescData []byte
++)
++
++func file_transport_internet_finalmask_udphop_config_proto_rawDescGZIP() []byte {
++	file_transport_internet_finalmask_udphop_config_proto_rawDescOnce.Do(func() {
++		file_transport_internet_finalmask_udphop_config_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_transport_internet_finalmask_udphop_config_proto_rawDesc), len(file_transport_internet_finalmask_udphop_config_proto_rawDesc)))
++	})
++	return file_transport_internet_finalmask_udphop_config_proto_rawDescData
++}
++
++var file_transport_internet_finalmask_udphop_config_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
++var file_transport_internet_finalmask_udphop_config_proto_goTypes = []any{
++	(*Config)(nil),                // 0: xray.transport.internet.finalmask.udphop.Config
++	(*internet.SocketConfig)(nil), // 1: xray.transport.internet.SocketConfig
++}
++var file_transport_internet_finalmask_udphop_config_proto_depIdxs = []int32{
++	1, // 0: xray.transport.internet.finalmask.udphop.Config.sockopt:type_name -> xray.transport.internet.SocketConfig
++	1, // [1:1] is the sub-list for method output_type
++	1, // [1:1] is the sub-list for method input_type
++	1, // [1:1] is the sub-list for extension type_name
++	1, // [1:1] is the sub-list for extension extendee
++	0, // [0:1] is the sub-list for field type_name
++}
++
++func init() { file_transport_internet_finalmask_udphop_config_proto_init() }
++func file_transport_internet_finalmask_udphop_config_proto_init() {
++	if File_transport_internet_finalmask_udphop_config_proto != nil {
++		return
++	}
++	type x struct{}
++	out := protoimpl.TypeBuilder{
++		File: protoimpl.DescBuilder{
++			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
++			RawDescriptor: unsafe.Slice(unsafe.StringData(file_transport_internet_finalmask_udphop_config_proto_rawDesc), len(file_transport_internet_finalmask_udphop_config_proto_rawDesc)),
++			NumEnums:      0,
++			NumMessages:   1,
++			NumExtensions: 0,
++			NumServices:   0,
++		},
++		GoTypes:           file_transport_internet_finalmask_udphop_config_proto_goTypes,
++		DependencyIndexes: file_transport_internet_finalmask_udphop_config_proto_depIdxs,
++		MessageInfos:      file_transport_internet_finalmask_udphop_config_proto_msgTypes,
++	}.Build()
++	File_transport_internet_finalmask_udphop_config_proto = out.File
++	file_transport_internet_finalmask_udphop_config_proto_goTypes = nil
++	file_transport_internet_finalmask_udphop_config_proto_depIdxs = nil
++}
+diff --git a/transport/internet/finalmask/udphop/config.proto b/transport/internet/finalmask/udphop/config.proto
+new file mode 100644
+index 00000000..48b8b1da
+--- /dev/null
++++ b/transport/internet/finalmask/udphop/config.proto
+@@ -0,0 +1,21 @@
++syntax = "proto3";
++
++package xray.transport.internet.finalmask.udphop;
++option csharp_namespace = "Xray.Transport.Internet.Finalmask.Udphop";
++option go_package = "github.com/xtls/xray-core/transport/internet/finalmask/udphop";
++option java_package = "com.xray.transport.internet.finalmask.udphop";
++option java_multiple_files = true;
++
++import "transport/internet/config.proto";
++
++message Config {
++  xray.transport.internet.SocketConfig sockopt = 1;
++  bool local = 2;
++  bool remote = 3;
++  bool remote_once = 4;
++  int64 interval_min = 5;
++  int64 interval_max = 6;
++  repeated uint32 remote_ports = 7;
++  repeated string remoteIPs = 8;
++}
++
+diff --git a/transport/internet/finalmask/udphop/conn.go b/transport/internet/finalmask/udphop/conn.go
+new file mode 100644
+index 00000000..13c3288d
+--- /dev/null
++++ b/transport/internet/finalmask/udphop/conn.go
+@@ -0,0 +1,305 @@
++package udphop
++
++import (
++	"context"
++	"crypto/rand"
++	goerrors "errors"
++	"io"
++	mrand "math/rand"
++	gonet "net"
++	"net/netip"
++	"reflect"
++	"sync"
++	"time"
++
++	"github.com/xtls/xray-core/common"
++	"github.com/xtls/xray-core/common/crypto"
++	"github.com/xtls/xray-core/common/errors"
++	"github.com/xtls/xray-core/common/net"
++	"github.com/xtls/xray-core/common/net/cnc"
++	"github.com/xtls/xray-core/transport/internet"
++	"github.com/xtls/xray-core/transport/internet/finalmask"
++)
++
++var pool = sync.Pool{
++	New: func() any {
++		return make([]byte, finalmask.UDPSize)
++	},
++}
++
++type packet struct {
++	p    []byte
++	addr net.Addr
++	err  error
++}
++
++type udpHopConn struct {
++	conn       net.PacketConn
++	sockopt    *internet.SocketConfig
++	local      bool
++	remote     bool
++	remoteOnce bool
++
++	intervalMin int64
++	intervalMax int64
++	remotePorts []uint32
++	remoteIPs   []netip.Prefix
++
++	deadline      time.Time
++	readDeadline  time.Time
++	writeDeadline time.Time
++
++	pre     net.PacketConn
++	cur     net.PacketConn
++	addr    *net.UDPAddr
++	readCh  chan packet
++	closeCh chan struct{}
++	wg      sync.WaitGroup
++	mu      sync.Mutex
++}
++
++func NewUDPHopConn(c *Config, raw net.PacketConn) (net.PacketConn, error) {
++	if c.IntervalMin < 5 || c.IntervalMax < 5 {
++		return nil, errors.New("invalid interval")
++	}
++	remoteIPs := make([]netip.Prefix, 0, len(c.RemoteIPs))
++	for _, ip := range c.RemoteIPs {
++		remoteIPs = append(remoteIPs, netip.MustParsePrefix(ip))
++	}
++	conn := &udpHopConn{
++		conn:       raw,
++		sockopt:    c.Sockopt,
++		local:      c.Local,
++		remote:     c.Remote,
++		remoteOnce: c.RemoteOnce,
++
++		intervalMin: c.IntervalMin,
++		intervalMax: c.IntervalMax,
++		remotePorts: c.RemotePorts,
++		remoteIPs:   remoteIPs,
++
++		readCh:  make(chan packet),
++		closeCh: make(chan struct{}),
++	}
++	return conn, nil
++}
++
++func (c *udpHopConn) closed() bool {
++	select {
++	case <-c.closeCh:
++		return true
++	default:
++		return false
++	}
++}
++
++func (c *udpHopConn) hop(addr *net.UDPAddr) {
++	if c.closed() {
++		return
++	}
++	newAddr := &net.UDPAddr{IP: addr.IP, Port: addr.Port}
++	newConn := c.conn
++	if c.remote || c.remoteOnce && c.addr == nil {
++		if len(c.remotePorts) > 0 {
++			newAddr.Port = int(c.remotePorts[mrand.Intn(len(c.remotePorts))])
++		}
++		if len(c.remoteIPs) > 0 {
++			newAddr.IP = randPrefix(c.remoteIPs[mrand.Intn(len(c.remoteIPs))])
++		}
++	}
++	if c.local {
++		raw, err := internet.DialSystem(context.Background(), net.UDPDestination(net.IPAddress(newAddr.IP), net.Port(newAddr.Port)), c.sockopt)
++		if err != nil {
++			errors.LogErrorInner(context.Background(), err, "hop err")
++			return
++		}
++		switch c := raw.(type) {
++		case *internet.PacketConnWrapper:
++			newConn = c.PacketConn
++		case *cnc.Connection:
++			newConn = &internet.FakePacketConn{Conn: c}
++		default:
++			panic(reflect.TypeOf(c))
++		}
++		newConn.SetDeadline(c.deadline)
++		newConn.SetReadDeadline(c.readDeadline)
++		newConn.SetWriteDeadline(c.writeDeadline)
++		if c.pre != nil {
++			_ = c.pre.Close()
++		}
++		c.pre = c.cur
++		c.wg.Add(1)
++		go c.recv(newConn)
++	}
++	c.addr = newAddr
++	c.cur = newConn
++}
++
++func (c *udpHopConn) recv(conn net.PacketConn) {
++	defer c.wg.Done()
++
++	for {
++		if c.closed() {
++			return
++		}
++		p := pool.Get().([]byte)
++		n, addr, err := conn.ReadFrom(p)
++		if err != nil {
++			pool.Put(p[:cap(p)])
++			if goerrors.Is(err, io.EOF) || goerrors.Is(err, io.ErrClosedPipe) || goerrors.Is(err, gonet.ErrClosed) {
++				break
++			}
++			var netErr net.Error
++			if goerrors.As(err, &netErr) && netErr.Timeout() {
++				select {
++				case c.readCh <- packet{err: err}:
++				case <-c.closeCh:
++					return
++				}
++			}
++			errors.LogErrorInner(context.Background(), err, "recv err")
++			continue
++		}
++		select {
++		case c.readCh <- packet{p: p[:n], addr: addr}:
++		case <-c.closeCh:
++			pool.Put(p[:cap(p)])
++			return
++		}
++	}
++}
++
++func (c *udpHopConn) hopLoop() {
++	ticker := time.NewTicker(time.Second * time.Duration(crypto.RandBetween(c.intervalMin, c.intervalMax+1)))
++	defer ticker.Stop()
++	for {
++		select {
++		case <-ticker.C:
++			ticker.Reset(time.Second * time.Duration(crypto.RandBetween(c.intervalMin, c.intervalMax+1)))
++			c.mu.Lock()
++			c.hop(c.addr)
++			c.mu.Unlock()
++		case <-c.closeCh:
++			return
++		}
++	}
++}
++
++func (c *udpHopConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
++	packet, ok := <-c.readCh
++	if ok {
++		if packet.p != nil {
++			n = copy(p, packet.p)
++			pool.Put(packet.p[:cap(packet.p)])
++		}
++		return n, packet.addr, packet.err
++	}
++	return 0, nil, io.EOF
++}
++
++func (c *udpHopConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++
++	if c.cur == nil {
++		c.hop(addr.(*net.UDPAddr))
++		if c.cur == nil {
++			return 0, nil
++		}
++		go c.hopLoop()
++	}
++
++	_, err = c.cur.WriteTo(p, c.addr)
++	if err != nil {
++		errors.LogErrorInner(context.Background(), err, "send err")
++		return 0, err
++	}
++	return len(p), nil
++}
++
++func (c *udpHopConn) Close() error {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.closed() {
++		return nil
++	}
++	close(c.closeCh)
++	if c.pre != nil {
++		_ = c.pre.Close()
++	}
++	if c.cur != nil {
++		_ = c.cur.Close()
++	}
++	_ = c.conn.Close()
++	c.wg.Wait()
++	select {
++	case p := <-c.readCh:
++		if p.p != nil {
++			pool.Put(p.p[:cap(p.p)])
++		}
++	default:
++	}
++	close(c.readCh)
++	return nil
++}
++
++func (c *udpHopConn) LocalAddr() net.Addr {
++	return c.conn.LocalAddr()
++}
++
++func (c *udpHopConn) SetDeadline(t time.Time) error {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.deadline = t
++	if c.pre != nil {
++		_ = c.pre.SetDeadline(t)
++	}
++	if c.cur != nil {
++		_ = c.cur.SetDeadline(t)
++	}
++	return nil
++}
++
++func (c *udpHopConn) SetReadDeadline(t time.Time) error {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.readDeadline = t
++	if c.pre != nil {
++		_ = c.pre.SetReadDeadline(t)
++	}
++	if c.cur != nil {
++		_ = c.cur.SetReadDeadline(t)
++	}
++	return nil
++}
++
++func (c *udpHopConn) SetWriteDeadline(t time.Time) error {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.writeDeadline = t
++	if c.pre != nil {
++		_ = c.pre.SetWriteDeadline(t)
++	}
++	if c.cur != nil {
++		_ = c.cur.SetWriteDeadline(t)
++	}
++	return nil
++}
++
++func randPrefix(p netip.Prefix) []byte {
++	if p.IsSingleIP() {
++		return p.Addr().AsSlice()
++	}
++	b := p.Addr().AsSlice()
++	prefix := p.Bits()
++	var new [16]byte
++	common.Must2(rand.Read(new[:len(b)]))
++	i := prefix / 8
++	j := prefix % 8
++	if i+1 < len(b) {
++		copy(b[i+1:], new[i+1:])
++	}
++	mask := byte(0xff << (8 - j))
++	b[i] = (b[i] & mask) | (new[i] &^ mask)
++	return b
++}
+diff --git a/transport/internet/finalmask/xdns/config.go b/transport/internet/finalmask/xdns/config.go
+index bac0456e..46241476 100644
+--- a/transport/internet/finalmask/xdns/config.go
++++ b/transport/internet/finalmask/xdns/config.go
+@@ -4,9 +4,6 @@ import (
+ 	"net"
+ )
+ 
+-func (c *Config) UDP() {
+-}
+-
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+ 	// _, ok1 := raw.(*internet.FakePacketConn)
+ 	// _, ok2 := raw.(*udphop.UdpHopPacketConn)
+diff --git a/transport/internet/finalmask/xicmp/client.go b/transport/internet/finalmask/xicmp/client.go
+index 3777bd87..93db4e30 100644
+--- a/transport/internet/finalmask/xicmp/client.go
++++ b/transport/internet/finalmask/xicmp/client.go
+@@ -45,7 +45,8 @@ type xicmpConnClient struct {
+ 	id       int
+ 	seq      int
+ 	readCh   chan packet
+-	closedCh chan struct{}
++	closeCh  chan struct{}
++	wg       sync.WaitGroup
+ 	mu       sync.Mutex
+ }
+ 
+@@ -81,9 +82,10 @@ func NewConnClient(c *Config, raw net.PacketConn) (net.PacketConn, error) {
+ 		id:       mathrand.Intn(65536),
+ 		seq:      1,
+ 		readCh:   make(chan packet),
+-		closedCh: make(chan struct{}),
++		closeCh:  make(chan struct{}),
+ 	}
+ 
++	conn.wg.Add(2)
+ 	go conn.recv4()
+ 	go conn.recv6()
+ 
+@@ -96,7 +98,7 @@ func (c *xicmpConnClient) ring(a, b uint16) uint16 {
+ 
+ func (c *xicmpConnClient) closed() bool {
+ 	select {
+-	case <-c.closedCh:
++	case <-c.closeCh:
+ 		return true
+ 	default:
+ 		return false
+@@ -104,8 +106,9 @@ func (c *xicmpConnClient) closed() bool {
+ }
+ 
+ func (c *xicmpConnClient) recv4() {
+-	var b [finalmask.UDPSize]byte
++	defer c.wg.Done()
+ 
++	var b [finalmask.UDPSize]byte
+ 	for {
+ 		if c.closed() {
+ 			return
+@@ -119,10 +122,11 @@ func (c *xicmpConnClient) recv4() {
+ 				case c.readCh <- packet{
+ 					err: err,
+ 				}:
+-				case <-c.closedCh:
++				case <-c.closeCh:
+ 					return
+ 				}
+ 			}
++			errors.LogErrorInner(context.Background(), err, "recv4 err")
+ 			continue
+ 		}
+ 
+@@ -166,7 +170,7 @@ func (c *xicmpConnClient) recv4() {
+ 			p:    p,
+ 			addr: addr,
+ 		}:
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			pool.Put(p)
+ 			return
+ 		}
+@@ -174,11 +178,12 @@ func (c *xicmpConnClient) recv4() {
+ }
+ 
+ func (c *xicmpConnClient) recv6() {
+-	var b [finalmask.UDPSize]byte
++	defer c.wg.Done()
+ 
++	var b [finalmask.UDPSize]byte
+ 	for {
+ 		if c.closed() {
+-			break
++			return
+ 		}
+ 
+ 		n, addr, err := c.icmp6.ReadFrom(b[:])
+@@ -189,10 +194,11 @@ func (c *xicmpConnClient) recv6() {
+ 				case c.readCh <- packet{
+ 					err: err,
+ 				}:
+-				case <-c.closedCh:
++				case <-c.closeCh:
+ 					return
+ 				}
+ 			}
++			errors.LogErrorInner(context.Background(), err, "recv6 err")
+ 			continue
+ 		}
+ 
+@@ -236,7 +242,7 @@ func (c *xicmpConnClient) recv6() {
+ 			p:    p,
+ 			addr: addr,
+ 		}:
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			pool.Put(p)
+ 			return
+ 		}
+@@ -244,16 +250,15 @@ func (c *xicmpConnClient) recv6() {
+ }
+ 
+ func (c *xicmpConnClient) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+-	select {
+-	case packet := <-c.readCh:
++	packet, ok := <-c.readCh
++	if ok {
+ 		if packet.p != nil {
+ 			n = copy(p, packet.p)
+ 			pool.Put(packet.p)
+ 		}
+ 		return n, packet.addr, packet.err
+-	case <-c.closedCh:
+-		return 0, nil, io.EOF
+ 	}
++	return 0, nil, io.EOF
+ }
+ 
+ func (c *xicmpConnClient) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+@@ -294,10 +299,9 @@ func (c *xicmpConnClient) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+ 	}
+ 
+ 	if err != nil {
+-		errors.LogErrorInner(context.Background(), err, "xicmp write")
++		errors.LogErrorInner(context.Background(), err, "send err")
+ 		return 0, err
+ 	}
+-
+ 	return len(p), nil
+ }
+ 
+@@ -307,10 +311,19 @@ func (c *xicmpConnClient) Close() error {
+ 	if c.closed() {
+ 		return nil
+ 	}
+-	close(c.closedCh)
++	close(c.closeCh)
+ 	_ = c.icmp4.Close()
+ 	_ = c.icmp6.Close()
+ 	_ = c.conn.Close()
++	c.wg.Wait()
++	select {
++	case p := <-c.readCh:
++		if p.p != nil {
++			pool.Put(p.p)
++		}
++	default:
++	}
++	close(c.readCh)
+ 	return nil
+ }
+ 
+diff --git a/transport/internet/finalmask/xicmp/config.go b/transport/internet/finalmask/xicmp/config.go
+index fdcb02ae..f99784c1 100644
+--- a/transport/internet/finalmask/xicmp/config.go
++++ b/transport/internet/finalmask/xicmp/config.go
+@@ -5,16 +5,11 @@ import (
+ 
+ 	"github.com/xtls/xray-core/common/errors"
+ 	"github.com/xtls/xray-core/transport/internet"
+-	"github.com/xtls/xray-core/transport/internet/hysteria/udphop"
+ )
+ 
+-func (c *Config) UDP() {
+-}
+-
+ func (c *Config) WrapPacketConnClient(raw net.PacketConn, level int, levelCount int) (net.PacketConn, error) {
+ 	_, ok1 := raw.(*internet.FakePacketConn)
+-	_, ok2 := raw.(*udphop.UdpHopPacketConn)
+-	if level != 0 || ok1 || ok2 {
++	if level != 0 || ok1 {
+ 		return nil, errors.New("xicmp requires being at the outermost level")
+ 	}
+ 	return NewConnClient(c, raw)
+diff --git a/transport/internet/finalmask/xicmp/server.go b/transport/internet/finalmask/xicmp/server.go
+index 05ba48bb..f3fb429b 100644
+--- a/transport/internet/finalmask/xicmp/server.go
++++ b/transport/internet/finalmask/xicmp/server.go
+@@ -37,14 +37,15 @@ type record struct {
+ }
+ 
+ type xicmpConnServer struct {
+-	conn     net.PacketConn
+-	icmp4    *icmp.PacketConn
+-	icmp6    *icmp.PacketConn
+-	ips      map[netip.Addr]struct{}
+-	rec      map[string]record
+-	readCh   chan packet
+-	closedCh chan struct{}
+-	mu       sync.Mutex
++	conn    net.PacketConn
++	icmp4   *icmp.PacketConn
++	icmp6   *icmp.PacketConn
++	ips     map[netip.Addr]struct{}
++	rec     map[string]record
++	readCh  chan packet
++	closeCh chan struct{}
++	wg      sync.WaitGroup
++	mu      sync.Mutex
+ }
+ 
+ func NewConnServer(c *Config, raw net.PacketConn) (net.PacketConn, error) {
+@@ -63,16 +64,17 @@ func NewConnServer(c *Config, raw net.PacketConn) (net.PacketConn, error) {
+ 	}
+ 
+ 	conn := &xicmpConnServer{
+-		conn:     raw,
+-		icmp4:    icmp4,
+-		icmp6:    icmp6,
+-		ips:      ips,
+-		rec:      make(map[string]record),
+-		readCh:   make(chan packet),
+-		closedCh: make(chan struct{}),
++		conn:    raw,
++		icmp4:   icmp4,
++		icmp6:   icmp6,
++		ips:     ips,
++		rec:     make(map[string]record),
++		readCh:  make(chan packet),
++		closeCh: make(chan struct{}),
+ 	}
+ 
+ 	go conn.clean()
++	conn.wg.Add(2)
+ 	go conn.recv4()
+ 	go conn.recv6()
+ 
+@@ -81,7 +83,7 @@ func NewConnServer(c *Config, raw net.PacketConn) (net.PacketConn, error) {
+ 
+ func (c *xicmpConnServer) closed() bool {
+ 	select {
+-	case <-c.closedCh:
++	case <-c.closeCh:
+ 		return true
+ 	default:
+ 		return false
+@@ -102,15 +104,16 @@ func (c *xicmpConnServer) clean() {
+ 				}
+ 			}
+ 			c.mu.Unlock()
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			return
+ 		}
+ 	}
+ }
+ 
+ func (c *xicmpConnServer) recv4() {
+-	var b [finalmask.UDPSize]byte
++	defer c.wg.Done()
+ 
++	var b [finalmask.UDPSize]byte
+ 	for {
+ 		if c.closed() {
+ 			return
+@@ -124,10 +127,11 @@ func (c *xicmpConnServer) recv4() {
+ 				case c.readCh <- packet{
+ 					err: err,
+ 				}:
+-				case <-c.closedCh:
++				case <-c.closeCh:
+ 					return
+ 				}
+ 			}
++			errors.LogErrorInner(context.Background(), err, "recv4 err")
+ 			continue
+ 		}
+ 
+@@ -179,7 +183,7 @@ func (c *xicmpConnServer) recv4() {
+ 			p:    p,
+ 			addr: cAddr,
+ 		}:
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			pool.Put(p)
+ 			return
+ 		}
+@@ -187,8 +191,9 @@ func (c *xicmpConnServer) recv4() {
+ }
+ 
+ func (c *xicmpConnServer) recv6() {
+-	var b [finalmask.UDPSize]byte
++	defer c.wg.Done()
+ 
++	var b [finalmask.UDPSize]byte
+ 	for {
+ 		if c.closed() {
+ 			return
+@@ -202,10 +207,11 @@ func (c *xicmpConnServer) recv6() {
+ 				case c.readCh <- packet{
+ 					err: err,
+ 				}:
+-				case <-c.closedCh:
++				case <-c.closeCh:
+ 					return
+ 				}
+ 			}
++			errors.LogErrorInner(context.Background(), err, "recv6 err")
+ 			continue
+ 		}
+ 
+@@ -257,7 +263,7 @@ func (c *xicmpConnServer) recv6() {
+ 			p:    p,
+ 			addr: cAddr,
+ 		}:
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			pool.Put(p)
+ 			return
+ 		}
+@@ -265,16 +271,15 @@ func (c *xicmpConnServer) recv6() {
+ }
+ 
+ func (c *xicmpConnServer) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+-	select {
+-	case packet := <-c.readCh:
++	packet, ok := <-c.readCh
++	if ok {
+ 		if packet.p != nil {
+ 			n = copy(p, packet.p)
+ 			pool.Put(packet.p)
+ 		}
+ 		return n, packet.addr, packet.err
+-	case <-c.closedCh:
+-		return 0, nil, io.EOF
+ 	}
++	return 0, nil, io.EOF
+ }
+ 
+ func (c *xicmpConnServer) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+@@ -310,10 +315,9 @@ func (c *xicmpConnServer) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+ 	}
+ 
+ 	if err != nil {
+-		errors.LogErrorInner(context.Background(), err, "xicmp write")
++		errors.LogErrorInner(context.Background(), err, "send err")
+ 		return 0, err
+ 	}
+-
+ 	return len(p), nil
+ }
+ 
+@@ -323,10 +327,19 @@ func (c *xicmpConnServer) Close() error {
+ 	if c.closed() {
+ 		return nil
+ 	}
+-	close(c.closedCh)
++	close(c.closeCh)
+ 	_ = c.icmp4.Close()
+ 	_ = c.icmp6.Close()
+ 	_ = c.conn.Close()
++	c.wg.Wait()
++	select {
++	case p := <-c.readCh:
++		if p.p != nil {
++			pool.Put(p.p)
++		}
++	default:
++	}
++	close(c.readCh)
+ 	return nil
+ }
+ 
+diff --git a/transport/internet/finalmask/xicmp/server_oob.go b/transport/internet/finalmask/xicmp/server_oob.go
+index 0a04b080..d8bdb93c 100644
+--- a/transport/internet/finalmask/xicmp/server_oob.go
++++ b/transport/internet/finalmask/xicmp/server_oob.go
+@@ -39,16 +39,17 @@ type record struct {
+ }
+ 
+ type xicmpConnServer struct {
+-	conn     net.PacketConn
+-	icmp4    *icmp.PacketConn
+-	icmp6    *icmp.PacketConn
+-	ipv4PC   *ipv4.PacketConn
+-	ipv6PC   *ipv6.PacketConn
+-	ips      map[netip.Addr]struct{}
+-	rec      map[string]record
+-	readCh   chan packet
+-	closedCh chan struct{}
+-	mu       sync.Mutex
++	conn    net.PacketConn
++	icmp4   *icmp.PacketConn
++	icmp6   *icmp.PacketConn
++	ipv4PC  *ipv4.PacketConn
++	ipv6PC  *ipv6.PacketConn
++	ips     map[netip.Addr]struct{}
++	rec     map[string]record
++	readCh  chan packet
++	closeCh chan struct{}
++	wg      sync.WaitGroup
++	mu      sync.Mutex
+ }
+ 
+ func NewConnServer(c *Config, raw net.PacketConn) (net.PacketConn, error) {
+@@ -67,21 +68,22 @@ func NewConnServer(c *Config, raw net.PacketConn) (net.PacketConn, error) {
+ 	}
+ 
+ 	conn := &xicmpConnServer{
+-		conn:     raw,
+-		icmp4:    icmp4,
+-		icmp6:    icmp6,
+-		ipv4PC:   icmp4.IPv4PacketConn(),
+-		ipv6PC:   icmp6.IPv6PacketConn(),
+-		ips:      ips,
+-		rec:      make(map[string]record),
+-		readCh:   make(chan packet),
+-		closedCh: make(chan struct{}),
++		conn:    raw,
++		icmp4:   icmp4,
++		icmp6:   icmp6,
++		ipv4PC:  icmp4.IPv4PacketConn(),
++		ipv6PC:  icmp6.IPv6PacketConn(),
++		ips:     ips,
++		rec:     make(map[string]record),
++		readCh:  make(chan packet),
++		closeCh: make(chan struct{}),
+ 	}
+ 
+ 	common.Must(conn.ipv4PC.SetControlMessage(ipv4.FlagDst, true))
+ 	common.Must(conn.ipv6PC.SetControlMessage(ipv6.FlagDst, true))
+ 
+ 	go conn.clean()
++	conn.wg.Add(2)
+ 	go conn.recv4()
+ 	go conn.recv6()
+ 
+@@ -90,7 +92,7 @@ func NewConnServer(c *Config, raw net.PacketConn) (net.PacketConn, error) {
+ 
+ func (c *xicmpConnServer) closed() bool {
+ 	select {
+-	case <-c.closedCh:
++	case <-c.closeCh:
+ 		return true
+ 	default:
+ 		return false
+@@ -111,15 +113,16 @@ func (c *xicmpConnServer) clean() {
+ 				}
+ 			}
+ 			c.mu.Unlock()
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			return
+ 		}
+ 	}
+ }
+ 
+ func (c *xicmpConnServer) recv4() {
+-	var b [finalmask.UDPSize]byte
++	defer c.wg.Done()
+ 
++	var b [finalmask.UDPSize]byte
+ 	for {
+ 		if c.closed() {
+ 			return
+@@ -133,10 +136,11 @@ func (c *xicmpConnServer) recv4() {
+ 				case c.readCh <- packet{
+ 					err: err,
+ 				}:
+-				case <-c.closedCh:
++				case <-c.closeCh:
+ 					return
+ 				}
+ 			}
++			errors.LogErrorInner(context.Background(), err, "recv4 err")
+ 			continue
+ 		}
+ 
+@@ -189,7 +193,7 @@ func (c *xicmpConnServer) recv4() {
+ 			p:    p,
+ 			addr: cAddr,
+ 		}:
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			pool.Put(p)
+ 			return
+ 		}
+@@ -197,8 +201,9 @@ func (c *xicmpConnServer) recv4() {
+ }
+ 
+ func (c *xicmpConnServer) recv6() {
+-	var b [finalmask.UDPSize]byte
++	defer c.wg.Done()
+ 
++	var b [finalmask.UDPSize]byte
+ 	for {
+ 		if c.closed() {
+ 			return
+@@ -212,10 +217,11 @@ func (c *xicmpConnServer) recv6() {
+ 				case c.readCh <- packet{
+ 					err: err,
+ 				}:
+-				case <-c.closedCh:
++				case <-c.closeCh:
+ 					return
+ 				}
+ 			}
++			errors.LogErrorInner(context.Background(), err, "recv6 err")
+ 			continue
+ 		}
+ 
+@@ -268,7 +274,7 @@ func (c *xicmpConnServer) recv6() {
+ 			p:    p,
+ 			addr: cAddr,
+ 		}:
+-		case <-c.closedCh:
++		case <-c.closeCh:
+ 			pool.Put(p)
+ 			return
+ 		}
+@@ -276,16 +282,15 @@ func (c *xicmpConnServer) recv6() {
+ }
+ 
+ func (c *xicmpConnServer) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+-	select {
+-	case packet := <-c.readCh:
++	packet, ok := <-c.readCh
++	if ok {
+ 		if packet.p != nil {
+ 			n = copy(p, packet.p)
+ 			pool.Put(packet.p)
+ 		}
+ 		return n, packet.addr, packet.err
+-	case <-c.closedCh:
+-		return 0, nil, io.EOF
+ 	}
++	return 0, nil, io.EOF
+ }
+ 
+ func (c *xicmpConnServer) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+@@ -321,10 +326,9 @@ func (c *xicmpConnServer) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+ 	}
+ 
+ 	if err != nil {
+-		errors.LogErrorInner(context.Background(), err, "xicmp write")
++		errors.LogErrorInner(context.Background(), err, "send err")
+ 		return 0, err
+ 	}
+-
+ 	return len(p), nil
+ }
+ 
+@@ -334,10 +338,19 @@ func (c *xicmpConnServer) Close() error {
+ 	if c.closed() {
+ 		return nil
+ 	}
+-	close(c.closedCh)
++	close(c.closeCh)
+ 	_ = c.icmp4.Close()
+ 	_ = c.icmp6.Close()
+ 	_ = c.conn.Close()
++	c.wg.Wait()
++	select {
++	case p := <-c.readCh:
++		if p.p != nil {
++			pool.Put(p.p)
++		}
++	default:
++	}
++	close(c.readCh)
+ 	return nil
+ }
+ 
+diff --git a/transport/internet/finalmask/xmc/config.go b/transport/internet/finalmask/xmc/config.go
+index be3a1ef6..863eb97b 100644
+--- a/transport/internet/finalmask/xmc/config.go
++++ b/transport/internet/finalmask/xmc/config.go
+@@ -5,9 +5,6 @@ import (
+ 	"net"
+ )
+ 
+-func (c *Config) TCP() {
+-}
+-
+ func (c *Config) WrapConnClient(conn net.Conn) (net.Conn, error) {
+ 	profiles, err := profilesFromConfig(c.Profiles)
+ 	if err != nil {
+diff --git a/transport/internet/hysteria/conn.go b/transport/internet/hysteria/conn.go
+index ce2a4af3..07b8f6d9 100644
+--- a/transport/internet/hysteria/conn.go
++++ b/transport/internet/hysteria/conn.go
+@@ -103,14 +103,11 @@ func (c *InterConn) Update() {
+ 
+ func (c *InterConn) Read(p []byte) (int, error) {
+ 	b, ok := <-c.ch
+-	if !ok {
+-		return 0, io.EOF
+-	}
+-	if len(p) < len(b) {
+-		return 0, io.ErrShortBuffer
++	if ok {
++		c.Update()
++		return copy(p, b), nil
+ 	}
+-	c.Update()
+-	return copy(p, b), nil
++	return 0, io.EOF
+ }
+ 
+ func (c *InterConn) Write(p []byte) (int, error) {
+diff --git a/transport/internet/hysteria/dialer.go b/transport/internet/hysteria/dialer.go
+index 0307df57..5a32f816 100644
+--- a/transport/internet/hysteria/dialer.go
++++ b/transport/internet/hysteria/dialer.go
+@@ -3,7 +3,6 @@ package hysteria
+ import (
+ 	"context"
+ 	go_tls "crypto/tls"
+-	"math/rand"
+ 	"net/http"
+ 	"net/url"
+ 	"reflect"
+@@ -22,7 +21,6 @@ import (
+ 	"github.com/xtls/xray-core/transport/internet/finalmask"
+ 	"github.com/xtls/xray-core/transport/internet/hysteria/congestion"
+ 	"github.com/xtls/xray-core/transport/internet/hysteria/congestion/bbr"
+-	"github.com/xtls/xray-core/transport/internet/hysteria/udphop"
+ 	"github.com/xtls/xray-core/transport/internet/stat"
+ 	"github.com/xtls/xray-core/transport/internet/tls"
+ )
+@@ -78,7 +76,6 @@ func (c *client) dial(ctx context.Context) error {
+ 	if quicParams == nil {
+ 		quicParams = &internet.QuicParams{
+ 			BbrProfile: string(bbr.ProfileStandard),
+-			UdpHop:     &internet.UdpHop{},
+ 		}
+ 	}
+ 
+@@ -115,35 +112,8 @@ func (c *client) dial(ctx context.Context) error {
+ 	// 	quicConfig.KeepAlivePeriod = 10 * time.Second
+ 	// }
+ 
+-	udpHopDialer := func(addr *net.UDPAddr) (net.PacketConn, error) {
+-		conn, err := internet.DialSystem(ctx, net.UDPDestination(net.IPAddress(addr.IP), net.Port(addr.Port)), c.socketConfig)
+-		if err != nil {
+-			errors.LogInfoInner(context.Background(), err, "skip hop: failed to dial to dest")
+-			return nil, errors.New("")
+-		}
+-
+-		var pktConn net.PacketConn
+-
+-		switch c := conn.(type) {
+-		case *internet.PacketConnWrapper:
+-			pktConn = c.PacketConn
+-		case *cnc.Connection:
+-			pktConn = &internet.FakePacketConn{Conn: c}
+-		default:
+-			panic(reflect.TypeOf(c))
+-		}
+-
+-		return pktConn, nil
+-	}
+-
+ 	var pktConn net.PacketConn
+ 	var udpAddr *net.UDPAddr
+-	var index int
+-
+-	if len(quicParams.UdpHop.Ports) > 0 {
+-		index = rand.Intn(len(quicParams.UdpHop.Ports))
+-		c.dest.Port = net.Port(quicParams.UdpHop.Ports[index])
+-	}
+ 
+ 	raw, err := internet.DialSystem(ctx, c.dest, c.socketConfig)
+ 	if err != nil {
+@@ -160,10 +130,6 @@ func (c *client) dial(ctx context.Context) error {
+ 		panic(reflect.TypeOf(c))
+ 	}
+ 
+-	if len(quicParams.UdpHop.Ports) > 0 {
+-		pktConn = udphop.NewUDPHopPacketConn(udphop.ToAddrs(udpAddr.IP, quicParams.UdpHop.Ports), time.Duration(quicParams.UdpHop.IntervalMin)*time.Second, time.Duration(quicParams.UdpHop.IntervalMax)*time.Second, udpHopDialer, pktConn, index)
+-	}
+-
+ 	if c.udpmaskManager != nil {
+ 		newConn, err := c.udpmaskManager.WrapPacketConnClient(pktConn)
+ 		if err != nil {
+diff --git a/transport/internet/hysteria/hub.go b/transport/internet/hysteria/hub.go
+index 4a41aa8f..b95fc621 100644
+--- a/transport/internet/hysteria/hub.go
++++ b/transport/internet/hysteria/hub.go
+@@ -281,7 +281,6 @@ func Listen(ctx context.Context, address net.Address, port net.Port, streamSetti
+ 	if quicParams == nil {
+ 		quicParams = &internet.QuicParams{
+ 			BbrProfile: string(bbr.ProfileStandard),
+-			UdpHop:     &internet.UdpHop{},
+ 		}
+ 	}
+ 
+diff --git a/transport/internet/hysteria/udphop/conn.go b/transport/internet/hysteria/udphop/conn.go
+deleted file mode 100644
+index 8ab8339d..00000000
+--- a/transport/internet/hysteria/udphop/conn.go
++++ /dev/null
+@@ -1,254 +0,0 @@
+-package udphop
+-
+-import (
+-	"errors"
+-	"math/rand"
+-	"net"
+-	"sync"
+-	"time"
+-
+-	"github.com/xtls/xray-core/transport/internet/finalmask"
+-)
+-
+-const (
+-	packetQueueSize = 1024
+-	udpBufferSize   = finalmask.UDPSize
+-
+-	defaultHopInterval = 30 * time.Second
+-)
+-
+-type UdpHopPacketConn struct {
+-	Addrs          []net.Addr
+-	HopIntervalMin time.Duration
+-	HopIntervalMax time.Duration
+-	ListenUDPFunc  func(addr *net.UDPAddr) (net.PacketConn, error)
+-
+-	connMutex   sync.RWMutex
+-	prevConn    net.PacketConn
+-	currentConn net.PacketConn
+-	addrIndex   int
+-
+-	deadline      time.Time
+-	readDeadline  time.Time
+-	writeDeadline time.Time
+-
+-	recvQueue chan *udpPacket
+-	closeChan chan struct{}
+-	closed    bool
+-
+-	bufPool sync.Pool
+-}
+-
+-type udpPacket struct {
+-	Buf  []byte
+-	N    int
+-	Addr net.Addr
+-	Err  error
+-}
+-
+-func NewUDPHopPacketConn(addrs []net.Addr, hopIntervalMin time.Duration, hopIntervalMax time.Duration, listenUDPFunc func(addr *net.UDPAddr) (net.PacketConn, error), currentConn net.PacketConn, addrIndex int) net.PacketConn {
+-	if len(addrs) == 0 {
+-		panic("len(addrs) == 0")
+-	}
+-	if hopIntervalMin == 0 {
+-		hopIntervalMin = defaultHopInterval
+-	}
+-	if hopIntervalMax == 0 {
+-		hopIntervalMax = defaultHopInterval
+-	}
+-	if hopIntervalMin < 5*time.Second {
+-		panic("hopIntervalMin < 5*time.Second")
+-	}
+-	if hopIntervalMax < 5*time.Second {
+-		panic("hopIntervalMax < 5*time.Second")
+-	}
+-	if hopIntervalMax < hopIntervalMin {
+-		panic("hopIntervalMax < hopIntervalMin")
+-	}
+-	if listenUDPFunc == nil {
+-		panic("listenUDPFunc is nil")
+-	}
+-	hConn := &UdpHopPacketConn{
+-		Addrs:          addrs,
+-		HopIntervalMin: hopIntervalMin,
+-		HopIntervalMax: hopIntervalMax,
+-		ListenUDPFunc:  listenUDPFunc,
+-		prevConn:       nil,
+-		currentConn:    currentConn,
+-		addrIndex:      addrIndex,
+-		recvQueue:      make(chan *udpPacket, packetQueueSize),
+-		closeChan:      make(chan struct{}),
+-		bufPool: sync.Pool{
+-			New: func() interface{} {
+-				return make([]byte, udpBufferSize)
+-			},
+-		},
+-	}
+-	go hConn.recvLoop(hConn.currentConn)
+-	go hConn.hopLoop()
+-	return hConn
+-}
+-
+-func (u *UdpHopPacketConn) recvLoop(conn net.PacketConn) {
+-	for {
+-		buf := u.bufPool.Get().([]byte)
+-		n, addr, err := conn.ReadFrom(buf)
+-		if err != nil {
+-			u.bufPool.Put(buf)
+-			var netErr net.Error
+-			if errors.As(err, &netErr) && netErr.Timeout() {
+-				u.recvQueue <- &udpPacket{nil, 0, nil, netErr}
+-				continue
+-			}
+-			return
+-		}
+-		select {
+-		case u.recvQueue <- &udpPacket{buf, n, addr, nil}:
+-		default:
+-			u.bufPool.Put(buf)
+-		}
+-	}
+-}
+-
+-func (u *UdpHopPacketConn) hopLoop() {
+-	timer := time.NewTimer(u.nextHopInterval())
+-	defer timer.Stop()
+-	for {
+-		select {
+-		case <-timer.C:
+-			u.hop()
+-			timer.Reset(u.nextHopInterval())
+-		case <-u.closeChan:
+-			return
+-		}
+-	}
+-}
+-
+-func (u *UdpHopPacketConn) nextHopInterval() time.Duration {
+-	if u.HopIntervalMin == u.HopIntervalMax {
+-		return u.HopIntervalMin
+-	}
+-	return u.HopIntervalMin + time.Duration(rand.Int63n(int64(u.HopIntervalMax-u.HopIntervalMin)+1))
+-}
+-
+-func (u *UdpHopPacketConn) hop() {
+-	u.connMutex.Lock()
+-	defer u.connMutex.Unlock()
+-	if u.closed {
+-		return
+-	}
+-	addrIndex := rand.Intn(len(u.Addrs))
+-	newConn, err := u.ListenUDPFunc(u.Addrs[addrIndex].(*net.UDPAddr))
+-	if err != nil {
+-		return
+-	}
+-	if u.prevConn != nil {
+-		_ = u.prevConn.Close()
+-	}
+-	u.prevConn = u.currentConn
+-	u.addrIndex = addrIndex
+-	u.currentConn = newConn
+-	if !u.deadline.IsZero() {
+-		_ = u.currentConn.SetDeadline(u.deadline)
+-	}
+-	if !u.readDeadline.IsZero() {
+-		_ = u.currentConn.SetReadDeadline(u.readDeadline)
+-	}
+-	if !u.writeDeadline.IsZero() {
+-		_ = u.currentConn.SetWriteDeadline(u.writeDeadline)
+-	}
+-	go u.recvLoop(newConn)
+-}
+-
+-func (u *UdpHopPacketConn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
+-	for {
+-		select {
+-		case p := <-u.recvQueue:
+-			if p.Err != nil {
+-				return 0, nil, p.Err
+-			}
+-			n := copy(b, p.Buf[:p.N])
+-			u.bufPool.Put(p.Buf)
+-			return n, p.Addr, nil
+-		case <-u.closeChan:
+-			return 0, nil, net.ErrClosed
+-		}
+-	}
+-}
+-
+-func (u *UdpHopPacketConn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
+-	u.connMutex.RLock()
+-	defer u.connMutex.RUnlock()
+-	if u.closed {
+-		return 0, net.ErrClosed
+-	}
+-	return u.currentConn.WriteTo(b, u.Addrs[u.addrIndex])
+-}
+-
+-func (u *UdpHopPacketConn) Close() error {
+-	u.connMutex.Lock()
+-	defer u.connMutex.Unlock()
+-	if u.closed {
+-		return nil
+-	}
+-	if u.prevConn != nil {
+-		_ = u.prevConn.Close()
+-	}
+-	err := u.currentConn.Close()
+-	close(u.closeChan)
+-	u.closed = true
+-	u.Addrs = nil
+-	return err
+-}
+-
+-func (u *UdpHopPacketConn) LocalAddr() net.Addr {
+-	u.connMutex.RLock()
+-	defer u.connMutex.RUnlock()
+-	return u.currentConn.LocalAddr()
+-}
+-
+-func (u *UdpHopPacketConn) SetDeadline(t time.Time) error {
+-	u.connMutex.Lock()
+-	defer u.connMutex.Unlock()
+-	u.deadline = t
+-	u.readDeadline = t
+-	u.writeDeadline = t
+-	if u.prevConn != nil {
+-		_ = u.prevConn.SetDeadline(t)
+-	}
+-	return u.currentConn.SetDeadline(t)
+-}
+-
+-func (u *UdpHopPacketConn) SetReadDeadline(t time.Time) error {
+-	u.connMutex.Lock()
+-	defer u.connMutex.Unlock()
+-	u.deadline = time.Time{}
+-	u.readDeadline = t
+-	if u.prevConn != nil {
+-		_ = u.prevConn.SetReadDeadline(t)
+-	}
+-	return u.currentConn.SetReadDeadline(t)
+-}
+-
+-func (u *UdpHopPacketConn) SetWriteDeadline(t time.Time) error {
+-	u.connMutex.Lock()
+-	defer u.connMutex.Unlock()
+-	u.deadline = time.Time{}
+-	u.writeDeadline = t
+-	if u.prevConn != nil {
+-		_ = u.prevConn.SetWriteDeadline(t)
+-	}
+-	return u.currentConn.SetWriteDeadline(t)
+-}
+-
+-func ToAddrs(ip net.IP, ports []uint32) []net.Addr {
+-	var addrs []net.Addr
+-	for _, port := range ports {
+-		addr := &net.UDPAddr{
+-			IP:   ip,
+-			Port: int(port),
+-		}
+-		addrs = append(addrs, addr)
+-	}
+-	return addrs
+-}
+diff --git a/transport/internet/splithttp/dialer.go b/transport/internet/splithttp/dialer.go
+index 3c0f1a57..9bac57a1 100644
+--- a/transport/internet/splithttp/dialer.go
++++ b/transport/internet/splithttp/dialer.go
+@@ -5,7 +5,6 @@ import (
+ 	gotls "crypto/tls"
+ 	"fmt"
+ 	"io"
+-	"math/rand"
+ 	"net/http"
+ 	"net/http/httptrace"
+ 	"net/url"
+@@ -28,7 +27,6 @@ import (
+ 	"github.com/xtls/xray-core/transport/internet/browser_dialer"
+ 	"github.com/xtls/xray-core/transport/internet/hysteria/congestion"
+ 	"github.com/xtls/xray-core/transport/internet/hysteria/congestion/bbr"
+-	"github.com/xtls/xray-core/transport/internet/hysteria/udphop"
+ 	"github.com/xtls/xray-core/transport/internet/reality"
+ 	"github.com/xtls/xray-core/transport/internet/stat"
+ 	"github.com/xtls/xray-core/transport/internet/tls"
+@@ -162,7 +160,6 @@ func createHTTPClient(dest net.Destination, streamSettings *internet.MemoryStrea
+ 		if quicParams == nil {
+ 			quicParams = &internet.QuicParams{
+ 				BbrProfile: string(bbr.ProfileStandard),
+-				UdpHop:     &internet.UdpHop{},
+ 			}
+ 		}
+ 
+@@ -198,35 +195,8 @@ func createHTTPClient(dest net.Destination, streamSettings *internet.MemoryStrea
+ 			QUICConfig:      quicConfig,
+ 			TLSClientConfig: gotlsConfig,
+ 			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (*quic.Conn, error) {
+-				udpHopDialer := func(addr *net.UDPAddr) (net.PacketConn, error) {
+-					conn, err := internet.DialSystem(ctx, net.UDPDestination(net.IPAddress(addr.IP), net.Port(addr.Port)), streamSettings.SocketSettings)
+-					if err != nil {
+-						errors.LogInfoInner(context.Background(), err, "skip hop: failed to dial to dest")
+-						return nil, errors.New("")
+-					}
+-
+-					var pktConn net.PacketConn
+-
+-					switch c := conn.(type) {
+-					case *internet.PacketConnWrapper:
+-						pktConn = c.PacketConn
+-					case *cnc.Connection:
+-						pktConn = &internet.FakePacketConn{Conn: c}
+-					default:
+-						panic(reflect.TypeOf(c))
+-					}
+-
+-					return pktConn, nil
+-				}
+-
+ 				var pktConn net.PacketConn
+ 				var udpAddr *net.UDPAddr
+-				var index int
+-
+-				if len(quicParams.UdpHop.Ports) > 0 {
+-					index = rand.Intn(len(quicParams.UdpHop.Ports))
+-					dest.Port = net.Port(quicParams.UdpHop.Ports[index])
+-				}
+ 
+ 				raw, err := internet.DialSystem(ctx, dest, streamSettings.SocketSettings)
+ 				if err != nil {
+@@ -243,10 +213,6 @@ func createHTTPClient(dest net.Destination, streamSettings *internet.MemoryStrea
+ 					panic(reflect.TypeOf(c))
+ 				}
+ 
+-				if len(quicParams.UdpHop.Ports) > 0 {
+-					pktConn = udphop.NewUDPHopPacketConn(udphop.ToAddrs(udpAddr.IP, quicParams.UdpHop.Ports), time.Duration(quicParams.UdpHop.IntervalMin)*time.Second, time.Duration(quicParams.UdpHop.IntervalMax)*time.Second, udpHopDialer, pktConn, index)
+-				}
+-
+ 				if streamSettings.UdpmaskManager != nil {
+ 					newConn, err := streamSettings.UdpmaskManager.WrapPacketConnClient(pktConn)
+ 					if err != nil {
+diff --git a/transport/internet/splithttp/hub.go b/transport/internet/splithttp/hub.go
+index c542a325..431d8f18 100644
+--- a/transport/internet/splithttp/hub.go
++++ b/transport/internet/splithttp/hub.go
+@@ -493,7 +493,6 @@ func ListenXH(ctx context.Context, address net.Address, port net.Port, streamSet
+ 		if quicParams == nil {
+ 			quicParams = &internet.QuicParams{
+ 				BbrProfile: string(bbr.ProfileStandard),
+-				UdpHop:     &internet.UdpHop{},
+ 			}
+ 		}
+ 

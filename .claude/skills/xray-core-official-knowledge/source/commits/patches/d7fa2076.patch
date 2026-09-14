@@ -1,0 +1,854 @@
+commit d7fa2076c3e5401173bf9b58f7b07f9aa5174443
+Author:     Katana <115213458+OfficialKatana@users.noreply.github.com>
+AuthorDate: Tue Jul 7 10:01:53 2026 +0800
+Commit:     GitHub <noreply@github.com>
+CommitDate: Tue Jul 7 02:01:53 2026 +0000
+
+    Xray-core: Forbid unencrypted outbounds on public Internet for VLESS and Trojan; Remove "none/zero/plain" for VMess and Shadowsocks (#6303)
+    
+    https://github.com/XTLS/Xray-core/pull/5640#issuecomment-4611416512
+    https://github.com/XTLS/Xray-core/pull/6303#issuecomment-4668055274
+    
+    ---------
+    
+    Co-authored-by: Meow <197331664+Meo597@users.noreply.github.com>
+
+diff --git a/common/geodata/consts.go b/common/geodata/consts.go
+new file mode 100644
+index 00000000..3d03d14b
+--- /dev/null
++++ b/common/geodata/consts.go
+@@ -0,0 +1,49 @@
++package geodata
++
++import (
++	"sync"
++
++	"github.com/xtls/xray-core/common"
++)
++
++var privateIPMatcher = sync.OnceValue(func() IPMatcher {
++	return common.Must2(IPReg.BuildIPMatcher(common.Must2(ParseIPRules([]string{
++		"0.0.0.0/8",
++		"10.0.0.0/8",
++		"100.64.0.0/10",
++		"127.0.0.0/8",
++		"169.254.0.0/16",
++		"172.16.0.0/12",
++		"192.0.0.0/24",
++		"192.0.2.0/24",
++		"192.88.99.0/24",
++		"192.168.0.0/16",
++		"198.18.0.0/15",
++		"198.51.100.0/24",
++		"203.0.113.0/24",
++		"224.0.0.0/3",
++		"::/127",
++		"fc00::/7",
++		"fe80::/10",
++		"ff00::/8",
++	}))))
++})
++
++func GetPrivateIPMatcher() IPMatcher { return privateIPMatcher() }
++
++var privateDomainMatcher = sync.OnceValue(func() DomainMatcher {
++	return common.Must2(DomainReg.BuildDomainMatcher(common.Must2(ParseDomainRules([]string{
++		"lan",
++		"localdomain",
++		"example",
++		"invalid",
++		"localhost",
++		"test",
++		"local",
++		"home.arpa",
++		"internal",
++		"regexp:^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", // Dotless domains
++	}, Domain_Domain))))
++})
++
++func GetPrivateDomainMatcher() DomainMatcher { return privateDomainMatcher() }
+diff --git a/common/protocol/headers.pb.go b/common/protocol/headers.pb.go
+index 21ebe895..70bec77a 100644
+--- a/common/protocol/headers.pb.go
++++ b/common/protocol/headers.pb.go
+@@ -28,8 +28,6 @@ const (
+ 	SecurityType_AUTO              SecurityType = 2
+ 	SecurityType_AES128_GCM        SecurityType = 3
+ 	SecurityType_CHACHA20_POLY1305 SecurityType = 4
+-	SecurityType_NONE              SecurityType = 5 // [DEPRECATED 2023-06]
+-	SecurityType_ZERO              SecurityType = 6
+ )
+ 
+ // Enum value maps for SecurityType.
+@@ -39,16 +37,12 @@ var (
+ 		2: "AUTO",
+ 		3: "AES128_GCM",
+ 		4: "CHACHA20_POLY1305",
+-		5: "NONE",
+-		6: "ZERO",
+ 	}
+ 	SecurityType_value = map[string]int32{
+ 		"UNKNOWN":           0,
+ 		"AUTO":              2,
+ 		"AES128_GCM":        3,
+ 		"CHACHA20_POLY1305": 4,
+-		"NONE":              5,
+-		"ZERO":              6,
+ 	}
+ )
+ 
+@@ -129,15 +123,13 @@ const file_common_protocol_headers_proto_rawDesc = "" +
+ 	"\n" +
+ 	"\x1dcommon/protocol/headers.proto\x12\x14xray.common.protocol\"H\n" +
+ 	"\x0eSecurityConfig\x126\n" +
+-	"\x04type\x18\x01 \x01(\x0e2\".xray.common.protocol.SecurityTypeR\x04type*`\n" +
++	"\x04type\x18\x01 \x01(\x0e2\".xray.common.protocol.SecurityTypeR\x04type*L\n" +
+ 	"\fSecurityType\x12\v\n" +
+ 	"\aUNKNOWN\x10\x00\x12\b\n" +
+ 	"\x04AUTO\x10\x02\x12\x0e\n" +
+ 	"\n" +
+ 	"AES128_GCM\x10\x03\x12\x15\n" +
+-	"\x11CHACHA20_POLY1305\x10\x04\x12\b\n" +
+-	"\x04NONE\x10\x05\x12\b\n" +
+-	"\x04ZERO\x10\x06B^\n" +
++	"\x11CHACHA20_POLY1305\x10\x04B^\n" +
+ 	"\x18com.xray.common.protocolP\x01Z)github.com/xtls/xray-core/common/protocol\xaa\x02\x14Xray.Common.Protocolb\x06proto3"
+ 
+ var (
+diff --git a/common/protocol/headers.proto b/common/protocol/headers.proto
+index 1ae3537f..3ac1eef4 100644
+--- a/common/protocol/headers.proto
++++ b/common/protocol/headers.proto
+@@ -11,8 +11,6 @@ enum SecurityType {
+   AUTO = 2;
+   AES128_GCM = 3;
+   CHACHA20_POLY1305 = 4;
+-  NONE = 5; // [DEPRECATED 2023-06] 
+-  ZERO = 6;
+ }
+ 
+ message SecurityConfig {
+diff --git a/infra/conf/shadowsocks.go b/infra/conf/shadowsocks.go
+index 2cfc0953..18451ab5 100644
+--- a/infra/conf/shadowsocks.go
++++ b/infra/conf/shadowsocks.go
+@@ -24,8 +24,6 @@ func cipherFromString(c string) shadowsocks.CipherType {
+ 		return shadowsocks.CipherType_CHACHA20_POLY1305
+ 	case "xchacha20-poly1305", "aead_xchacha20_poly1305", "xchacha20-ietf-poly1305":
+ 		return shadowsocks.CipherType_XCHACHA20_POLY1305
+-	case "none", "plain":
+-		return shadowsocks.CipherType_NONE
+ 	default:
+ 		return shadowsocks.CipherType_UNKNOWN
+ 	}
+diff --git a/infra/conf/vmess.go b/infra/conf/vmess.go
+index a73883b6..6ff27469 100644
+--- a/infra/conf/vmess.go
++++ b/infra/conf/vmess.go
+@@ -31,10 +31,6 @@ func (a *VMessAccount) Build() *vmess.Account {
+ 		st = protocol.SecurityType_CHACHA20_POLY1305
+ 	case "auto":
+ 		st = protocol.SecurityType_AUTO
+-	case "none":
+-		st = protocol.SecurityType_NONE
+-	case "zero":
+-		st = protocol.SecurityType_ZERO
+ 	default:
+ 		st = protocol.SecurityType_AUTO
+ 	}
+diff --git a/infra/conf/xray.go b/infra/conf/xray.go
+index c8ff1627..91d16118 100644
+--- a/infra/conf/xray.go
++++ b/infra/conf/xray.go
+@@ -230,6 +230,40 @@ func (c *OutboundDetourConfig) checkChainProxyConfig() error {
+ 	return nil
+ }
+ 
++func requiresTransportSecurity(address *Address) bool {
++	if address == nil || address.Address == nil {
++		return false
++	}
++	if address.Family().IsIP() {
++		return !geodata.GetPrivateIPMatcher().Match(address.IP())
++	}
++	domain := strings.TrimSuffix(strings.ToLower(address.Domain()), ".")
++	return !geodata.GetPrivateDomainMatcher().MatchAny(domain)
++}
++
++func validateOutboundTransportSecurity(rawConfig interface{}, senderSettings *proxyman.SenderConfig) error {
++	if senderSettings.StreamSettings != nil && senderSettings.StreamSettings.GetSecurityType() != "" {
++		return nil
++	}
++
++	if vlessCfg, ok := rawConfig.(*VLessOutboundConfig); ok {
++		if vlessCfg.Encryption != "" && vlessCfg.Encryption != "none" {
++			return nil
++		}
++		if requiresTransportSecurity(vlessCfg.Address) {
++			return errors.New("vless without TLS or other encryption is prohibited unless the server address is a private IP or domain")
++		}
++	}
++
++	if tjCfg, ok := rawConfig.(*TrojanClientConfig); ok {
++		if requiresTransportSecurity(tjCfg.Address) {
++			return errors.New("trojan without TLS is prohibited unless the server address is a private IP or domain")
++		}
++	}
++
++	return nil
++}
++
+ // Build implements Buildable.
+ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
+ 	senderSettings := &proxyman.SenderConfig{}
+@@ -323,6 +357,9 @@ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
+ 	if err != nil {
+ 		return nil, errors.New("failed to load outbound detour config for protocol ", c.Protocol).Base(err)
+ 	}
++	if err := validateOutboundTransportSecurity(rawConfig, senderSettings); err != nil {
++		return nil, err
++	}
+ 	ts, err := rawConfig.(Buildable).Build()
+ 	if err != nil {
+ 		return nil, errors.New("failed to build outbound handler for protocol ", c.Protocol).Base(err)
+diff --git a/proxy/freedom/freedom.go b/proxy/freedom/freedom.go
+index 9cdce38a..51c90a7a 100644
+--- a/proxy/freedom/freedom.go
++++ b/proxy/freedom/freedom.go
+@@ -62,26 +62,7 @@ func init() {
+ 	defaultBlockPrivateRule = &FinalRule{
+ 		action:  RuleAction_Block,
+ 		network: allNetworks,
+-		ip: common.Must2(geodata.IPReg.BuildIPMatcher(common.Must2(geodata.ParseIPRules([]string{
+-			"0.0.0.0/8",
+-			"10.0.0.0/8",
+-			"100.64.0.0/10",
+-			"127.0.0.0/8",
+-			"169.254.0.0/16",
+-			"172.16.0.0/12",
+-			"192.0.0.0/24",
+-			"192.0.2.0/24",
+-			"192.88.99.0/24",
+-			"192.168.0.0/16",
+-			"198.18.0.0/15",
+-			"198.51.100.0/24",
+-			"203.0.113.0/24",
+-			"224.0.0.0/3",
+-			"::/127",
+-			"fc00::/7",
+-			"fe80::/10",
+-			"ff00::/8",
+-		})))),
++		ip:      geodata.GetPrivateIPMatcher(),
+ 	}
+ 
+ 	defaultBlockAllRule = &FinalRule{
+diff --git a/proxy/shadowsocks/config.go b/proxy/shadowsocks/config.go
+index dc8bff0b..2a178a8a 100644
+--- a/proxy/shadowsocks/config.go
++++ b/proxy/shadowsocks/config.go
+@@ -85,8 +85,6 @@ func (a *Account) getCipher() (Cipher, error) {
+ 			IVBytes:         32,
+ 			AEADAuthCreator: createXChaCha20Poly1305,
+ 		}, nil
+-	case CipherType_NONE:
+-		return NoneCipher{}, nil
+ 	default:
+ 		return nil, errors.New("Unsupported cipher.")
+ 	}
+@@ -186,30 +184,6 @@ func (c *AEADCipher) DecodePacket(key []byte, b *buf.Buffer) error {
+ 	return nil
+ }
+ 
+-type NoneCipher struct{}
+-
+-func (NoneCipher) KeySize() int32 { return 0 }
+-func (NoneCipher) IVSize() int32  { return 0 }
+-func (NoneCipher) IsAEAD() bool {
+-	return false
+-}
+-
+-func (NoneCipher) NewDecryptionReader(key []byte, iv []byte, reader io.Reader) (buf.Reader, error) {
+-	return buf.NewReader(reader), nil
+-}
+-
+-func (NoneCipher) NewEncryptionWriter(key []byte, iv []byte, writer io.Writer) (buf.Writer, error) {
+-	return buf.NewWriter(writer), nil
+-}
+-
+-func (NoneCipher) EncodePacket(key []byte, b *buf.Buffer) error {
+-	return nil
+-}
+-
+-func (NoneCipher) DecodePacket(key []byte, b *buf.Buffer) error {
+-	return nil
+-}
+-
+ func passwordToCipherKey(password []byte, keySize int32) []byte {
+ 	key := make([]byte, 0, keySize)
+ 
+diff --git a/proxy/shadowsocks/config.pb.go b/proxy/shadowsocks/config.pb.go
+index ca450a0e..f4ff3dc3 100644
+--- a/proxy/shadowsocks/config.pb.go
++++ b/proxy/shadowsocks/config.pb.go
+@@ -31,7 +31,6 @@ const (
+ 	CipherType_AES_256_GCM        CipherType = 6
+ 	CipherType_CHACHA20_POLY1305  CipherType = 7
+ 	CipherType_XCHACHA20_POLY1305 CipherType = 8
+-	CipherType_NONE               CipherType = 9
+ )
+ 
+ // Enum value maps for CipherType.
+@@ -42,7 +41,6 @@ var (
+ 		6: "AES_256_GCM",
+ 		7: "CHACHA20_POLY1305",
+ 		8: "XCHACHA20_POLY1305",
+-		9: "NONE",
+ 	}
+ 	CipherType_value = map[string]int32{
+ 		"UNKNOWN":            0,
+@@ -50,7 +48,6 @@ var (
+ 		"AES_256_GCM":        6,
+ 		"CHACHA20_POLY1305":  7,
+ 		"XCHACHA20_POLY1305": 8,
+-		"NONE":               9,
+ 	}
+ )
+ 
+@@ -251,15 +248,14 @@ const file_proxy_shadowsocks_config_proto_rawDesc = "" +
+ 	"\x05users\x18\x01 \x03(\v2\x1a.xray.common.protocol.UserR\x05users\x122\n" +
+ 	"\anetwork\x18\x02 \x03(\x0e2\x18.xray.common.net.NetworkR\anetwork\"L\n" +
+ 	"\fClientConfig\x12<\n" +
+-	"\x06server\x18\x01 \x01(\v2$.xray.common.protocol.ServerEndpointR\x06server*t\n" +
++	"\x06server\x18\x01 \x01(\v2$.xray.common.protocol.ServerEndpointR\x06server*j\n" +
+ 	"\n" +
+ 	"CipherType\x12\v\n" +
+ 	"\aUNKNOWN\x10\x00\x12\x0f\n" +
+ 	"\vAES_128_GCM\x10\x05\x12\x0f\n" +
+ 	"\vAES_256_GCM\x10\x06\x12\x15\n" +
+ 	"\x11CHACHA20_POLY1305\x10\a\x12\x16\n" +
+-	"\x12XCHACHA20_POLY1305\x10\b\x12\b\n" +
+-	"\x04NONE\x10\tBd\n" +
++	"\x12XCHACHA20_POLY1305\x10\bBd\n" +
+ 	"\x1acom.xray.proxy.shadowsocksP\x01Z+github.com/xtls/xray-core/proxy/shadowsocks\xaa\x02\x16Xray.Proxy.Shadowsocksb\x06proto3"
+ 
+ var (
+diff --git a/proxy/shadowsocks/config.proto b/proxy/shadowsocks/config.proto
+index 879fb77b..b6dc5f1b 100644
+--- a/proxy/shadowsocks/config.proto
++++ b/proxy/shadowsocks/config.proto
+@@ -23,7 +23,6 @@ enum CipherType {
+   AES_256_GCM = 6;
+   CHACHA20_POLY1305 = 7;
+   XCHACHA20_POLY1305 = 8;
+-  NONE = 9;
+ }
+ 
+ message ServerConfig {
+diff --git a/proxy/shadowsocks/protocol_test.go b/proxy/shadowsocks/protocol_test.go
+index 4083905d..5e288d45 100644
+--- a/proxy/shadowsocks/protocol_test.go
++++ b/proxy/shadowsocks/protocol_test.go
+@@ -38,19 +38,6 @@ func TestUDPEncodingDecoding(t *testing.T) {
+ 				}),
+ 			},
+ 		},
+-		{
+-			Version: Version,
+-			Command: protocol.RequestCommandUDP,
+-			Address: net.LocalHostIP,
+-			Port:    1234,
+-			User: &protocol.MemoryUser{
+-				Email: "love@example.com",
+-				Account: toAccount(&Account{
+-					Password:   "123",
+-					CipherType: CipherType_NONE,
+-				}),
+-			},
+-		},
+ 	}
+ 
+ 	for _, request := range testRequests {
+@@ -80,10 +67,6 @@ func TestUDPDecodingWithPayloadTooShort(t *testing.T) {
+ 			Password:   "password",
+ 			CipherType: CipherType_AES_128_GCM,
+ 		}),
+-		toAccount(&Account{
+-			Password:   "password",
+-			CipherType: CipherType_NONE,
+-		}),
+ 	}
+ 
+ 	for _, account := range testAccounts {
+diff --git a/proxy/shadowsocks/validator.go b/proxy/shadowsocks/validator.go
+index 2c48334f..e8b33738 100644
+--- a/proxy/shadowsocks/validator.go
++++ b/proxy/shadowsocks/validator.go
+@@ -145,7 +145,6 @@ func (v *Validator) Get(bs []byte, command protocol.RequestCommand) (u *protocol
+ 		} else {
+ 			u = user
+ 			ivLen = user.Account.(*MemoryAccount).Cipher.IVSize()
+-			// err = user.Account.(*MemoryAccount).CheckIV(bs[:ivLen]) // The IV size of None Cipher is 0.
+ 			return
+ 		}
+ 	}
+diff --git a/proxy/vmess/encoding/auth.go b/proxy/vmess/encoding/auth.go
+index 99bdaa49..0640bb5a 100644
+--- a/proxy/vmess/encoding/auth.go
++++ b/proxy/vmess/encoding/auth.go
+@@ -17,27 +17,6 @@ func Authenticate(b []byte) uint32 {
+ 	return fnv1hash.Sum32()
+ }
+ 
+-// [DEPRECATED 2023-06]
+-type NoOpAuthenticator struct{}
+-
+-func (NoOpAuthenticator) NonceSize() int {
+-	return 0
+-}
+-
+-func (NoOpAuthenticator) Overhead() int {
+-	return 0
+-}
+-
+-// Seal implements AEAD.Seal().
+-func (NoOpAuthenticator) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
+-	return append(dst[:0], plaintext...)
+-}
+-
+-// Open implements AEAD.Open().
+-func (NoOpAuthenticator) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
+-	return append(dst[:0], ciphertext...), nil
+-}
+-
+ // GenerateChacha20Poly1305Key generates a 32-byte key from a given 16-byte array.
+ func GenerateChacha20Poly1305Key(b []byte) []byte {
+ 	key := make([]byte, 32)
+diff --git a/proxy/vmess/encoding/client.go b/proxy/vmess/encoding/client.go
+index d48eddd7..e5b38d39 100644
+--- a/proxy/vmess/encoding/client.go
++++ b/proxy/vmess/encoding/client.go
+@@ -116,20 +116,6 @@ func (c *ClientSession) EncodeRequestBody(request *protocol.RequestHeader, write
+ 	}
+ 
+ 	switch request.Security {
+-	case protocol.SecurityType_NONE:
+-		if request.Option.Has(protocol.RequestOptionChunkStream) {
+-			if request.Command.TransferType() == protocol.TransferTypeStream {
+-				return crypto.NewChunkStreamWriter(sizeParser, writer), nil
+-			}
+-			auth := &crypto.AEADAuthenticator{
+-				AEAD:                    new(NoOpAuthenticator),
+-				NonceGenerator:          crypto.GenerateEmptyBytes(),
+-				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+-			}
+-			return crypto.NewAuthenticationWriter(auth, sizeParser, writer, protocol.TransferTypePacket, padding), nil
+-		}
+-
+-		return buf.NewWriter(writer), nil
+ 	case protocol.SecurityType_AES128_GCM:
+ 		aead := crypto.NewAesGcm(c.requestBodyKey[:])
+ 		auth := &crypto.AEADAuthenticator{
+@@ -267,22 +253,6 @@ func (c *ClientSession) DecodeResponseBody(request *protocol.RequestHeader, read
+ 	}
+ 
+ 	switch request.Security {
+-	case protocol.SecurityType_NONE:
+-		if request.Option.Has(protocol.RequestOptionChunkStream) {
+-			if request.Command.TransferType() == protocol.TransferTypeStream {
+-				return crypto.NewChunkStreamReader(sizeParser, reader), nil
+-			}
+-
+-			auth := &crypto.AEADAuthenticator{
+-				AEAD:                    new(NoOpAuthenticator),
+-				NonceGenerator:          crypto.GenerateEmptyBytes(),
+-				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+-			}
+-
+-			return crypto.NewAuthenticationReader(auth, sizeParser, reader, protocol.TransferTypePacket, padding), nil
+-		}
+-
+-		return buf.NewReader(reader), nil
+ 	case protocol.SecurityType_AES128_GCM:
+ 		aead := crypto.NewAesGcm(c.responseBodyKey[:])
+ 
+diff --git a/proxy/vmess/encoding/server.go b/proxy/vmess/encoding/server.go
+index 3a11c747..b8640505 100644
+--- a/proxy/vmess/encoding/server.go
++++ b/proxy/vmess/encoding/server.go
+@@ -262,21 +262,6 @@ func (s *ServerSession) DecodeRequestBody(request *protocol.RequestHeader, reade
+ 	}
+ 
+ 	switch request.Security {
+-	case protocol.SecurityType_NONE:
+-		if request.Option.Has(protocol.RequestOptionChunkStream) {
+-			if request.Command.TransferType() == protocol.TransferTypeStream {
+-				return crypto.NewChunkStreamReader(sizeParser, reader), nil
+-			}
+-
+-			auth := &crypto.AEADAuthenticator{
+-				AEAD:                    new(NoOpAuthenticator),
+-				NonceGenerator:          crypto.GenerateEmptyBytes(),
+-				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+-			}
+-			return crypto.NewAuthenticationReader(auth, sizeParser, reader, protocol.TransferTypePacket, padding), nil
+-		}
+-		return buf.NewReader(reader), nil
+-
+ 	case protocol.SecurityType_AES128_GCM:
+ 		aead := crypto.NewAesGcm(s.requestBodyKey[:])
+ 		auth := &crypto.AEADAuthenticator{
+@@ -384,21 +369,6 @@ func (s *ServerSession) EncodeResponseBody(request *protocol.RequestHeader, writ
+ 	}
+ 
+ 	switch request.Security {
+-	case protocol.SecurityType_NONE:
+-		if request.Option.Has(protocol.RequestOptionChunkStream) {
+-			if request.Command.TransferType() == protocol.TransferTypeStream {
+-				return crypto.NewChunkStreamWriter(sizeParser, writer), nil
+-			}
+-
+-			auth := &crypto.AEADAuthenticator{
+-				AEAD:                    new(NoOpAuthenticator),
+-				NonceGenerator:          crypto.GenerateEmptyBytes(),
+-				AdditionalDataGenerator: crypto.GenerateEmptyBytes(),
+-			}
+-			return crypto.NewAuthenticationWriter(auth, sizeParser, writer, protocol.TransferTypePacket, padding), nil
+-		}
+-		return buf.NewWriter(writer), nil
+-
+ 	case protocol.SecurityType_AES128_GCM:
+ 		aead := crypto.NewAesGcm(s.responseBodyKey[:])
+ 		auth := &crypto.AEADAuthenticator{
+diff --git a/proxy/vmess/outbound/outbound.go b/proxy/vmess/outbound/outbound.go
+index 903e73ce..bdc3ecc2 100644
+--- a/proxy/vmess/outbound/outbound.go
++++ b/proxy/vmess/outbound/outbound.go
+@@ -105,7 +105,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 	account := request.User.Account.(*vmess.MemoryAccount)
+ 	request.Security = account.Security
+ 
+-	if request.Security == protocol.SecurityType_AES128_GCM || request.Security == protocol.SecurityType_NONE || request.Security == protocol.SecurityType_CHACHA20_POLY1305 {
++	if request.Security == protocol.SecurityType_AES128_GCM || request.Security == protocol.SecurityType_CHACHA20_POLY1305 {
+ 		request.Option.Set(protocol.RequestOptionChunkMasking)
+ 	}
+ 
+@@ -113,12 +113,6 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
+ 		request.Option.Set(protocol.RequestOptionGlobalPadding)
+ 	}
+ 
+-	if request.Security == protocol.SecurityType_ZERO {
+-		request.Security = protocol.SecurityType_NONE
+-		request.Option.Clear(protocol.RequestOptionChunkStream)
+-		request.Option.Clear(protocol.RequestOptionChunkMasking)
+-	}
+-
+ 	if account.AuthenticatedLengthExperiment {
+ 		request.Option.Set(protocol.RequestOptionAuthenticatedLength)
+ 	}
+diff --git a/testing/scenarios/shadowsocks_test.go b/testing/scenarios/shadowsocks_test.go
+index affa4124..2f453699 100644
+--- a/testing/scenarios/shadowsocks_test.go
++++ b/testing/scenarios/shadowsocks_test.go
+@@ -390,88 +390,3 @@ func TestShadowsocksAES128GCMUDPMux(t *testing.T) {
+ 		t.Error(err)
+ 	}
+ }
+-
+-func TestShadowsocksNone(t *testing.T) {
+-	tcpServer := tcp.Server{
+-		MsgProcessor: xor,
+-	}
+-	dest, err := tcpServer.Start()
+-	common.Must(err)
+-
+-	defer tcpServer.Close()
+-
+-	account := serial.ToTypedMessage(&shadowsocks.Account{
+-		Password:   "shadowsocks-password",
+-		CipherType: shadowsocks.CipherType_NONE,
+-	})
+-
+-	serverPort := tcp.PickPort()
+-	serverConfig := &core.Config{
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(serverPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&shadowsocks.ServerConfig{
+-					Users: []*protocol.User{{
+-						Account: account,
+-						Level:   1,
+-					}},
+-					Network: []net.Network{net.Network_TCP},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&freedom.Config{
+-					FinalRules: []*freedom.FinalRuleConfig{{Action: freedom.RuleAction_Allow}},
+-				}),
+-			},
+-		},
+-	}
+-
+-	clientPort := tcp.PickPort()
+-	clientConfig := &core.Config{
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+-					RewriteAddress:  net.NewIPOrDomain(dest.Address),
+-					RewritePort:     uint32(dest.Port),
+-					AllowedNetworks: []net.Network{net.Network_TCP},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&shadowsocks.ClientConfig{
+-					Server: &protocol.ServerEndpoint{
+-						Address: net.NewIPOrDomain(net.LocalHostIP),
+-						Port:    uint32(serverPort),
+-						User: &protocol.User{
+-							Account: account,
+-						},
+-					},
+-				}),
+-			},
+-		},
+-	}
+-
+-	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+-	common.Must(err)
+-
+-	defer CloseAllServers(servers)
+-
+-	var errGroup errgroup.Group
+-	for range 3 {
+-		errGroup.Go(testTCPConn(clientPort, 10240*1024, time.Second*20))
+-	}
+-
+-	if err := errGroup.Wait(); err != nil {
+-		t.Fatal(err)
+-	}
+-}
+diff --git a/testing/scenarios/vmess_test.go b/testing/scenarios/vmess_test.go
+index 28b4f0e0..b1d73b20 100644
+--- a/testing/scenarios/vmess_test.go
++++ b/testing/scenarios/vmess_test.go
+@@ -423,103 +423,6 @@ func TestVMessChacha20(t *testing.T) {
+ 	}
+ }
+ 
+-func TestVMessNone(t *testing.T) {
+-	tcpServer := tcp.Server{
+-		MsgProcessor: xor,
+-	}
+-	dest, err := tcpServer.Start()
+-	common.Must(err)
+-	defer tcpServer.Close()
+-
+-	userID := protocol.NewID(uuid.New())
+-	serverPort := tcp.PickPort()
+-	serverConfig := &core.Config{
+-		App: []*serial.TypedMessage{
+-			serial.ToTypedMessage(&log.Config{
+-				ErrorLogLevel: clog.Severity_Debug,
+-				ErrorLogType:  log.LogType_Console,
+-			}),
+-		},
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(serverPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-					User: []*protocol.User{
+-						{
+-							Account: serial.ToTypedMessage(&vmess.Account{
+-								Id: userID.String(),
+-							}),
+-						},
+-					},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&freedom.Config{
+-					FinalRules: []*freedom.FinalRuleConfig{{Action: freedom.RuleAction_Allow}},
+-				}),
+-			},
+-		},
+-	}
+-
+-	clientPort := tcp.PickPort()
+-	clientConfig := &core.Config{
+-		App: []*serial.TypedMessage{
+-			serial.ToTypedMessage(&log.Config{
+-				ErrorLogLevel: clog.Severity_Debug,
+-				ErrorLogType:  log.LogType_Console,
+-			}),
+-		},
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+-					RewriteAddress:  net.NewIPOrDomain(dest.Address),
+-					RewritePort:     uint32(dest.Port),
+-					AllowedNetworks: []net.Network{net.Network_TCP},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&outbound.Config{
+-					Receiver: &protocol.ServerEndpoint{
+-						Address: net.NewIPOrDomain(net.LocalHostIP),
+-						Port:    uint32(serverPort),
+-						User: &protocol.User{
+-							Account: serial.ToTypedMessage(&vmess.Account{
+-								Id: userID.String(),
+-								SecuritySettings: &protocol.SecurityConfig{
+-									Type: protocol.SecurityType_NONE,
+-								},
+-							}),
+-						},
+-					},
+-				}),
+-			},
+-		},
+-	}
+-
+-	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+-	common.Must(err)
+-	defer CloseAllServers(servers)
+-
+-	var errg errgroup.Group
+-	for range 3 {
+-		errg.Go(testTCPConn(clientPort, 1024*1024, time.Second*30))
+-	}
+-	if err := errg.Wait(); err != nil {
+-		t.Error(err)
+-	}
+-}
+-
+ func TestVMessKCP(t *testing.T) {
+ 	tcpServer := tcp.Server{
+ 		MsgProcessor: xor,
+@@ -970,103 +873,6 @@ func TestVMessGCMMuxUDP(t *testing.T) {
+ 	}()
+ }
+ 
+-func TestVMessZero(t *testing.T) {
+-	tcpServer := tcp.Server{
+-		MsgProcessor: xor,
+-	}
+-	dest, err := tcpServer.Start()
+-	common.Must(err)
+-	defer tcpServer.Close()
+-
+-	userID := protocol.NewID(uuid.New())
+-	serverPort := tcp.PickPort()
+-	serverConfig := &core.Config{
+-		App: []*serial.TypedMessage{
+-			serial.ToTypedMessage(&log.Config{
+-				ErrorLogLevel: clog.Severity_Debug,
+-				ErrorLogType:  log.LogType_Console,
+-			}),
+-		},
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(serverPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&inbound.Config{
+-					User: []*protocol.User{
+-						{
+-							Account: serial.ToTypedMessage(&vmess.Account{
+-								Id: userID.String(),
+-							}),
+-						},
+-					},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&freedom.Config{
+-					FinalRules: []*freedom.FinalRuleConfig{{Action: freedom.RuleAction_Allow}},
+-				}),
+-			},
+-		},
+-	}
+-
+-	clientPort := tcp.PickPort()
+-	clientConfig := &core.Config{
+-		App: []*serial.TypedMessage{
+-			serial.ToTypedMessage(&log.Config{
+-				ErrorLogLevel: clog.Severity_Debug,
+-				ErrorLogType:  log.LogType_Console,
+-			}),
+-		},
+-		Inbound: []*core.InboundHandlerConfig{
+-			{
+-				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+-					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+-					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+-				}),
+-				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+-					RewriteAddress:  net.NewIPOrDomain(dest.Address),
+-					RewritePort:     uint32(dest.Port),
+-					AllowedNetworks: []net.Network{net.Network_TCP},
+-				}),
+-			},
+-		},
+-		Outbound: []*core.OutboundHandlerConfig{
+-			{
+-				ProxySettings: serial.ToTypedMessage(&outbound.Config{
+-					Receiver: &protocol.ServerEndpoint{
+-						Address: net.NewIPOrDomain(net.LocalHostIP),
+-						Port:    uint32(serverPort),
+-						User: &protocol.User{
+-							Account: serial.ToTypedMessage(&vmess.Account{
+-								Id: userID.String(),
+-								SecuritySettings: &protocol.SecurityConfig{
+-									Type: protocol.SecurityType_ZERO,
+-								},
+-							}),
+-						},
+-					},
+-				}),
+-			},
+-		},
+-	}
+-
+-	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+-	common.Must(err)
+-	defer CloseAllServers(servers)
+-
+-	var errg errgroup.Group
+-	for range 3 {
+-		errg.Go(testTCPConn(clientPort, 1024*1024, time.Second*30))
+-	}
+-	if err := errg.Wait(); err != nil {
+-		t.Error(err)
+-	}
+-}
+-
+ func TestVMessGCMLengthAuth(t *testing.T) {
+ 	tcpServer := tcp.Server{
+ 		MsgProcessor: xor,
