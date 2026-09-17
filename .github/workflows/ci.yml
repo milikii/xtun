@@ -14,15 +14,18 @@ env:
 
 jobs:
   shellcheck-and-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck jq openssl unzip curl ca-certificates
+          sudo apt-get install -y shellcheck jq openssl unzip curl ca-certificates qrencode zbar-tools libcap2-bin python3 nginx iproute2 util-linux
 
       # smoke 会把宿主机的 xray 软链进沙箱，然后真的去跑 xray vlessenc / x25519 /
       # run -test。runner 上没有 xray，所以第 4 条用例就 die 了——CI 从 3b167b7
@@ -52,24 +55,43 @@ jobs:
         if: ${{ !cancelled() }}
         run: sudo --preserve-env=GITHUB_ACTIONS python3 tests/task-menu-boundary.py
 
+      - name: Run native transport and negative paths
+        if: ${{ !cancelled() }}
+        run: sudo python3 tests/native-transport.py
+
+      - name: Run exact historical migration matrix
+        if: ${{ !cancelled() }}
+        run: sudo --preserve-env=GITHUB_ACTIONS bash tests/migration.sh
+
+      - name: Run exported client in official container
+        if: ${{ !cancelled() }}
+        run: sudo bash tests/docker-client.sh
+
   # 真机冒烟：debian:13 systemd 容器里完整跑一遍 install + diagnose。
   # 沙箱用例永远碰不到 systemd / apt / 真实 haproxy / nginx，这一层只有真机跑得出来。
   # 容器必须以 /sbin/init 起（systemd 才是 PID 1），install 再通过 docker exec 进去跑；
   # 网络不可达导致 check-sni 失败时走 --skip-sni-check。
   install-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['debian:12', 'debian:13', 'ubuntu:24.04']
+        track: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["baseline","latest"]' || '["baseline"]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Start debian:13 systemd container
+      - name: Start systemd container
+        env:
+          TEST_IMAGE: ${{ matrix.image }}
         run: |
           # 基础镜像里没有 /sbin/init：先装 systemd + systemd-sysv，再 exec 成 PID 1。
           docker run -d --name smoke --privileged --cgroupns=host \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
             -v "${PWD}:/src:ro" \
-            debian:13 bash -euc '
+            "${TEST_IMAGE}" bash -euc '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
               apt-get install -y -qq systemd systemd-sysv >/dev/null
@@ -89,6 +111,8 @@ jobs:
           exit 1
 
       - name: Run install smoke
+        env:
+          XRAY_VERSION: ${{ matrix.track == 'latest' && 'latest-published' || env.XRAY_VERSION }}
         run: docker exec -e XRAY_VERSION="${XRAY_VERSION}" -e GITHUB_ACTIONS smoke bash /src/tests/install-smoke.sh container
 
       - name: TLS debug（diagnose 失败时留现场）
@@ -113,8 +137,8 @@ jobs:
 
   latest-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -122,7 +146,7 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq unzip curl ca-certificates
+          sudo apt-get install -y shellcheck jq openssl unzip curl ca-certificates qrencode zbar-tools libcap2-bin python3 nginx iproute2 util-linux
 
       - name: Check latest published Xray-core
         run: bash tests/install-smoke.sh check-latest

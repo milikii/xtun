@@ -1,14 +1,14 @@
 # 测试 VPS 与三端交互验收手册
 
-> 计划日期：2026-09-12；现状与排程更新：2026-09-14。可复现核心基线 Xray `v26.9.9`。本文提供复现与后续验收步骤；最新结果见[批次 B 报告](REPORT-2026-09-14-BATCH-B.md)，前序恢复见[接手报告](REPORT-2026-09-14-W04R-W05R.md)，其余项目保持待验证。
+> 计划日期：2026-09-12；实现与证据更新：2026-09-15。可复现核心基线 Xray `v26.9.9`。本文提供复现与后续验收步骤；最新结果见[批次 C/D/E 报告](REPORT-2026-09-15-CDE.md)，前序恢复见[接手报告](REPORT-2026-09-14-W04R-W05R.md)，未执行项目保持待验证。
 > 使用者：按新计划 W14/W15 分批验收的实施者，以及操作 Android、Windows、Debian NAS 的用户。
 > 依赖：[当前计划](PLAN.md)、[详细 W 工单](PLAN-UX-RELIABILITY.md)、[决策](DECISIONS-UX-RELIABILITY.md)与[参数契约](PARAMETERS.md)。所有故障注入使用独立测试 VPS、独立客户端配置和独立 NAS 测试容器。
 
-> **排程决定：** 按 D18/D19，完整范围统一发布，真人/设备稍后安排。A/B 已有报告列出的实现和证据，G1 强制断电仍待验证；下一独立代码批次 C：W08.2/8.3。按 D30，本次提交与 push 已授权，正式 release 仍需完整验收。设备到位先 W14.1/W15.1，再修正并完成 W14.2/W15 全矩阵；R4 不取代首轮真人。
+> **排程决定：** 按 D18/D19，完整范围统一发布。A–E 代码及报告列出的自动/实机证据已交付；后续为公共 ACME、G1 强制断电、真人/三端和观察。按 D30，提交与 push 已授权，正式 release 仍需完整验收。设备到位先 W14.1/W15.1，再修正并完成 W14.2/W15 全矩阵；R4 不取代首轮真人。
 
 ## 1. 交付顺序与停止条件
 
-首轮验收只使用当次已实现能力并记录准确候选，未完成的 NAS/ECH 导出不假称可用；最终候选仍须补齐下面的完整材料和范围。真人任务、影响预期与记录格式见详细计划 J01–J16。等待 G2 的操作者/设备不阻止独立 W08–W13 实施，但不能借此提前完成 G4/G5。
+首轮验收使用当前已实现的独立 NAS/ECH 导出，记录准确候选；导出成功不等于客户端网络通过。最终候选须补齐下面的完整材料和范围。真人任务、影响预期与记录格式见详细计划 J01–J16。等待操作者/设备期间可补公共证书、断电与独立回归证据，不能提前勾选 G4/G5。
 
 先证明普通五类节点按名字工作，再开启节点 3 的 ECH 变体，最后验证 split ECH、IPv6/H3 和生命周期。任一阶段失败，保存证据并回到对应工单修复；不能在测试机手改托管配置后，将结果当作公开安装入口已经修好。
 
@@ -25,7 +25,7 @@
 
 ## 2. R0：准备材料与环境记录
 
-1. 从候选代码生成准确安装说明。标记已实现的命令、所需输入和实际导出位置；参数契约里尚未实现的 `export-client` 设计不能直接复制给用户执行。
+1. 从准确候选生成安装说明，记录 runtime 摘要、安装回执、state schema 与参数修订。`export-client` / `rebuild-qr` 已可执行；用本手册命令导出实际文件，不给用户带占位凭据的客户端 JSON。
 2. 准备一台可重建的测试 VPS；首轮建议 Debian 13 amd64，先用发行版内核、关闭 WARP 和可选网络优化。其余系统/架构按主计划另测。
 3. 准备受控 Cloudflare 域名、橙云、边缘证书及 Full (strict) 回源证书。记录套餐、ECH/HTTP2/gRPC 设置、缓存规则和实际源站绑定，不将 Cloudflare 的默认说明当成本账户实测。
 4. 选择经预检的 REALITY SNI 与真实远端 target，记录目标端口、TLS/SNI 检查及 PQ 观察结果。不得因目标未支持可选签名而跳过所有普通节点测试。
@@ -36,7 +36,7 @@
 | --- | --- | --- |
 | Android | Android/v2rayNG 版本、实际 Xray 核心版本、架构、导入方式、Wi-Fi/移动网络 | 先 Wi-Fi，再移动数据；记录 VPN/DNS 设置 |
 | Windows | Windows/v2rayN 版本、当前选用的核心类型和版本、架构 | 先系统代理，再 TUN；记录影响 DNS 的设置 |
-| Debian NAS | Debian/CPU 架构、镜像来源/tag/digest、容器内实际 xray version、Entrypoint/命令、网络与挂载 | 独立 bridge 测试容器、独立配置卷；既有 NAS 容器继续保留 |
+| Debian NAS | Debian/CPU 架构、镜像来源/tag/digest、容器内实际 xray version、Entrypoint/命令、网络与挂载 | 独立 Linux host 网络测试容器、只读私有配置；使用导出的回环监听，先确认端口空闲 |
 
 不要求 GUI 的版本号与 Xray 相同；以实际内核为准。若 GUI 内核落后，先在测试配置中使用其支持的更新办法，再验收。Docker `:latest` 不能替代 `xray version` 与 digest。
 
@@ -48,7 +48,7 @@
 | --- | --- | --- |
 | 当前本机生产 | bundle 0.11.14 声明 schema 1；实际 state 2；Xray 26.3.27/d2758a0/arm64；A 的 63 条、B 独立范围的 62 条记录分别按各自基线核对 | 保持现场；迁移用脱敏隔离副本，不按包版本推断 state |
 | 原测试 VPS | W06 的系统、IPv6、模块和端口是历史证据 | 旧地址认证失败，后续不使用旧凭据反复尝试 |
-| 新授权 VPS `194.195.251.247` | Debian 12 amd64；A 的恢复/安装及 B 的菜单/H3/维护证据分别见报告，Xray 26.9.9。SSH 密码/配置保持不变 | 保留作测试节点；先读前序 nginx 人工修复与包/二进制版本差异，开测前记录 pending/服务/端口 |
+| 新授权 VPS `194.195.251.247` | Debian 12 amd64、Xray 26.9.9；C/D/E 已安装，state2/参数2/users；实际 nginx 1.30.1，dpkg 记录 1.22.1-9+deb12u9 | 保留作测试节点；沿用报告中的版本差异，开测前记录 pending/服务/端口，SSH 密码与配置不变 |
 | H3 正向环境 | 新 VPS 实际 nginx 1.30.1 有 http_v3，但测试自签证书不满足直连公共信任 | 仍须准备受客户端信任证书、外部 UDP 可达环境；模块存在不能替代完整正向证据 |
 
 本机目标核心测试使用独立目录下的准确二进制与资源。先记录其 `version` 和摘要，再通过 `TEST_HOST_XRAY_BIN` 指定它。本轮已在 arm64/amd64 执行；复现时路径按实际替换：
@@ -88,7 +88,9 @@ H25–H29 已完成前序报告列出的自动/实机复验；H30 已有批次 B
 | 历史组合：bundle 0.11.14 / state v1 | 保留旧状态迁移用例，不被新增实际组合替代 |
 | 工作区 1.1.0 / state v2 | 包含已有 W01–W06/W08.1 增量；以准确候选 SHA/内容身份区分，不能只比版本字符串 |
 
-各组覆盖旧 clients、新 users、冲突/空数组、xmux 来源未知、既有 H3/ECH 选择和缺归属元数据。由 W10/W13 提供迁移前→候选→失败恢复的身份和实际配置证据；不复制生产秘密到公开报告。
+三组已在 arm64 与 amd64 运行：使用历史提交 `b6eb98b49d01c9b524aa0a679cc951d5b72c9db7`（0.11.14）和 `434075910feb1ce6c93873be7a550a5a7591230e`（1.1.0）的实际生成器、合成身份及对应核心。0.11.14/state2 是显式构造的生产组合夹具，不能宣称旧 schema1 生成器自行产出 state2。参数应用前先完成核心选择，注入 PNG 失败验证原件恢复，再成功迁移；不把它写成三范围的原子系统升级。
+
+clients/users 冲突/空数组、xmux 来源未知、既有 H3/ECH 选择等边界另由 smoke 覆盖。不复制生产秘密到公开报告；本机生产不参与迁移。
 
 ### 2.4 已有自动与 VPS 套件的复现
 
@@ -100,9 +102,15 @@ export TEST_HOST_XRAY_ASSET_DIR=/path/to/isolated/xray-release
 bash tests/smoke.sh
 python3 tests/install-boundary.py --evidence /path/to/private-evidence
 python3 tests/task-menu-boundary.py --evidence /path/to/private-menu-evidence
+python3 tests/native-transport.py --workdir /path/to/private-native-evidence
+bash tests/migration.sh /path/to/private-migration-evidence
 ```
 
-资源目录须含可读非空的 `geoip.dat` 和 `geosite.dat`。测试显式设置 Xray 的资源查找目录；仅复制二进制不算具备完整测试依赖。缺文件会在开始运行用例前报错。
+资源目录须含可读非空的 `geoip.dat` 和 `geosite.dat`。测试显式设置 Xray 的资源查找目录；仅复制二进制不算具备完整测试依赖。缺文件会在开始运行用例前报错。迁移要求完整 Git 历史（CI checkout `fetch-depth: 0`）；旧核心可由 `TEST_OLD_XRAY_BIN` / `TEST_OLD_XRAY_ASSET_DIR` 指定，否则从官方已校验归档下载到测试目录。
+
+原生传输需要 Python、nginx、iproute2、util-linux 与可创建 network namespace 的 root 环境。套件只在独立 namespace 内建立测试地址和监听；五类节点及原生 ECH 正向各上传/下载 64 MiB，校验内容，并验证 UUID/密钥/shortId/路径/ECH/split 逐腿阻断失败。它不使用真实 Cloudflare，不改变宿主服务。
+
+具备 Docker 的隔离测试机可执行 `bash tests/docker-client.sh`，验证真实 CLI 导出、固定官方镜像、只读挂载、0600 文件与 SOCKS 启动。默认追新选择及语义/传输可用 `bash tests/install-smoke.sh check-latest` 复现；该命令使用临时核心和资源，不安装到宿主。执行需 sudo 权限，前置依赖与 CI 相同。
 
 在授权测试 VPS 的候选目录执行下面的原生套件。systemd/ownership 使用唯一测试 unit；filesystem 仅填满专用 tmpfs；deployment 会实际替换这台 VPS 的安装内容。先备份它的配置、二进制、unit/drop-in、包清单与 SSH 指纹，已有 pending 要先处理。完整现场保留为 root 私有目录。
 
@@ -128,9 +136,9 @@ XTUN_TEST_ISOLATED_VPS=yes bash tests/minimal-install.sh "$XTUN_TEST_ROOTFS"
 
 批次 A 的 systemd 13/13、filesystem 5/5、ownership 5/5、minbase 5/5，以及安装/升级/bundle 故障和草稿续装结果保持为历史证据。批次 B 的 canonical smoke 增至 220 条，安装/任务菜单 PTY 分别为 68/9 个场景；准确双架构结果与新信号反例见批次 B 报告。sleep unit、模拟失败与共享 HAProxy 的实际 HTTP 监听分别记录，不能互相替代。
 
-CI 补修后最终代码为 `6956e01`，对应 CI `34853691008` 已通过干净 Debian 13 安装/诊断。smoke 因首次日志权限及其失败恢复新增至 222 条，本机/测试 VPS 均通过；VPS 已更新 `df15775f…60f4349` 运行内容，同包 noop、诊断和 SSH/配置/服务快照核对通过，详见报告 §4.2。后续任务从这一安装现场继续，不把早期 220 条归档当成最新候选。
+批次 B 后续 CI 补修 `6956e01` / run `34853691008` 及 222 条 smoke 是历史基线。C/D/E 当前 canonical smoke 为 252 组、PTY 为 68/9；双架构原生 17 场景、历史迁移 3 组和 VPS 26 项实际维护结果见最新报告。push 的 CI 按对应 SHA 检查，安装矩阵为 Debian 12/13、Ubuntu 24.04，另含官方客户端容器。
 
-批次 B 还须按实际候选复核以下行为：
+每次修改相关范围时，按实际候选复核以下行为：
 
 1. `show-links --summary`、`show-links --node 3`、`show-links --qr --node 3` 前后文件、备份和服务 PID 不变；不存在的节点返回非零。
 2. 旧 state 未记录 H3 时，只读识别清晰的托管关闭配置；即使 nginx 有 http_v3，也不自动创建 QUIC/Alt-Svc/节点 8/9。
@@ -175,11 +183,52 @@ CI 补修后最终代码为 `6956e01`，对应 CI `34853691008` 已通过干净 
 
 ### 4.3 Debian NAS 的 Xray-core Docker
 
-1. 由实施 AI 提供实际镜像 digest、配套启动说明、每类节点的完整原生客户端 JSON。先核实镜像 Entrypoint/命令和容器内版本，再启动独立测试实例。
-2. 首轮使用 bridge：容器 SOCKS 入站监听容器内 `0.0.0.0:10808`，宿主只发布到 `127.0.0.1:10808`；若该端口已占用，选一个空闲端口并记录。不能同时让容器只监听自身 loopback 却期待 Docker 端口映射可访问。
-3. 配置卷只读挂载，日志按需要单独处理；先做配置校验，再通过宿主回环 SOCKS 发送测试流量。由测试程序通过代理解析目标名，记录其 DNS 模式；不修改 NAS 的全局代理或生产路由。
-4. 依次加载每类节点 JSON，完成与 GUI 相同的短请求、双向哈希和 split 路径检查。容器不直接消费 `vless://`，不得以“不会扫码”作为 NAS 交付终点。
-5. 检查宿主/容器 DNS、DoH 入口引导、容器停止后端口行为、容器与宿主重启后的恢复。若还需要 host 网络模式，作为另一条测试记录，不混用 bridge 结果。
+先在已安装的测试 VPS 导出，再通过私有 SSH 通道将文件传到 NAS 的专用目录；不要把含凭据 JSON 放进公开仓库：
+
+```bash
+xtun export-client --node 3 --variant plain --format json --output /root/xtun-clients/node3.json
+```
+
+固定官方镜像为 `ghcr.io/xtls/xray-core:26.9.9`，实际运行用多架构 index digest：
+
+| 对象 | SHA256 |
+| --- | --- |
+| 多架构 index | `45338c4df61fda061c47ce62aafda6c5d7d59cbdefc33f2e335d8b0c748b748a` |
+| linux/amd64 | `9a17fb7fcda36f80d041fc1f12f1d661d3f7c502572b2a6f2e4432534789a20b` |
+| linux/arm64 | `2924913941c200d4e3b9636179f6777ed857c9a3a0d761c01eec8f90a25106d2` |
+
+镜像的 Entrypoint 是 `/usr/local/bin/xray`，默认用户为 65532；下面显式使用配置文件的属主 UID/GID，保证 0600 文件可读。Linux host 网络保留导出的 `127.0.0.1:10808`，无需手工修改 JSON 或发布容器端口。先确认 NAS 上该端口空闲，已有代理继续运行在各自端口。
+
+在 NAS 的 `node3.json` 所在目录，用 Bash 执行（需 Docker 权限与 Python 3）：
+
+```bash
+chmod 600 node3.json
+XTUN_NAS_CONFIG="$(realpath node3.json)"
+XTUN_NAS_IMAGE=ghcr.io/xtls/xray-core@sha256:45338c4df61fda061c47ce62aafda6c5d7d59cbdefc33f2e335d8b0c748b748a
+XTUN_NAS_CONTAINER="xtun-client-test-$(date -u +%Y%m%d%H%M%S)"
+XTUN_NAS_OPTIONS=(--read-only --cap-drop=ALL --security-opt=no-new-privileges
+  --user "$(stat -c '%u:%g' "${XTUN_NAS_CONFIG}")"
+  --mount "type=bind,src=${XTUN_NAS_CONFIG},dst=/config/client.json,readonly")
+python3 - <<'PY'
+import socket
+with socket.socket() as sock:
+    sock.bind(('127.0.0.1', 10808))
+PY
+docker pull "${XTUN_NAS_IMAGE}"
+docker run --rm "${XTUN_NAS_IMAGE}" version
+docker run --rm "${XTUN_NAS_OPTIONS[@]}" "${XTUN_NAS_IMAGE}" run -test -config /config/client.json
+docker run --rm -d --name "${XTUN_NAS_CONTAINER}" --network host \
+  "${XTUN_NAS_OPTIONS[@]}" "${XTUN_NAS_IMAGE}" run -config /config/client.json
+docker logs "${XTUN_NAS_CONTAINER}"
+```
+
+任一步失败先停止处理，不继续启动。端口已占用时另开独立测试环境，或明确制作并验证不同监听的副本；不能停止原有代理来制造空闲。通过宿主 `socks5h://127.0.0.1:10808` 请求受控内容端点，记录代理解析模式、双向内容哈希和 split 路径。测试结束只停止本次容器：
+
+```bash
+docker stop "${XTUN_NAS_CONTAINER}"
+```
+
+依次加载各节点/变体，另测 NAS 的 DNS/DoH 引导、核心冷启动、容器和宿主重启。CI 容器仅证明固定镜像接受实际导出的 JSON 并启动 SOCKS；真实 NAS 数据路径仍待 W15。需要 bridge 时单独制作容器内非回环监听并仅向宿主回环发布端口，记录这项有意变更并另测，不能继承 host 网络结论。
 
 普通节点通过标准：请求标识与内容正确，流量确实走选中出站，路径与节点名称一致，编辑和重新导入不丢字段。不能用所有节点相同的出口 IP 证明 split；用客户端连接记录、受控日志及隔离阻断其中一条路径的结果验证。
 
@@ -269,7 +318,7 @@ candidate:
   xray_tag: v26.9.9
   xray_commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
   asset_sha256: 待实际下载核验
-  parameter_revision: 待实现后填写
+  parameter_revision: 2（旧安装未迁移时按实际状态填写）
 environment:
   os_arch: 待填
   client_app_and_version: 待填
@@ -296,4 +345,4 @@ result:
 
 同一客户端的各节点/变体逐行记录通过、失败、未执行或不适用，不用一个总勾选覆盖整个矩阵。填写 `docs/COMPATIBILITY.md` 时只转入有准确版本和实测证据的结论，源码存在字段仅标为“源码支持”。
 
-实施者最终交付：可复现的代码/ref、按 W13 完成的 baseline/latest/migration 证据、实际安装命令与输入说明、三端导入步骤、参数流向与内容/路径验证、ECH 正负测试、失败恢复方法、两轮人工交互问题清单。当前 latest-check 仅有下载/候选命令检查，尚无完整传输和独立迁移 CI，不预填为通过。没有完成的项目保留未执行状态；不得凭菜单截图判断整套节点已稳定可用。
+实施者最终交付：可复现的代码/ref、按 W13 完成的 baseline/latest/migration 证据、实际安装命令与输入说明、三端导入步骤、参数流向与内容/路径验证、ECH 正负测试、失败恢复方法、两轮人工交互问题清单。当前 latest-check 已运行候选完整 smoke 与原生传输，baseline CI 增加历史迁移、官方客户端容器和三系统安装矩阵；各次实际结果及范围写入报告，不以工作流存在代替通过。没有完成的项目保留未执行状态；不得凭菜单截图判断整套节点已稳定可用。

@@ -52,7 +52,7 @@ case "${1:-}" in
     # 真实下载、摘要/核心校验、二进制与 geo 替换之后注入失败。
     validate_configs() { return 1; }
     status=0
-    run_cli_command upgrade --non-interactive --xray-version "${XRAY_VERSION:-v26.9.9}" > "${TEST_DEPLOYMENT_ROOT}/operation.log" 2>&1 || status=$?
+    run_cli_command upgrade --reinstall --non-interactive --xray-version "${XRAY_VERSION:-v26.9.9}" > "${TEST_DEPLOYMENT_ROOT}/operation.log" 2>&1 || status=$?
     [[ "${status}" -eq 1 && -s "${TEST_DEPLOYMENT_ROOT}/candidate-version.txt" ]]
     [[ "${GENERATION_RECOVERY_RESULT}" == restored-verified && ! -e "${PENDING_OP_FILE}" ]]
     deployment_fingerprint "${paths[@]}" > "${TEST_DEPLOYMENT_ROOT}/after.txt"
@@ -80,7 +80,7 @@ case "${1:-}" in
       command cp "$@"
     }
     status=0
-    run_cli_command update-script --non-interactive > "${TEST_DEPLOYMENT_ROOT}/operation.log" 2>&1 || status=$?
+    run_cli_command update-script --reinstall --non-interactive > "${TEST_DEPLOYMENT_ROOT}/operation.log" 2>&1 || status=$?
     [[ "${status}" -eq 1 && -s "${TEST_DEPLOYMENT_ROOT}/injection.txt" ]]
     [[ "${GENERATION_RECOVERY_RESULT}" == restored-verified && ! -e "${PENDING_OP_FILE}" ]]
     deployment_fingerprint "${paths[@]}" > "${TEST_DEPLOYMENT_ROOT}/after.txt"

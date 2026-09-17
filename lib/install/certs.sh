@@ -17,6 +17,11 @@ certificate_public_trust_roots() {
   [[ "${found}" -eq 1 ]]
 }
 
+certificate_origin_trust_roots() {
+  cat "${SCRIPT_ROOT}/static/certificates/cloudflare-origin-ca-rsa.pem" \
+    "${SCRIPT_ROOT}/static/certificates/cloudflare-origin-ca-ecc.pem"
+}
+
 # 只读，输出 state|原因；不写临时证书、不加载私有信任、不联网补中间链。
 # ready 只证明本机按公共根校验通过，不代表每个客户端的信任库或公网路径通过。
 certificate_capability_report() {
@@ -60,12 +65,17 @@ certificate_capability_report() {
   fi
   subject="$(openssl x509 -in "${cert}" -noout -subject -nameopt RFC2253 2>/dev/null)"
   issuer="$(openssl x509 -in "${cert}" -noout -issuer -nameopt RFC2253 2>/dev/null)"
-  if [[ "${issuer,,}" == *cloudflare*origin* || "${subject,,}" == *cloudflare*origin* ]]; then
-    printf 'origin-ca|Cloudflare Origin CA 仅用于回源，不是终端直连公共信任证书'
+  if [[ "${subject#subject=}" == "${issuer#issuer=}" ]]; then
+    if ! openssl verify -check_ss_sig -trusted "${cert}" "${cert}" >/dev/null 2>&1; then
+      printf 'invalid|自签证书签名校验失败'; return
+    fi
+    printf 'self-signed|自签证书不能证明客户端公共信任'
     return
   fi
-  if [[ "${subject#subject=}" == "${issuer#issuer=}" ]]; then
-    printf 'self-signed|自签证书不能证明客户端公共信任'
+  if roots="$(certificate_origin_trust_roots)" && [[ -n "${roots}" ]] \
+    && openssl verify -trusted <(printf '%s\n' "${roots}") -untrusted "${cert}" \
+      -purpose sslserver -verify_hostname "${hostname}" "${cert}" >/dev/null 2>&1; then
+    printf 'origin-ca|Cloudflare Origin CA 链检查通过，仅用于回源，不是终端直连公共信任证书'
     return
   fi
   if ! roots="$(certificate_public_trust_roots)" || [[ -z "${roots}" ]]; then
@@ -229,48 +239,17 @@ prompt_cert_mode_inputs() {
 }
 
 write_acme_reload_helper() {
-  local stage_cert_file="${1}"
-  local stage_key_file="${2}"
   local tmp_file=""
-
-  tmp_file="$(mktemp)"
-  cat > "${tmp_file}" <<EOF
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-cert_stage='${stage_cert_file}'
-key_stage='${stage_key_file}'
-cert_target='${TLS_CERT_FILE}'
-key_target='${TLS_KEY_FILE}'
-
-if [[ -f "\${cert_stage}" && -f "\${key_stage}" ]]; then
-  openssl x509 -in "\${cert_stage}" -noout >/dev/null 2>&1 || exit 1
-  openssl pkey -in "\${key_stage}" -noout >/dev/null 2>&1 || exit 1
-  cert_pub_hash="\$(openssl x509 -in "\${cert_stage}" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print \$1}')"
-  key_pub_hash="\$(openssl pkey -in "\${key_stage}" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print \$1}')"
-  [[ -n "\${cert_pub_hash}" && "\${cert_pub_hash}" == "\${key_pub_hash}" ]] || exit 1
-
-  chown 0:${XRAY_GID} "\${cert_stage}" "\${key_stage}" 2>/dev/null || true
-  chmod 0640 "\${cert_stage}" "\${key_stage}" 2>/dev/null || true
-  mv -f "\${cert_stage}" "\${cert_target}"
-  mv -f "\${key_stage}" "\${key_target}"
-fi
-
-# 这张证书只有 nginx 在用：Reality 有自己的密钥对，XHTTP 入站是挂在 nginx
-# 后面的明文 h2c，xray 配置里一次都没引用 ${SSL_DIR}。重启 xray 只会把所有
-# 在跑的 Reality 会话白白掐断一次，换不来任何东西，所以这里不碰 xray。
-# nginx 用 reload：它收到 SIGHUP 会重读证书，老 worker 把在飞的请求做完再退。
-# 失败不吞：acme.sh 会把 reloadcmd 的非 0 退出记成续期失败，
-# 而「证书换了但没生效」正是该被看见的那一类失败。
-if systemctl is-active --quiet nginx; then
-  systemctl reload nginx
-else
-  systemctl start nginx
-fi
-EOF
-
-  backup_path "${ACME_RELOAD_HELPER}" || return 1
-  install -m 0755 "${tmp_file}" "${ACME_RELOAD_HELPER}" || return 1
+  tmp_file="$(mktemp)" || return 1
+  # 只保存入口和域名；回调复用当前安装的锁、校验、generation 与服务验证。
+  # 路径用 Bash %q 编码，不能把文件名当成 Shell 程序拼接。
+  {
+    printf '#!/usr/bin/env bash\nset -Eeuo pipefail\n'
+    printf 'exec bash %q acme-deploy --domain %q\n' "${SELF_INSTALL_DIR}/xtun.sh" "${XHTTP_DOMAIN}"
+  } > "${tmp_file}" || { rm -f "${tmp_file}"; return 1; }
+  if ! backup_path "${ACME_RELOAD_HELPER}" || ! install -m 0755 "${tmp_file}" "${ACME_RELOAD_HELPER}"; then
+    rm -f "${tmp_file}"; return 1
+  fi
   rm -f "${tmp_file}"
 }
 
@@ -282,57 +261,79 @@ install_acme_sh() {
   fi
 
   [[ -n "${ACME_EMAIL}" ]] || die "acme-dns-cf 模式必须提供 ACME_EMAIL。"
-  tmp_file="$(mktemp)"
-  curl -fsSL https://get.acme.sh -o "${tmp_file}"
-  sh "${tmp_file}" email="${ACME_EMAIL}" >/dev/null
+  tmp_file="$(mktemp)" || return 1
+  if ! curl -fsSL --connect-timeout 10 --max-time 60 https://get.acme.sh -o "${tmp_file}" \
+    || ! sh "${tmp_file}" email="${ACME_EMAIL}" >/dev/null; then
+    rm -f "${tmp_file}"; return 1
+  fi
   rm -f "${tmp_file}"
   [[ -x "${ACME_SH_BIN}" ]] || die "acme.sh 安装失败。"
 }
 
+acme_stage_cert_file() { printf '%s/.acme-stage/cert.pem' "${SSL_DIR}"; }
+acme_stage_key_file() { printf '%s/.acme-stage/key.pem' "${SSL_DIR}"; }
+
+# acme.sh may log a reload error and still return 0. The deferred callback must
+# acknowledge this operation's nonce and the exact two staged files.
+acme_deferred_receipt_valid() {
+  local cert_digest="" key_digest=""
+  cert_digest="$(identity_file_sha256 "$(acme_stage_cert_file)")" || return 1
+  key_digest="$(identity_file_sha256 "$(acme_stage_key_file)")" || return 1
+  jq -e --arg nonce "${1}" --arg domain "${XHTTP_DOMAIN}" --arg cert "${cert_digest}" --arg key "${key_digest}" \
+    '.nonce == $nonce and .domain == $domain and .cert_sha256 == $cert and .key_sha256 == $key' \
+    "${BACKUP_DIR}/acme-deferred.json" >/dev/null 2>&1
+}
+
+# 环境只传给独立 ACME/回调进程；故意不污染父操作。
+# shellcheck disable=SC2030
 issue_acme_cf_cert() {
-  local cert_file="${1}"
-  local key_file="${2}"
-
-  [[ -n "${ACME_EMAIL}" ]] || die "acme-dns-cf 模式必须提供 ACME_EMAIL。"
-  [[ -n "${CF_DNS_TOKEN}" ]] || die "acme-dns-cf 模式必须提供 CF_DNS_TOKEN。"
-
-  install_acme_sh
-  # 这个钩子写不进去，后面 acme.sh 自动续期时就不会 reload nginx——
-  # 证书换了但没生效，而且是无声的。
-  write_acme_reload_helper "${cert_file}" "${key_file}" || return 1
-
-  unset CF_Account_ID CF_Zone_ID
-  export CF_Token="${CF_DNS_TOKEN}"
-  if [[ -n "${CF_DNS_ACCOUNT_ID}" ]]; then
-    export CF_Account_ID="${CF_DNS_ACCOUNT_ID}"
-  fi
-  if [[ -n "${CF_DNS_ZONE_ID}" ]]; then
-    export CF_Zone_ID="${CF_DNS_ZONE_ID}"
-  fi
-
-  "${ACME_SH_BIN}" --register-account -m "${ACME_EMAIL}" --server "${ACME_CA}" >/dev/null 2>&1 || true
-  "${ACME_SH_BIN}" --issue --dns dns_cf -d "${XHTTP_DOMAIN}" --server "${ACME_CA}" --keylength ec-256
-  "${ACME_SH_BIN}" --install-cert -d "${XHTTP_DOMAIN}" \
-    --ecc \
-    --key-file "${key_file}" \
-    --fullchain-file "${cert_file}" \
-    --reloadcmd "${ACME_RELOAD_HELPER}"
+  local cert_file="${1}" key_file="${2}" nonce="" status=0
+  [[ -n "${ACME_EMAIL}" ]] || { warn "acme-dns-cf 模式必须提供 ACME_EMAIL。"; return 1; }
+  [[ -n "${CF_DNS_TOKEN}" ]] || { warn "acme-dns-cf 模式必须提供 CF_DNS_TOKEN。"; return 1; }
+  [[ "${GENERATION_ACTIVE:-no}" == yes && "${SCRIPT_LOCK_HELD:-0}" -eq 1 ]] || return 1
+  install_acme_sh || return 1
+  write_acme_reload_helper || return 1
+  install -d -m 0700 "${SSL_DIR}/.acme-stage" || return 1
+  nonce="$(cat /proc/sys/kernel/random/uuid)" || return 1
+  rm -f "${BACKUP_DIR}/acme-deferred.json" || return 1
+  (
+    # 限定到本次子进程，避免下一次维护继承令牌或回调上下文。
+    unset CF_Account_ID CF_Zone_ID
+    export CF_Token="${CF_DNS_TOKEN}"
+    if [[ -n "${CF_DNS_ACCOUNT_ID}" ]]; then export CF_Account_ID="${CF_DNS_ACCOUNT_ID}"; fi
+    if [[ -n "${CF_DNS_ZONE_ID}" ]]; then export CF_Zone_ID="${CF_DNS_ZONE_ID}"; fi
+    export XTUN_ACME_DEFER_OPERATION="${BACKUP_DIR}" XTUN_ACME_DEFER_NONCE="${nonce}"
+    export XTUN_LOCK_FILE="${SCRIPT_LOCK_FILE}"
+    "${ACME_SH_BIN}" --register-account -m "${ACME_EMAIL}" --server "${ACME_CA}" || exit 1
+    "${ACME_SH_BIN}" --issue --dns dns_cf -d "${XHTTP_DOMAIN}" --server "${ACME_CA}" --keylength ec-256 \
+      --key-file "$(acme_stage_key_file)" --fullchain-file "$(acme_stage_cert_file)" \
+      --reloadcmd "${ACME_RELOAD_HELPER}" || status=$?
+    # acme.sh 3.1.1: RENEW_SKIP=2 means the existing certificate is not due.
+    [[ "${status}" -eq 0 || "${status}" -eq 2 ]] || exit "${status}"
+    if [[ "${status}" -eq 2 ]]; then log "ACME 尚未到轮换日期，将重新校验和部署现有证书。"; fi
+    rm -f "${BACKUP_DIR}/acme-deferred.json" || exit 1
+    "${ACME_SH_BIN}" --install-cert -d "${XHTTP_DOMAIN}" --ecc \
+      --key-file "$(acme_stage_key_file)" --fullchain-file "$(acme_stage_cert_file)" \
+      --reloadcmd "${ACME_RELOAD_HELPER}" || exit 1
+  ) || return 1
+  acme_deferred_receipt_valid "${nonce}" || {
+    warn "ACME 回调未确认本次证书，未把外层返回成功当作部署成功。"; return 1;
+  }
+  copy_acme_stage_pair "${cert_file}" "${key_file}" || return 1
 }
 
 validate_tls_assets_with_paths() {
-  local cert_file="${1}"
-  local key_file="${2}"
-  local cert_pub_hash=""
-  local key_pub_hash=""
-
-  openssl x509 -in "${cert_file}" -noout >/dev/null 2>&1 || die "写入后的证书内容无效：${cert_file}"
-  openssl pkey -in "${key_file}" -noout >/dev/null 2>&1 || die "写入后的私钥内容无效：${key_file}"
-
-  cert_pub_hash="$(openssl x509 -in "${cert_file}" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
-  key_pub_hash="$(openssl pkey -in "${key_file}" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
-
-  [[ -n "${cert_pub_hash}" && -n "${key_pub_hash}" ]] || die "无法校验证书与私钥是否匹配。"
-  [[ "${cert_pub_hash}" == "${key_pub_hash}" ]] || die "证书与私钥不匹配，请检查输入内容。"
+  local report="" capability=""
+  report="$(certificate_capability_report "${1}" "${2}" "${XHTTP_DOMAIN}")" || return 1
+  capability="${report%%|*}"
+  case "${capability}" in
+    ready) ;;
+    origin-ca|self-signed)
+      if [[ "${CERT_MODE}" == acme-dns-cf ]]; then
+        warn "ACME 候选必须通过公共信任链校验：${report#*|}"; return 1
+      fi ;;
+    *) warn "候选证书校验失败：${report#*|}"; return 1 ;;
+  esac
 }
 
 validate_tls_assets() {
@@ -412,8 +413,12 @@ promote_tls_assets() {
 
   chown 0:"${XRAY_GID}" "${cert_file}" "${key_file}" || return 1
   chmod 0640 "${cert_file}" "${key_file}" || return 1
-  mv -f "${cert_file}" "${TLS_CERT_FILE}" || return 1
-  mv -f "${key_file}" "${TLS_KEY_FILE}" || return 1
+  [[ ! -L "${TLS_CERT_FILE}" && ! -L "${TLS_KEY_FILE}" ]] || return 1
+  sync_required_path "${cert_file}" || return 1
+  sync_required_path "${key_file}" || return 1
+  mv -fT -- "${cert_file}" "${TLS_CERT_FILE}" || return 1
+  mv -fT -- "${key_file}" "${TLS_KEY_FILE}" || return 1
+  sync_required_path "${SSL_DIR}" || return 1
 }
 
 # 签发/导入暂存证书并把它顶上去。所有失败都靠 return 传出去，暂存文件的清理
@@ -450,7 +455,7 @@ write_tls_assets() {
   local stage_key_file=""
   local status=0
 
-  mkdir -p "${SSL_DIR}"
+  mkdir -p "${SSL_DIR}" || return 1
   backup_path "${TLS_CERT_FILE}" || return 1
   backup_path "${TLS_KEY_FILE}" || return 1
   stage_cert_file="$(tls_stage_cert_file)"
@@ -483,4 +488,211 @@ cleanup_previous_acme_cert() {
       "${ACME_SH_BIN}" --remove -d "${old_xhttp_domain}" --ecc >/dev/null 2>&1 || true
     fi
   fi
+}
+
+# ACME 写入独立收件目录；复制前后都核对摘要，拒绝半份/并发变化的输入。
+copy_acme_stage_pair() {
+  local cert="" key="" before="" after=""
+  cert="$(acme_stage_cert_file)"; key="$(acme_stage_key_file)"
+  before="$(identity_file_sha256 "${cert}"):$(identity_file_sha256 "${key}")" || return 1
+  [[ "${before}" =~ ^[a-f0-9]{64}:[a-f0-9]{64}$ ]] || return 1
+  install -m 0600 -- "${cert}" "${1}" || return 1
+  install -m 0600 -- "${key}" "${2}" || return 1
+  after="$(identity_file_sha256 "${cert}"):$(identity_file_sha256 "${key}")" || return 1
+  [[ "${before}" == "${after}" && "${before}" == "$(identity_file_sha256 "${1}"):$(identity_file_sha256 "${2}")" ]]
+}
+
+certificate_fingerprint() {
+  openssl x509 -in "${1}" -outform DER 2>/dev/null | sha256sum | awk '{print $1}'
+}
+
+served_certificate_fingerprint() {
+  local certificate=""
+  certificate="$(timeout 4 openssl s_client -connect "127.0.0.1:${NGINX_TLS_PORT}" \
+    -servername "${XHTTP_DOMAIN}" -showcerts </dev/null 2>/dev/null)" || return 1
+  openssl x509 -outform DER <<< "${certificate}" 2>/dev/null | sha256sum | awk '{print $1}'
+}
+
+verify_served_tls_assets() {
+  local expected="" actual="" attempt=0
+  expected="$(certificate_fingerprint "${TLS_CERT_FILE}")" || return 1
+  for attempt in 1 2 3 4; do
+    if actual="$(served_certificate_fingerprint)" && [[ "${actual}" == "${expected}" ]]; then return 0; fi
+    sleep 0.2
+  done
+  warn "nginx 实际提供的证书未匹配候选证书，未确认部署成功。"
+  return 1
+}
+
+write_certificate_receipt() {
+  local temporary="" fingerprint="" report=""
+  fingerprint="$(certificate_fingerprint "${TLS_CERT_FILE}")" || return 1
+  report="$(certificate_capability_report "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" "${XHTTP_DOMAIN}")" || return 1
+  temporary="$(mktemp "${SSL_DIR}/.certificate.XXXXXX")" || return 1
+  if ! jq -n --arg domain "${XHTTP_DOMAIN}" --arg fingerprint "${fingerprint}" --arg capability "${report%%|*}" \
+    --arg at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --arg operation "${BACKUP_DIR}" \
+    '{schema:1,domain:$domain,sha256:$fingerprint,capability:$capability,served_verified_at:$at,operation:$operation}' \
+    > "${temporary}" || ! durable_replace_file "${temporary}" "${SSL_DIR}/.xtun-certificate.json"; then
+    rm -f "${temporary}"; return 1
+  fi
+}
+
+certificate_next_renewal() {
+  local conf="${ACME_HOME}/${XHTTP_DOMAIN}_ecc/${XHTTP_DOMAIN}.conf"
+  [[ "${CERT_MODE:-}" == acme-dns-cf && -f "${conf}" ]] || return 0
+  # acme.sh 的配置是 Shell；这里只读数字，不 source 邮箱、令牌或其它程序。
+  awk -F= '$1 == "Le_NextRenewTime" {v=$2; gsub(/[\047\042]/,"",v); if (v ~ /^[0-9]+$/) print v}' "${conf}" | tail -n 1
+}
+
+certificate_record_event() {
+  local temporary="" target="${OP_LOG_DIR}/certificate.json"
+  if ! (umask 077; mkdir -p "${OP_LOG_DIR}") || ! temporary="$(mktemp "${OP_LOG_DIR}/.certificate.XXXXXX")"; then
+    warn "证书操作记录无法写入；请保存本次终端结果。"; return 0
+  fi
+  if ! jq -n --arg trigger "${1}" --arg result "${2}" --arg detail "${3:-}" \
+    --arg at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --arg domain "${XHTTP_DOMAIN:-}" \
+    --arg next "$(certificate_next_renewal)" --arg operation "${BACKUP_DIR:-}" \
+    '{schema:1,trigger:$trigger,result:$result,detail:$detail,at:$at,domain:$domain,next_renewal_epoch:$next,operation:$operation}' \
+    > "${temporary}" || ! durable_replace_file "${temporary}" "${target}"; then
+    rm -f "${temporary}"; warn "证书操作记录未能持久化；请保存本次终端结果。"
+  fi
+  return 0
+}
+
+certificate_last_event_text() {
+  local target="${OP_LOG_DIR}/certificate.json"
+  [[ -f "${target}" && ! -L "${target}" ]] || { printf '无已保存记录'; return; }
+  jq -er '.at + " " + .trigger + " / " + .result +
+    (if .next_renewal_epoch == "" then "" else "；ACME 下次检查时间戳 " + .next_renewal_epoch end)' \
+    "${target}" 2>/dev/null || printf '记录不可读'
+}
+
+# 同域名换证只改证书相关 state 字段，旧参数修订、身份及未识别键保持原样。
+certificate_state_text() {
+  local key=""
+  if [[ ! -f "${STATE_FILE}" ]]; then state_file_text || return 1; return; fi
+  awk '!/^(CERT_MODE|ACME_EMAIL|ACME_CA|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID)=/' "${STATE_FILE}" || return 1
+  for key in CERT_MODE ACME_EMAIL ACME_CA CF_DNS_ACCOUNT_ID CF_DNS_ZONE_ID; do
+    write_state_kv "${key}" "${!key:-}" || return 1
+  done
+}
+
+update_certificate_metadata() {
+  local temporary="" manifest="${QR_OUTPUT_DIR}/manifest.json"
+  write_generated_file_atomically "${STATE_FILE}" certificate_state_text || return 1
+  chmod 0600 "${STATE_FILE}" || return 1
+  # 保留 URI/PNG 原字节，只更新与证书来源有关的说明和同代清单摘要。
+  if [[ -f "${OUTPUT_FILE}" ]]; then
+    temporary="$(mktemp "${OUTPUT_FILE}.tmp.XXXXXX")" || return 1
+    if ! sed "s/^- 请将 Cloudflare SSL\/TLS 模式设置为 .*。$/- 请将 Cloudflare SSL\/TLS 模式设置为 $(cloudflare_ssl_mode_text)。/" \
+      "${OUTPUT_FILE}" > "${temporary}" || ! durable_replace_file "${temporary}" "${OUTPUT_FILE}"; then
+      rm -f "${temporary}"; return 1
+    fi
+  fi
+  if [[ -f "${manifest}" ]]; then
+    temporary="$(mktemp "${QR_OUTPUT_DIR}/.manifest.XXXXXX")" || return 1
+    if ! jq --arg state "$(identity_file_sha256 "${STATE_FILE}")" --arg output "$(identity_file_sha256 "${OUTPUT_FILE}")" \
+      '.state_sha256=$state | .output_sha256=$output' "${manifest}" > "${temporary}" \
+      || ! durable_replace_file "${temporary}" "${manifest}"; then
+      rm -f "${temporary}"; return 1
+    fi
+  fi
+}
+
+apply_certificate_only_update() {
+  local trigger="${1:-manual}" source="${2:-manual}" cert="" key="" failed=no
+  local -a paths=("${SSL_DIR}" "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" "${ACME_RELOAD_HELPER}")
+  # A fresh renew/callback process has not entered the Xray configuration path.
+  ensure_xray_user lookup || return 1
+  if [[ "${source}" == manual ]]; then
+    paths+=("${STATE_FILE}" "${OUTPUT_FILE}" "${QR_OUTPUT_DIR}/manifest.json")
+    if [[ -f "${QR_OUTPUT_DIR}/manifest.json" ]]; then load_export_node_objects >/dev/null || return 1; fi
+  fi
+  if [[ "${CERT_MODE}" == acme-dns-cf ]]; then paths+=("${ACME_HOME}/${XHTTP_DOMAIN}_ecc"); fi
+  begin_generation_paths "证书更新 (${trigger})" nginx.service -- "${paths[@]}" || return 1
+  certificate_record_event "${trigger}" started
+  if [[ "${source}" == acme ]]; then
+    cert="$(tls_stage_cert_file)"; key="$(tls_stage_key_file)"
+    if ! copy_acme_stage_pair "${cert}" "${key}" || ! validate_tls_assets_with_paths "${cert}" "${key}" \
+      || ! h3_prepare_generation "${cert}" "${key}" || ! promote_tls_assets "${cert}" "${key}"; then failed=yes; fi
+    cleanup_tls_stage_files "${cert}" "${key}"
+  elif ! write_tls_assets; then failed=yes; fi
+  if [[ "${failed}" != yes ]]; then
+    if ! nginx -t || ! reload_or_restart_service nginx || ! verify_served_tls_assets \
+      || ! write_certificate_receipt; then failed=yes; fi
+  fi
+  if [[ "${failed}" != yes && "${source}" == manual ]] && ! update_certificate_metadata; then failed=yes; fi
+  if [[ "${failed}" == yes ]]; then
+    generation_failed "证书校验、部署或实际供证检查失败" || true
+    certificate_record_event "${trigger}" failed "${GENERATION_RECOVERY_RESULT}；修复原因后重试，存在 pending 时先 recover"
+    return 1
+  fi
+  if ! generation_commit; then
+    generation_failed "证书提交记录未完成" || true
+    certificate_record_event "${trigger}" failed "${GENERATION_RECOVERY_RESULT}"
+    return 1
+  fi
+  certificate_record_event "${trigger}" success '已验证 nginx 实际提供的证书'
+}
+
+# 回退也验证实际供证；失败时保留 pending，不能只凭 nginx active 宣称恢复。
+verify_recovered_tls_generation() {
+  local entry="" needed=no
+  if ! generation_has_path "${TLS_CERT_FILE}" && ! generation_has_path "${SSL_DIR}"; then return 0; fi
+  for entry in "${GENERATION_SERVICE_STATES[@]}"; do
+    [[ "${entry}" != nginx.service$'\t'active$'\t'* ]] || needed=yes
+  done
+  [[ "${needed}" == yes && -f "${TLS_CERT_FILE}" && -f "${STATE_FILE}" ]] || return 0
+  (
+    load_existing_state
+    [[ -n "${XHTTP_DOMAIN:-}" ]] || return 1
+    verify_served_tls_assets || return 1
+  )
+}
+
+# 回调在另一进程读取继承环境，不读取上面子 shell 的父进程变量。
+# shellcheck disable=SC2031
+acme_deploy_cmd() {
+  local domain="" cert_digest="" key_digest="" temporary=""
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --domain|--domain=*)
+        option_take_value --domain "${1}" "${@:2}"
+        domain="${OPTION_VALUE}"
+        validate_hostname_value "ACME 域名" "${domain}"
+        shift "${OPTION_ARGS_CONSUMED}" ;;
+      --help|-h|help) usage; return 0 ;;
+      *) die "未知的 acme-deploy 参数：${1}" ;;
+    esac
+  done
+  [[ -n "${domain}" ]] || die "acme-deploy 需要 --domain，且只部署已校验的 ACME 暂存证书。"
+  need_root
+  if [[ -n "${XTUN_ACME_DEFER_OPERATION:-}" ]]; then
+    # 外层安装/换证已持锁：回调只校验并确认输入，不抢锁、不移动文件、不启动服务。
+    [[ "${XTUN_ACME_DEFER_NONCE:-}" =~ ^[a-zA-Z0-9_-]{16,64}$ ]] || return 1
+    [[ "$(readlink -f /proc/self/fd/9)" == "$(readlink -f "${SCRIPT_LOCK_FILE}")" ]] || return 1
+    flock -n 9 || return 1
+    pending_operation_validate || return 1
+    [[ "$(awk -F'\t' '$1 == "op_id" {print $2}' "${PENDING_OP_FILE}")" == "${XTUN_ACME_DEFER_OPERATION}" ]] || return 1
+    local CERT_MODE=acme-dns-cf XHTTP_DOMAIN="${domain}"
+    validate_tls_assets_with_paths "$(acme_stage_cert_file)" "$(acme_stage_key_file)" || return 1
+    cert_digest="$(identity_file_sha256 "$(acme_stage_cert_file)")" || return 1
+    key_digest="$(identity_file_sha256 "$(acme_stage_key_file)")" || return 1
+    temporary="$(mktemp "${XTUN_ACME_DEFER_OPERATION}/.acme-deferred.XXXXXX")" || return 1
+    if ! jq -n --arg nonce "${XTUN_ACME_DEFER_NONCE}" --arg domain "${domain}" --arg cert "${cert_digest}" --arg key "${key_digest}" \
+      '{nonce:$nonce,domain:$domain,cert_sha256:$cert,key_sha256:$key}' > "${temporary}" \
+      || ! durable_replace_file "${temporary}" "${XTUN_ACME_DEFER_OPERATION}/acme-deferred.json"; then
+      rm -f "${temporary}"; return 1
+    fi
+    return 0
+  fi
+  begin_mutation || return 1
+  load_current_install_context || return 1
+  if [[ "${CERT_MODE}" != acme-dns-cf || "${XHTTP_DOMAIN}" != "${domain}" ]]; then
+    certificate_record_event acme-callback rejected '域名或证书来源已改变，保留当前证书'
+    warn "此回调不属于当前 ACME 域名，未部署。"; return 1
+  fi
+  start_backup_session || return 1
+  apply_certificate_only_update acme-callback acme || return 1
+  log_success "ACME 证书已部署，并核对 nginx 实际供证。"
 }

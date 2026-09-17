@@ -29,6 +29,9 @@ install_self_command() {
     if [[ -d "${source_root}/static" ]]; then
       cp -a "${source_root}/static" "${staging_dir}/static"
     fi
+    if [[ -f "${source_root}/.xtun-bundle.json" ]]; then
+      cp -a "${source_root}/.xtun-bundle.json" "${staging_dir}/.xtun-bundle.json" || return 1
+    fi
     source_bundle_root="${staging_dir}"
   fi
 
@@ -53,15 +56,8 @@ bundle_script_version() {
 # 源码归档（codeload tar.gz）里还有 README / tests / docs 等不进安装目录的文件，
 # 若把它们算进去，installed_script_matches_bundle 永远为假，update-script 每次都全量重装。
 bundle_script_signature() {
-  local bundle_root="${1}"
-
-  [[ -d "${bundle_root}" ]] || return 0
-  (
-    cd "${bundle_root}" || exit 0
-    find xtun.sh lib static -type f -print 2>/dev/null | LC_ALL=C sort | while IFS= read -r path; do
-      sha256sum "${path}"
-    done | sha256sum | awk '{print $1}'
-  )
+  [[ -d "${1}" ]] || return 0
+  bundle_content_signature "${1}"
 }
 
 installed_script_version() {
@@ -78,6 +74,7 @@ installed_script_matches_bundle() {
   local installed_signature=""
   local bundle_signature=""
 
+  bundle_identity_valid "${SELF_INSTALL_DIR}" || return 1
   installed_signature="$(bundle_script_signature "${SELF_INSTALL_DIR}")"
   bundle_signature="$(bundle_script_signature "${bundle_root}")"
   [[ -n "${installed_signature}" && -n "${bundle_signature}" && "${installed_signature}" == "${bundle_signature}" ]]
@@ -107,6 +104,7 @@ install_bundle_root_to_self() {
   if [[ -d "${source_bundle_root}/static" ]]; then
     cp -a "${source_bundle_root}/static" "${SELF_INSTALL_DIR}/static" || return 1
   fi
+  write_bundle_install_identity "${source_bundle_root}" "${SELF_INSTALL_DIR}" || return 1
 
   wrapper_tmp="$(mktemp)"
   cat > "${wrapper_tmp}" <<EOF
@@ -119,18 +117,7 @@ EOF
 }
 
 download_latest_script_bundle() {
-  local target_dir="${1}"
-  local archive_url=""
-  local archive_path="${target_dir}/xtun.tar.gz"
-  local bundle_root=""
-
-  archive_url="$(bootstrap_resolve_archive_url)"
-  printf '[信息] %s\n' "下载来源：${archive_url}" >&2
-  curl -fsSL "${archive_url}" -o "${archive_path}" || return 1
-  tar -xzf "${archive_path}" -C "${target_dir}" || return 1
-  bundle_root="$(find "${target_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-  bundle_root_ready "${bundle_root}" || return 1
-  printf '%s' "${bundle_root}"
+  bootstrap_download_bundle "${1}"
 }
 
 update_script_cmd() {
@@ -138,10 +125,19 @@ update_script_cmd() {
   local current_version=""
   local tmp_dir=""
   local bundle_root=""
+  local reinstall=0 before_signature="" current_signature=""
 
-  parse_command_without_options update-script "$@"
+  while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then shift; continue; fi
+    case "${1}" in
+      --reinstall) reinstall=1; shift ;;
+      --help|-h|help) usage; return 0 ;;
+      *) die "未知的 update-script 参数：${1}" ;;
+    esac
+  done
   need_root
   previous_version="$(installed_script_version)"
+  before_signature="$(bundle_script_signature "${SELF_INSTALL_DIR}")" || return 1
 
   tmp_dir="$(mktemp -d)"
   log_step "下载最新脚本 bundle。"
@@ -151,11 +147,23 @@ update_script_cmd() {
   fi
 
   current_version="$(bundle_script_version "${bundle_root}")"
-  if installed_script_matches_bundle "${bundle_root}"; then
+  if ! acquire_script_lock; then cleanup_script_bundle_tmp_dir "${tmp_dir}"; return 1; fi
+  if pending_operation_present; then
+    cleanup_script_bundle_tmp_dir "${tmp_dir}"
+    warn "存在未完成操作，请先运行 xtun recover。"
+    return 1
+  fi
+  if [[ "${reinstall}" -eq 0 ]] && installed_script_matches_bundle "${bundle_root}"; then
     cleanup_script_bundle_tmp_dir "${tmp_dir}"
     log_success "当前已经是最新脚本 bundle。"
     [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
     return 0
+  fi
+  current_signature="$(bundle_script_signature "${bundle_root}")" || { cleanup_script_bundle_tmp_dir "${tmp_dir}"; return 1; }
+  if [[ "${reinstall}" -eq 0 && -n "${before_signature}" && "${before_signature}" == "${current_signature}" ]]; then
+    cleanup_script_bundle_tmp_dir "${tmp_dir}"
+    warn "bundle 内容相同，但安装身份未核验。请显式运行 xtun update-script --reinstall 建立安装记录。"
+    return 1
   fi
   local confirmation_status=0
   (confirm_maintenance_action "更新脚本：${previous_version} → ${current_version}" \
@@ -164,6 +172,15 @@ update_script_cmd() {
   if [[ "${confirmation_status}" -ne 0 ]]; then
     cleanup_script_bundle_tmp_dir "${tmp_dir}"
     return "${confirmation_status}"
+  fi
+  if ! begin_mutation; then
+    cleanup_script_bundle_tmp_dir "${tmp_dir}"
+    return 1
+  fi
+  if [[ "$(bundle_script_signature "${SELF_INSTALL_DIR}")" != "${before_signature}" ]]; then
+    cleanup_script_bundle_tmp_dir "${tmp_dir}"
+    warn "确认期间脚本现场发生变化，请重新执行更新。"
+    return 1
   fi
   if ! start_backup_session || ! begin_generation_paths "脚本 bundle 更新" -- "${SELF_INSTALL_DIR}" "${SELF_COMMAND_PATH}"; then
     cleanup_script_bundle_tmp_dir "${tmp_dir}"

@@ -255,7 +255,7 @@ diagnose_cmd() {
   done
 
   # 只读上下文：诊断不写 state、不执行 repair / apply-config，也不改托管文件（D09）。
-  load_dashboard_context
+  load_dashboard_context || return 1
   h3_refresh_decision
 
   # 一次采集：下面所有展示与判定复用同一份结果。慢探测（xray -test、nginx -t、
@@ -303,6 +303,7 @@ diagnose_cmd() {
   printf '%s\n' "证书用途: $(certificate_usage_text)"
   printf '%s\n' "路由拦截: $(xray_routing_block_text)"
   printf '%s\n' "证书到期: $(cert_expiry_text)"
+  printf '%s\n' "证书操作: $(certificate_last_event_text)"
   printf '%s\n' "WARP 出站: $(warp_outbound_text)"
   printf '%s\n' "WARP 规则数: $(warp_rule_count_text)"
   printf '%s\n' "WARP Endpoint 解析: $(warp_endpoint_resolve_text)"
@@ -417,7 +418,7 @@ restart_cmd() {
   local restart_failed=0
 
   parse_command_without_options restart "$@"
-  load_dashboard_context
+  load_dashboard_context || return 1
   confirm_maintenance_action "重启托管服务" "不改配置" \
     "restart xray/nginx/HAProxy（已启用时包括网络优化）；现有连接可能中断" \
     "逐项报告实际服务状态；失败后运行 xtun diagnose" || return 1
@@ -976,6 +977,7 @@ show_task_menu() {
     nodes)
       (show_links --summary) || printf '节点文档不可用；可返回主菜单诊断。\n'
       printf '\n输入节点编号复制链接；q N 查看该节点二维码；all 查看完整文档。\n'
+      printf 'j N 导出 NAS / 原生 JSON（可选择 current / plain / ech）。\n'
       ;;
     status)
       printf '查看状态与诊断\n  1. 完整状态\n  2. 深度诊断\n  3. 检查 REALITY SNI\n  4. 上次动作与恢复信息\n'
@@ -984,7 +986,7 @@ show_task_menu() {
       printf '修改节点\n  1. 轮换 UUID\n  2. 修改 REALITY SNI\n  3. 修改 XHTTP 路径\n  4. 修改证书来源 / CDN 域名\n'
       ;;
     maintenance)
-      printf '升级与维护\n  1. 升级 Xray 核心\n  2. 更新脚本\n  3. 重启服务\n  4. 抢修文件权限\n  5. 重建托管配置\n  6. 续期 / 刷新证书\n  7. 安装任务（恢复草稿 / 重建 / 轮换）\n'
+      printf '升级与维护\n  1. 升级 Xray 核心\n  2. 更新脚本\n  3. 重启服务\n  4. 抢修文件权限\n  5. 重建托管配置\n  6. 续期 / 刷新证书\n  7. 安装任务（恢复草稿 / 重建 / 轮换）\n  8. 独立重建二维码\n  9. 显式重装 Xray 核心\n'
       ;;
     network)
       printf '网络与可选功能\n  1. 开关 WARP\n  2. 查看 WARP 规则\n  3. 修改 WARP 规则\n  4. 开关 H3 直连\n  5. 重新应用网络优化\n  6. IPv6 / ECH 等高级项（沿用身份重建）\n'
@@ -1146,11 +1148,20 @@ dispatch_cli_command() {
     renew-cert)
       renew_cert_cmd "$@"
       ;;
+    acme-deploy)
+      acme_deploy_cmd "$@"
+      ;;
     uninstall)
       uninstall_cmd "$@"
       ;;
     show-links)
       show_links "$@"
+      ;;
+    export-client)
+      export_client_cmd "$@"
+      ;;
+    rebuild-qr)
+      rebuild_qr_cmd "$@"
       ;;
     diagnose)
       diagnose_cmd "$@"
@@ -1182,6 +1193,13 @@ dispatch_cli_command() {
   esac
 }
 
+menu_export_client() {
+  local number="${1}" variant="" output=""
+  prompt_with_default variant '变体 current / plain / ech' current || return $?
+  prompt_with_default output 'JSON 输出文件' "/root/xtun-clients/node-${number}-${variant}.json" || return $?
+  run_cli_command export-client --node "${number}" --variant "${variant}" --format json --output "${output}"
+}
+
 run_menu_choice() {
   local group="${1}" choice="${2:-}" version=""
   case "${group}:${choice}" in
@@ -1193,6 +1211,7 @@ run_menu_choice() {
     nodes:all) run_cli_command show-links ;;
     nodes:[1-9]) run_cli_command show-links --node "${choice}" ;;
     nodes:q\ [1-9]) run_cli_command show-links --qr --node "${choice#q }" ;;
+    nodes:j\ [1-9]) menu_export_client "${choice#j }" ;;
     status:1) run_cli_command status ;;
     status:2) run_cli_command diagnose ;;
     status:4|recovery:2) show_operation_details ;;
@@ -1210,6 +1229,11 @@ run_menu_choice() {
     maintenance:5) run_cli_command apply-config ;;
     maintenance:6) run_cli_command renew-cert ;;
     maintenance:7) menu_install_task ;;
+    maintenance:8) run_cli_command rebuild-qr ;;
+    maintenance:9)
+      read_line_or_cancel version '重新安装 Xray 版本 [latest-published，或 vX.Y.Z]: ' || return $?
+      run_cli_command upgrade --reinstall --xray-version "${version:-latest-published}"
+      ;;
     network:1) run_cli_command change-warp ;;
     network:2) run_cli_command change-warp-rules --list ;;
     network:3) menu_warp_rules_change ;;
@@ -1245,7 +1269,7 @@ main_menu() {
       clear >/dev/null 2>&1 || true
     fi
     if [[ -z "${group}" ]]; then
-      show_dashboard_brief
+      show_dashboard_brief || warn "当前配置读取失败；可使用诊断或恢复入口。"
       show_main_menu
     else
       show_task_menu "${group}" || true

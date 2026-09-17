@@ -70,10 +70,10 @@ run_warp_enabled_case() {
   assert_contains '&ech=' "${OUTPUT_FILE}"
   assert_contains 'extra=' "${OUTPUT_FILE}"
   assert_contains 'xPaddingObfsMode' "${OUTPUT_FILE}"
-  assert_contains 'xmux' "${OUTPUT_FILE}"
-  assert_contains 'maxConcurrency' "${OUTPUT_FILE}"
-  assert_contains 'hMaxReusableSecs' "${OUTPUT_FILE}"
-  assert_contains 'scMinPostsIntervalMs' "${OUTPUT_FILE}"
+  assert_absent 'xmux' "${OUTPUT_FILE}"
+  assert_absent 'maxConcurrency' "${OUTPUT_FILE}"
+  assert_absent 'hMaxReusableSecs' "${OUTPUT_FILE}"
+  assert_absent 'scMinPostsIntervalMs' "${OUTPUT_FILE}"
   assert_contains 'alpn=h2' "${OUTPUT_FILE}"
   assert_contains 'fingerprint=chrome' "${OUTPUT_FILE}"
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
@@ -136,9 +136,9 @@ run_warp_disabled_case() {
 
   assert_contains 'Cloudflare SSL/TLS 模式设置为 Full。' "${OUTPUT_FILE}"
   assert_contains 'encryption=none' "${OUTPUT_FILE}"
-  assert_contains 'xmux' "${OUTPUT_FILE}"
-  assert_contains 'maxConcurrency' "${OUTPUT_FILE}"
-  assert_contains 'scMinPostsIntervalMs' "${OUTPUT_FILE}"
+  assert_absent 'xmux' "${OUTPUT_FILE}"
+  assert_absent 'maxConcurrency' "${OUTPUT_FILE}"
+  assert_absent 'scMinPostsIntervalMs' "${OUTPUT_FILE}"
 }
 
 run_warp_rules_file_case() {
@@ -167,7 +167,9 @@ run_warp_rules_file_case() {
 }
 
 run_output_helper_case() {
+  local uri=""
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
   SERVER_IP="203.0.113.12"
   NODE_LABEL_PREFIX="hkg"
   REALITY_UUID="55555555-5555-5555-5555-555555555555"
@@ -187,8 +189,9 @@ run_output_helper_case() {
   XHTTP_PATH="/assets/v3"
   [[ "$(cloudflare_xhttp_cache_bypass_expression)" == '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' ]]
 
-  [[ "$(build_reality_uri "HKG-REALITY")" == *"vless://${REALITY_UUID}@${SERVER_IP}:443"* ]]
-  [[ "$(build_reality_uri "HKG-REALITY")" == *"#HKG-REALITY" ]]
+  uri="$(build_node_objects | jq -c '.[] | select(.number==1)' | node_object_uri)"
+  [[ "${uri}" == *"vless://${REALITY_UUID}@${SERVER_IP}:443"* ]]
+  [[ "${uri}" == *"#HKG-REALITY" ]]
   jq -e '.routeOnly == true' <<<"$(xray_sniffing_json)" >/dev/null
 }
 
@@ -714,6 +717,7 @@ run_output_no_subscription_block_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
 
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"
@@ -745,6 +749,7 @@ run_node_link_entries_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
 
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"
@@ -799,13 +804,14 @@ run_output_write_failure_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   output_file_text() { printf 'private-node-material\n'; }
+  build_node_objects() { printf '[]'; }
   write_link_qr_pngs() { touch "${workdir}/qr-written"; }
   chmod() {
-    [[ "${!#}" != "${OUTPUT_FILE}" ]] || return 1
+    if [[ "${!#}" == "${OUTPUT_FILE}" ]]; then touch "${workdir}/chmod-reached"; return 1; fi
     command chmod "$@"
   }
   write_output_file || status=$?
-  [[ "${status}" -ne 0 && ! -e "${workdir}/qr-written" ]]
+  [[ "${status}" -ne 0 && -e "${workdir}/chmod-reached" && ! -e "${workdir}/qr-written" ]]
   unset -f chmod
 
   # 缺 qrencode 时清理旧二维码也必须成功，否则会提交新配置配旧二维码。
@@ -842,6 +848,7 @@ run_link_qr_png_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
 
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"
@@ -866,7 +873,7 @@ run_link_qr_png_case() {
       esac
       shift
     done
-    printf 'PNG' > "${out}"
+    printf '\211PNG\r\n\032\nfixture' > "${out}"
   }
 
   # 目录里预放一个过期文件：重建后必须消失
@@ -888,11 +895,12 @@ run_link_qr_png_case() {
   [[ -f "${OUTPUT_FILE}" ]]
   [[ "$(stat -c '%a' "${OUTPUT_FILE}")" == "600" ]]
 
-  # qrencode 缺失：不建目录、不失败，stderr 提示 qrencode
+  # qrencode 缺失：提交前失败，不写新文档或二维码。
   load_functions
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"
   REALITY_UUID="11111111-1111-1111-1111-111111111111"
@@ -909,8 +917,8 @@ run_link_qr_png_case() {
   have_qrencode() { return 1; }
 
   local err=""
-  err="$(write_output_file 2>&1 >/dev/null)"
-  [[ -f "${OUTPUT_FILE}" ]]
+  if err="$(write_output_file 2>&1 >/dev/null)"; then return 1; fi
+  [[ ! -e "${OUTPUT_FILE}" ]]
   [[ ! -e "${QR_OUTPUT_DIR}" ]]
   grep -q 'qrencode' <<< "${err}"
 
@@ -920,6 +928,7 @@ run_link_qr_png_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"
   REALITY_UUID="11111111-1111-1111-1111-111111111111"
@@ -962,6 +971,7 @@ run_h3_output_blocks_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
 
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"
@@ -991,6 +1001,7 @@ run_h3_output_blocks_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"
   REALITY_UUID="11111111-1111-1111-1111-111111111111"
@@ -1017,6 +1028,7 @@ run_output_qr_block_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   reset_feature_defaults
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
 
   SERVER_IP="203.0.113.30"
   NODE_LABEL_PREFIX="HKG"

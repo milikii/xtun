@@ -295,7 +295,7 @@ run_bootstrap_archive_resolve_case() {
   BOOTSTRAP_BRANCH_REF="main"
 
   curl() {
-    printf '%s' '{"sha":"0123456789abcdef0123456789abcdef01234567"}'
+    printf '%s\n200' '{"sha":"0123456789abcdef0123456789abcdef01234567"}'
   }
   archive_url="$(bootstrap_resolve_archive_url)"
   [[ "${archive_url}" == "https://codeload.github.com/milikii/xtun/tar.gz/0123456789abcdef0123456789abcdef01234567" ]]
@@ -303,8 +303,7 @@ run_bootstrap_archive_resolve_case() {
   curl() {
     return 99
   }
-  archive_url="$(bootstrap_resolve_archive_url)"
-  [[ "${archive_url}" == "https://codeload.github.com/milikii/xtun/tar.gz/main" ]]
+  if archive_url="$(bootstrap_resolve_archive_url)"; then return 1; fi
 
   BOOTSTRAP_ARCHIVE_URL="https://example.invalid/custom.tar.gz"
   archive_url="$(bootstrap_resolve_archive_url)"
@@ -354,138 +353,40 @@ run_install_self_command_case() {
 }
 
 run_update_script_command_case() {
-  local workdir=""
-  local logged=""
-  local stdout_output=""
-  local installs=0
-  local original_install_bundle_fn=""
-  local original_log_step_fn=""
-  local original_log_success_fn=""
-  local original_log_fn=""
-
+  local workdir="" source_root="" output="" before=""
   load_functions
-  original_log_step_fn="$(capture_function_definition log_step)"
-  original_log_success_fn="$(capture_function_definition log_success)"
-  original_log_fn="$(capture_function_definition log)"
   workdir="$(mktemp -d)"
   generation_case_setup "${workdir}"
   SELF_INSTALL_DIR="${workdir}/bundle"
   SELF_COMMAND_PATH="${workdir}/bin/xtun"
-  SCRIPT_VERSION="0.4.5"
-  original_install_bundle_fn="$(capture_function_definition install_bundle_root_to_self)"
-
-  need_root() { :; }
-  bootstrap_resolve_archive_url() {
-    printf '%s' "https://example.invalid/xtun.tar.gz"
-  }
-  curl() {
-    local output_path=""
-
-    while [[ $# -gt 0 ]]; do
-      case "${1}" in
-        -o)
-          output_path="${2}"
-          shift 2
-          ;;
-        *)
-          shift
-          ;;
-      esac
-    done
-
-    printf 'archive' > "${output_path}"
-  }
-  tar() {
-    if [[ "${1}" != "-xzf" ]]; then command tar "$@" || return 1; return 0; fi
-    local target_dir=""
-
-    while [[ $# -gt 0 ]]; do
-      case "${1}" in
-        -C)
-          target_dir="${2}"
-          shift 2
-          ;;
-        *)
-          shift
-          ;;
-      esac
-    done
-
-    mkdir -p "${target_dir}/bundle/lib/base" "${target_dir}/bundle/static/fallback"
-    cat > "${target_dir}/bundle/xtun.sh" <<'EOF'
-#!/usr/bin/env bash
-SCRIPT_VERSION="9.9.9"
-EOF
-    printf '# helper\n' > "${target_dir}/bundle/lib/base/helpers.sh"
-    printf '<!doctype html>\n' > "${target_dir}/bundle/static/fallback/index.html"
-  }
-  log_step() {
-    logged+="STEP:${1}"$'\n'
-  }
-  log_success() {
-    logged+="DONE:${1}"$'\n'
-  }
-  log() {
-    logged+="${1}"$'\n'
-  }
-  eval "${original_install_bundle_fn/install_bundle_root_to_self/real_install_bundle_root_to_self}"
-  install_bundle_root_to_self() {
-    installs=$((installs + 1))
-    real_install_bundle_root_to_self "${1}"
-  }
-  reload_updated_script_if_needed() {
-    SCRIPT_VERSION="${1}"
-    logged+="RELOAD:${1}"$'\n'
-  }
-
-  update_script_cmd --non-interactive
+  source_root="${workdir}/source"
+  mkdir "${source_root}"
+  cp -a "${ROOT_DIR}/xtun.sh" "${ROOT_DIR}/lib" "${ROOT_DIR}/static" "${source_root}/"
+  sed -i 's/^SCRIPT_VERSION=".*"/SCRIPT_VERSION="9.9.9"/' "${source_root}/xtun.sh"
+  BOOTSTRAP_ARCHIVE_URL="file://${workdir}/candidate.tar.gz"
+  tar -czf "${workdir}/candidate.tar.gz" -C "${workdir}" source
+  run_cli_command update-script --non-interactive
   [[ -x "${SELF_COMMAND_PATH}" ]]
-  [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
-  [[ -f "${SELF_INSTALL_DIR}/static/fallback/index.html" ]]
-  grep -q 'SCRIPT_VERSION="9.9.9"' "${SELF_INSTALL_DIR}/xtun.sh"
-  grep -q 'STEP:下载最新脚本 bundle。' <<< "${logged}"
-  grep -q 'STEP:安装脚本 bundle。' <<< "${logged}"
-  grep -q '当前版本：9.9.9' <<< "${logged}"
-  grep -q 'RELOAD:9.9.9' <<< "${logged}"
-  [[ "${SCRIPT_VERSION}" == "9.9.9" ]]
-  [[ "${installs}" -eq 1 ]]
+  [[ "$(bundle_script_version "${SELF_INSTALL_DIR}")" == 9.9.9 ]]
+  bundle_identity_valid "${SELF_INSTALL_DIR}"
+  before="$(backup_file_digest "${SELF_INSTALL_DIR}")"
+  LOGGED=""
+  run_cli_command update-script --non-interactive
+  [[ "${LOGGED}" == *当前已经是最新脚本* ]]
+  [[ "$(backup_file_digest "${SELF_INSTALL_DIR}")" == "${before}" ]]
 
-  restore_function_definition "${original_log_step_fn}"
-  restore_function_definition "${original_log_success_fn}"
-  restore_function_definition "${original_log_fn}"
-  stdout_output="$(update_script_cmd --non-interactive 2>&1)"
-  [[ -x "${SELF_COMMAND_PATH}" ]]
-  [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
-  grep -q '下载来源：' <<< "${stdout_output}"
-  grep -q '当前已经是最新脚本 bundle。' <<< "${stdout_output}"
-
-  tar() {
-    if [[ "${1}" != "-xzf" ]]; then command tar "$@" || return 1; return 0; fi
-    local target_dir=""
-
-    while [[ $# -gt 0 ]]; do
-      case "${1}" in
-        -C)
-          target_dir="${2}"
-          shift 2
-          ;;
-        *)
-          shift
-          ;;
-      esac
-    done
-
-    mkdir -p "${target_dir}/bundle/lib/base" "${target_dir}/bundle/static/fallback"
-    cat > "${target_dir}/bundle/xtun.sh" <<'EOF'
-#!/usr/bin/env bash
-SCRIPT_VERSION="9.9.9"
-echo changed
-EOF
-    printf '# helper\n' > "${target_dir}/bundle/lib/base/helpers.sh"
-    printf '<!doctype html>\n' > "${target_dir}/bundle/static/fallback/index.html"
-  }
-  stdout_output="$(update_script_cmd --non-interactive 2>&1)"
-  grep -q '脚本内容已更新，但版本号保持为 9.9.9。' <<< "${stdout_output}"
+  printf '\n# runtime content changed\n' >> "${source_root}/xtun.sh"
+  tar -czf "${workdir}/candidate.tar.gz" -C "${workdir}" source
+  LOGGED=""
+  run_cli_command update-script --non-interactive
+  [[ "${LOGGED}" == *脚本内容已更新*版本号保持* ]]
+  bundle_identity_valid "${SELF_INSTALL_DIR}"
+  [[ "$(backup_file_digest "${SELF_INSTALL_DIR}")" != "${before}" ]]
+  rm "${SELF_INSTALL_DIR}/.xtun-bundle.json"
+  if run_cli_command update-script --non-interactive; then return 1; fi
+  run_cli_command update-script --reinstall --non-interactive
+  bundle_identity_valid "${SELF_INSTALL_DIR}"
+  rm -rf "${workdir}"
 }
 
 run_bundle_script_signature_case() {
@@ -497,9 +398,7 @@ run_bundle_script_signature_case() {
 
   mkdir -p "${installed_dir}/lib/base" "${installed_dir}/static/fallback" \
     "${bundle_dir}/lib/base" "${bundle_dir}/static/fallback" "${bundle_dir}/tests"
-  printf '#!/usr/bin/env bash\nSCRIPT_VERSION="9.9.9"\n' > "${installed_dir}/xtun.sh"
-  printf '# helper\n' > "${installed_dir}/lib/base/helpers.sh"
-  printf '<!doctype html>\n' > "${installed_dir}/static/fallback/index.html"
+  cp -a "${ROOT_DIR}/xtun.sh" "${ROOT_DIR}/lib" "${ROOT_DIR}/static" "${installed_dir}/"
 
   # 源码归档比安装目录多出 README / tests 等不进安装目录的文件：签名只看 xtun.sh / lib / static，应相等
   cp -a "${installed_dir}/xtun.sh" "${installed_dir}/lib" "${installed_dir}/static" "${bundle_dir}/"
@@ -508,12 +407,13 @@ run_bundle_script_signature_case() {
 
   SELF_INSTALL_DIR="${installed_dir}"
   [[ "$(bundle_script_signature "${installed_dir}")" == "$(bundle_script_signature "${bundle_dir}")" ]]
+  write_bundle_install_identity "${bundle_dir}" "${installed_dir}"
   installed_script_matches_bundle "${bundle_dir}"
 
   # 运行文件有差异时签名必须不同
   printf '#!/usr/bin/env bash\nSCRIPT_VERSION="10.0.0"\n' > "${bundle_dir}/xtun.sh"
   [[ "$(bundle_script_signature "${installed_dir}")" != "$(bundle_script_signature "${bundle_dir}")" ]]
-  ! installed_script_matches_bundle "${bundle_dir}"
+  assert_false installed_script_matches_bundle "${bundle_dir}"
 }
 
 run_install_validation_case() {
@@ -873,7 +773,6 @@ run_install_parse_case() {
     --xhttp-path /edge \
     --disable-xhttp-vless-encryption \
     --enable-xhttp-ech \
-    --xhttp-ech-force-query none \
     --enable-xhttp-xpadding \
     --xhttp-xpadding-key x_pad \
     --xhttp-xpadding-header Referer \
@@ -898,8 +797,8 @@ run_install_parse_case() {
   [[ "${XHTTP_DOMAIN}" == "cdn.example.com" ]]
   [[ "${XHTTP_PATH}" == "/edge" ]]
   [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "no" ]]
-  [[ "${XHTTP_ECH_CONFIG_LIST}" == "cloudflare-ech.com+https://223.5.5.5/dns-query" ]]
-  [[ "${XHTTP_ECH_FORCE_QUERY}" == "none" ]]
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == "https://dns.alidns.com/dns-query" ]]
+  [[ -z "${XHTTP_ECH_FORCE_QUERY}" ]]
   [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]
   [[ "${XHTTP_XPADDING_KEY}" == "x_pad" ]]
   [[ "${XHTTP_XPADDING_HEADER}" == "Referer" ]]
@@ -949,8 +848,8 @@ run_install_prepare_preserves_ech_flag_case() {
 
   prepare_install_command --non-interactive --enable-xhttp-ech --enable-xhttp-xpadding
 
-  [[ "${XHTTP_ECH_CONFIG_LIST}" == "cloudflare-ech.com+https://223.5.5.5/dns-query" ]]
-  [[ "${XHTTP_ECH_FORCE_QUERY}" == "none" ]]
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == "https://dns.alidns.com/dns-query" ]]
+  [[ -z "${XHTTP_ECH_FORCE_QUERY}" ]]
   [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]
 }
 
@@ -1590,11 +1489,8 @@ run_acme_reload_helper_case() {
   bash -n "${ACME_RELOAD_HELPER}"
   [[ -x "${ACME_RELOAD_HELPER}" ]]
   assert_absent 'restart xray' "${ACME_RELOAD_HELPER}"
-  assert_contains 'systemctl reload nginx' "${ACME_RELOAD_HELPER}"
-  # `|| true` 会把 reload 失败洗成成功，acme.sh 就再也看不到这次续期没落地。
-  assert_absent 'systemctl reload nginx.*|| true' "${ACME_RELOAD_HELPER}"
-  # 没在跑的时候 reload 不了，得能起来。
-  assert_contains 'systemctl start nginx' "${ACME_RELOAD_HELPER}"
+  assert_contains 'exec bash .* acme-deploy --domain ' "${ACME_RELOAD_HELPER}"
+  assert_absent 'mv -f' "${ACME_RELOAD_HELPER}"
 
   rm -rf "${workdir}"
   load_functions

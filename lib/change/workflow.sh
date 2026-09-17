@@ -93,6 +93,10 @@ show_change_preview() {
       printf '  文件: %s\n        %s\n        %s、%s\n' "${XRAY_CONFIG_FILE}" "${STATE_FILE}" "${OUTPUT_FILE}" "${QR_OUTPUT_DIR}"
       printf '  服务: restart xray；所有经过 Xray 的连接可能中断。\n'
       ;;
+    tls-only)
+      printf '  文件: %s、%s；证书来源状态和节点清单摘要。\n' "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
+      printf '  服务: reload nginx，并核对实际提供的证书；已有请求由旧 worker 完成。\n'
+      ;;
     *)
       printf '  文件: Xray/nginx/HAProxy 托管配置、state、节点文档和 PNG。\n'
       printf '        %s\n        %s\n        %s\n' "${XRAY_CONFIG_FILE}" "${NGINX_CONFIG_FILE}" "${HAPROXY_CONFIG}"

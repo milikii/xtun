@@ -482,13 +482,14 @@ run_bootstrap_temp_and_installed_entry_case() {
   assert_absent_path "${self_install_dir}" '临时入口不应持久安装 bundle'
   assert_absent_path "${self_command_path}" '临时入口不应创建管理命令'
 
-  # 拉取失败时退回到已安装入口，而不是把用户丢在错误里
-  mkdir -p "${installed}/lib/base" "${installed}/static/fallback"
+  # 下载失败：只读入口可显示实际来源后回用完整已安装包，写动作必须失败。
+  mkdir -p "${installed}"
+  cp -a "${ROOT_DIR}/lib" "${ROOT_DIR}/static" "${installed}/"
   printf '#!/usr/bin/env bash\nprintf "INSTALLED-BUNDLE-RAN\\n"\n' > "${installed}/xtun.sh"
-  printf '# helper\n' > "${installed}/lib/base/helpers.sh"
-  printf '<!doctype html>\n' > "${installed}/static/fallback/index.html"
-  output="$(TMPDIR="${tmp_root}" XTUN_BOOTSTRAP_ARCHIVE_URL="file://${workdir}/missing.tar.gz" XTUN_SELF_INSTALL_DIR="${installed}" bash "${single_file}" install 2>&1)" || true
-  [[ "${output}" == *'INSTALLED-BUNDLE-RAN'* ]]
+  if output="$(TMPDIR="${tmp_root}" XTUN_BOOTSTRAP_ARCHIVE_URL="file://${workdir}/missing.tar.gz" XTUN_SELF_INSTALL_DIR="${installed}" bash "${single_file}" install 2>&1)"; then return 1; fi
+  [[ "${output}" != *'INSTALLED-BUNDLE-RAN'* ]]
+  output="$(TMPDIR="${tmp_root}" XTUN_BOOTSTRAP_ARCHIVE_URL="file://${workdir}/missing.tar.gz" XTUN_SELF_INSTALL_DIR="${installed}" bash "${single_file}" status 2>&1)"
+  [[ "${output}" == *'INSTALLED-BUNDLE-RAN'* && "${output}" == *'本次只读使用已安装'* ]]
 
   # 无 root 也能求助：单文件本地入口不该碰 root 检查，也不该装任何东西
   chmod -R a+rX "${workdir}"

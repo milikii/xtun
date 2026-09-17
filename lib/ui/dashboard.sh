@@ -13,7 +13,7 @@ show_dashboard_brief() {
   local haproxy_state=""
   local nginx_state=""
 
-  load_dashboard_context
+  load_dashboard_context || return 1
 
   xray_state="$(service_active_state 'xray.service')"
   haproxy_state="$(service_active_state 'haproxy.service')"
@@ -51,7 +51,7 @@ show_dashboard() {
   local net_enabled=""
   local version_line=""
 
-  load_dashboard_context
+  load_dashboard_context || return 1
   h3_refresh_decision
 
   xray_state="$(service_active_state 'xray.service')"
@@ -68,11 +68,21 @@ show_dashboard() {
   printf '%b%s%b\n' "${C_BOLD}${C_CYAN}" "Xray 管理面板" "${C_RESET}"
   divider
   panel_row "脚本版本" "${SCRIPT_VERSION}"
+  if bundle_identity_valid "${SELF_INSTALL_DIR}"; then
+    panel_row "脚本身份" "$(jq -r '.source + " / " + .content_sha256[0:12]' "${SELF_INSTALL_DIR}/.xtun-bundle.json")"
+  else
+    panel_row "脚本身份" "未核验（缺少或不匹配安装记录）"
+  fi
   panel_row "更新时间" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
   if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
     panel_row "安装状态" "$(style_text "${C_GREEN}" "已托管")"
     [[ -n "${version_line}" ]] && panel_row "Xray 核心" "${version_line}"
+    if xray_installed_identity_valid; then
+      panel_row "核心身份" "$(jq -r '.tag + " / " + .binary_sha256[0:12]' "$(xray_identity_file)")"
+    else
+      panel_row "核心身份" "未核验（可显式 upgrade --reinstall）"
+    fi
     panel_row "证书模式" "$(pretty_cert_mode)"
     panel_row "REALITY" "${SERVER_IP:-未知}:443  sni=${REALITY_SNI:-未知}"
     panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-未知}:443  path=${XHTTP_PATH:-未知}"
@@ -129,6 +139,7 @@ show_dashboard() {
   panel_row "HAProxy 自检" "$(haproxy_config_check_text)"
   panel_row "本地 TLS 探测" "$(local_tls_probe_text)"
   panel_row "证书到期" "$(cert_expiry_text)"
+  panel_row "证书操作" "$(certificate_last_event_text)"
   panel_row "WARP 出站" "$(warp_outbound_text)"
   panel_row "最近备份" "$(latest_backup_label)"
   divider

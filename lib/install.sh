@@ -217,15 +217,16 @@ install_xray() {
     xray_download_release "${tmp_dir}" || exit 1
     unzip -qo "${tmp_dir}/${XRAY_SELECTED_ARCHIVE_NAME}" -d "${tmp_dir}/xray" || exit 1
     xray_validate_candidate_archive "${tmp_dir}" || exit 1
+    [[ -s "${tmp_dir}/xray/geoip.dat" && -s "${tmp_dir}/xray/geosite.dat" ]] || {
+      warn "候选核心归档缺少 geoip.dat 或 geosite.dat。"; exit 1;
+    }
 
     mkdir -p "$(dirname "${XRAY_BIN}")" "${XRAY_ASSET_DIR}" || exit 1
     install -m 0755 "${tmp_dir}/xray/xray" "${XRAY_BIN}" || exit 1
-    if [[ -f "${tmp_dir}/xray/geoip.dat" ]]; then
-      install -m 0644 "${tmp_dir}/xray/geoip.dat" "${XRAY_ASSET_DIR}/geoip.dat" || exit 1
-    fi
-    if [[ -f "${tmp_dir}/xray/geosite.dat" ]]; then
-      install -m 0644 "${tmp_dir}/xray/geosite.dat" "${XRAY_ASSET_DIR}/geosite.dat" || exit 1
-    fi
+    install -m 0644 "${tmp_dir}/xray/geoip.dat" "${XRAY_ASSET_DIR}/geoip.dat" || exit 1
+    install -m 0644 "${tmp_dir}/xray/geosite.dat" "${XRAY_ASSET_DIR}/geosite.dat" || exit 1
+    ensure_xray_bind_capability || exit 1
+    write_xray_install_identity "${tmp_dir}/${XRAY_SELECTED_ARCHIVE_NAME}" || exit 1
   ); then
     rm -rf "${tmp_dir}"
     return 1
@@ -237,10 +238,15 @@ install_xray() {
 }
 
 ensure_xray_bind_capability() {
+  [[ -f "${XRAY_BIN}" && ! -L "${XRAY_BIN}" ]] || return 1
   if command -v setcap >/dev/null 2>&1; then
-    setcap cap_net_bind_service=+ep "${XRAY_BIN}" || die "为 Xray 二进制设置 CAP_NET_BIND_SERVICE 失败。"
+    setcap cap_net_bind_service=+ep "${XRAY_BIN}" || { warn "为 Xray 二进制设置 CAP_NET_BIND_SERVICE 失败。"; return 1; }
+    [[ "$(xray_binary_capabilities)" == cap_net_bind_service=ep ]] || {
+      warn "Xray CAP_NET_BIND_SERVICE 写入后核验失败。"; return 1;
+    }
   else
-    warn "系统中未找到 setcap，Xray 可能无法以普通用户绑定 443。"
+    warn "系统中未找到 setcap，无法确认 Xray 绑定 443 的能力。"
+    return 1
   fi
 }
 
@@ -362,6 +368,10 @@ generate_xhttp_vless_encryption_if_needed() {
 
   if [[ -n "${XHTTP_VLESS_DECRYPTION}" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
     return
+  fi
+  if [[ -n "${XHTTP_VLESS_DECRYPTION}" && "${XHTTP_VLESS_DECRYPTION}" != none ]]; then
+    warn "已有 VLESS 解密身份缺少配对客户端记录；请恢复 state/节点文档，或明确选择轮换身份。"
+    return 1
   fi
 
   enc_output="$("${XRAY_BIN}" vlessenc)"

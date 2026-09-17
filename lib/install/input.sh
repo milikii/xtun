@@ -838,8 +838,7 @@ configure_xhttp_ech_from_toggle() {
 
   enabled="$(normalize_yes_no_value "XHTTP_ECH_ENABLED" "${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}")" || exit 1
   if [[ "${enabled}" == "yes" ]]; then
-    XHTTP_ECH_CONFIG_LIST="${XHTTP_ECH_CONFIG_LIST:-cloudflare-ech.com+https://223.5.5.5/dns-query}"
-    XHTTP_ECH_FORCE_QUERY="${XHTTP_ECH_FORCE_QUERY:-none}"
+    XHTTP_ECH_CONFIG_LIST="${XHTTP_ECH_CONFIG_LIST:-https://dns.alidns.com/dns-query}"
     return
   fi
 
@@ -1416,9 +1415,42 @@ ensure_xhttp_path_format() {
   [[ "${XHTTP_PATH}" != *[[:space:]]* ]] || die "XHTTP 路径不能包含空白字符。"
 }
 
+xhttp_ech_value_valid() {
+  local value="${1}" url="" numbers="" length=0 offset=2 size=0 supported=no
+  local -a bytes=()
+  [[ -n "${value}" ]] || return 0
+  [[ "${value}" != *[[:space:]]* ]] || return 1
+  if [[ "${value}" == *://* ]]; then
+    url="${value}"
+    if [[ "${value}" == *+* ]]; then
+      is_valid_hostname "${value%%+*}" || return 1
+      url="${value#*+}"
+    fi
+    [[ "${url}" =~ ^(https|h2c|udp)://(\[[0-9a-fA-F:]+\]|[a-zA-Z0-9.-]+)(:[0-9]+)?(/[^[:space:]\#]*)?$ ]] || return 1
+    if [[ -n "${BASH_REMATCH[3]}" ]]; then
+      local port="${BASH_REMATCH[3]#:}"
+      [[ "${#port}" -le 5 ]] && (( 10#${port} >= 1 && 10#${port} <= 65535 )) || return 1
+    fi
+    return 0
+  fi
+  [[ "${value}" =~ ^[A-Za-z0-9+/]+={0,2}$ && $(( ${#value} % 4 )) -eq 0 ]] || return 1
+  numbers="$(printf '%s' "${value}" | base64 --decode | od -An -v -tu1)" || return 1
+  IFS=' ' read -r -a bytes <<< "${numbers//$'\n'/ }"
+  [[ "${#bytes[@]}" -ge 6 ]] || return 1
+  length=$((bytes[0] * 256 + bytes[1] + 2))
+  [[ "${length}" -eq "${#bytes[@]}" ]] || return 1
+  while [[ "${offset}" -lt "${length}" ]]; do
+    [[ $((offset + 4)) -le "${length}" ]] || return 1
+    size=$((bytes[offset + 2] * 256 + bytes[offset + 3]))
+    [[ "${size}" -gt 0 && $((offset + 4 + size)) -le "${length}" ]] || return 1
+    if [[ "${bytes[offset]}" -eq 254 && "${bytes[offset + 1]}" -eq 13 ]]; then supported=yes; fi
+    offset=$((offset + 4 + size))
+  done
+  [[ "${supported}" == yes ]]
+}
+
 ensure_xhttp_ech_format() {
-  [[ "${XHTTP_ECH_CONFIG_LIST}" != *$'\n'* && "${XHTTP_ECH_CONFIG_LIST}" != *$'\r'* ]] || die "XHTTP ECH 配置不能包含换行。"
-  [[ "${XHTTP_ECH_FORCE_QUERY}" != *$'\n'* && "${XHTTP_ECH_FORCE_QUERY}" != *$'\r'* ]] || die "XHTTP ECH 强制查询模式不能包含换行。"
+  xhttp_ech_value_valid "${XHTTP_ECH_CONFIG_LIST}" || die "XHTTP ECH 需要有效的 DoH/UDP 查询地址或完整 Base64 ECHConfigList。"
 }
 
 ensure_xhttp_xpadding_format() {

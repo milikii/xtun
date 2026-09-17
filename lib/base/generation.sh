@@ -640,6 +640,7 @@ recover_generation() {
         restore_service_enable_state "${unit}" "${enabled}" || GENERATION_UNRESTORED+=("${unit}:enable:${enabled}")
         restore_service_runtime_state "${unit}" "${active}" || GENERATION_UNRESTORED+=("${unit}:runtime:${active}")
       done
+      verify_recovered_tls_generation || GENERATION_UNRESTORED+=("nginx.service:served-certificate")
       generation_sync_paths || GENERATION_UNRESTORED+=("restored-files-sync")
       if [[ "${#GENERATION_UNRESTORED[@]}" -eq 0 ]]; then
         if generation_write_outcome restored-verified && clear_pending_operation restored-verified; then

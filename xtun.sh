@@ -32,10 +32,38 @@ bootstrap_die() {
 
 bundle_root_ready() {
   local root_path="${1}"
-  [[ -n "${root_path}" \
-    && -f "${root_path}/xtun.sh" \
-    && -f "${root_path}/lib/base/helpers.sh" \
-    && -f "${root_path}/static/fallback/index.html" ]]
+  local path=""
+  [[ -n "${root_path}" && -d "${root_path}" ]] || return 1
+  # 引导入口尚未加载任何模块，完整必需文件表必须可独立使用。
+  for path in xtun.sh \
+    lib/base/{helpers,env,input,versions,identity,runtime,generation}.sh \
+    lib/{install,generators,state,nodes,ui,commands,cli,change}.sh \
+    lib/install/{self,input,certs,network,warp}.sh \
+    lib/change/{commands,helpers,requests,workflow}.sh \
+    lib/cli/{core,install,sni}.sh lib/ui/{core,dashboard,output}.sh \
+    static/fallback/{index.html,robots.txt,desk-assets/styles.css,desk-assets/site.js} \
+    static/certificates/cloudflare-origin-ca-{rsa,ecc}.pem; do
+    [[ -f "${root_path}/${path}" && ! -L "${root_path}/${path}" ]] || return 1
+  done
+  [[ ! -L "${root_path}/lib" && ! -L "${root_path}/static" ]]
+}
+
+bundle_content_manifest() (
+  local root_path="${1}" path="" paths=""
+  cd "${root_path}" || return 1
+  [[ -z "$(find xtun.sh lib static -type l -print -quit 2>/dev/null)" ]] || return 1
+  paths="$(find xtun.sh lib static -type f -print | LC_ALL=C sort)" || return 1
+  [[ -n "${paths}" ]] || return 1
+  while IFS= read -r path; do
+    [[ "${path}" =~ ^[a-zA-Z0-9._/-]+$ ]] || return 1
+    sha256sum -- "${path}" || return 1
+  done <<< "${paths}"
+)
+
+bundle_content_signature() {
+  local manifest=""
+  manifest="$(bundle_content_manifest "${1}")" || return 1
+  printf '%s\n' "${manifest}" | sha256sum | awk '{print $1}'
 }
 
 bootstrap_default_archive_url() {
@@ -69,8 +97,12 @@ bootstrap_resolve_archive_url() {
     return
   fi
 
-  metadata_json="$(curl -fsSL -H "Accept: application/vnd.github+json" "$(bootstrap_commit_api_url)" 2>/dev/null || true)"
-  commit_sha="$(bootstrap_extract_commit_sha "${metadata_json}")"
+  if [[ "${BOOTSTRAP_BRANCH_REF}" =~ ^[0-9a-f]{40}$ ]]; then
+    commit_sha="${BOOTSTRAP_BRANCH_REF}"
+  else
+    metadata_json="$(bootstrap_fetch_json "$(bootstrap_commit_api_url)")" || return 1
+    commit_sha="$(bootstrap_extract_commit_sha "${metadata_json}")"
+  fi
   if [[ "${commit_sha}" =~ ^[0-9a-f]{40}$ ]]; then
     printf 'https://codeload.github.com/%s/%s/tar.gz/%s' \
       "${BOOTSTRAP_REPO_OWNER}" \
@@ -79,7 +111,83 @@ bootstrap_resolve_archive_url() {
     return
   fi
 
-  bootstrap_default_archive_url
+  printf '[错误] 无法解析脚本 ref 的准确提交：%s。未回退到浮动 ref。\n' "${BOOTSTRAP_BRANCH_REF}" >&2
+  return 1
+}
+
+bootstrap_fetch_json() {
+  local response="" http_status="" status=0
+  response="$(curl -sSL --connect-timeout 10 --max-time 30 \
+    -H 'Accept: application/vnd.github+json' -w '\n%{http_code}' "${1}")" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    printf '[错误] GitHub 元数据网络请求失败（curl %s）。\n' "${status}" >&2
+    return 1
+  fi
+  http_status="${response##*$'\n'}"
+  case "${http_status}" in
+    200) printf '%s' "${response%$'\n'*}" ;;
+    403|429) printf '[错误] GitHub API 限流或拒绝访问（HTTP %s）；请稍后重试。显式 tag 同样需要元数据。\n' "${http_status}" >&2; return 1 ;;
+    404) printf '[错误] GitHub ref 或发布不存在（HTTP 404）。\n' >&2; return 1 ;;
+    *) printf '[错误] GitHub 元数据 HTTP 状态异常：%s。\n' "${http_status}" >&2; return 1 ;;
+  esac
+}
+
+# 下载器供单文件入口和 update-script 共用。这里只处理数据，绝不 source 候选。
+bootstrap_download_bundle() {
+  local target_dir="${1}" archive_url="" archive_path="${1}/xtun.tar.gz"
+  local members="" roots="" bundle_root="" commit="" source="local-archive"
+  local digest="" entry_digest="" signature="" expected="${XTUN_BOOTSTRAP_ARCHIVE_SHA256:-}"
+  archive_url="$(bootstrap_resolve_archive_url)" || return 1
+  printf '[信息] 下载来源：%s\n' "${archive_url}" >&2
+  curl -fsSL --connect-timeout 10 --max-time 180 "${archive_url}" -o "${archive_path}" || {
+    printf '[错误] 脚本 bundle 下载失败。\n' >&2; return 1;
+  }
+  digest="$(sha256sum "${archive_path}" | awk '{print $1}')" || return 1
+  if [[ -n "${expected}" && ( ! "${expected}" =~ ^[0-9a-f]{64}$ || "${expected}" != "${digest}" ) ]]; then
+    printf '[错误] 脚本 bundle SHA256 校验失败。\n' >&2; return 1
+  fi
+  if [[ -z "${BOOTSTRAP_ARCHIVE_URL}" ]]; then
+    commit="${archive_url##*/}"
+    [[ "${commit}" =~ ^[0-9a-f]{40}$ ]] || return 1
+    source="github-commit"
+  elif [[ "${archive_url}" != file://* && -z "${expected}" ]]; then
+    printf '[错误] 自定义远程 bundle 必须提供 XTUN_BOOTSTRAP_ARCHIVE_SHA256。\n' >&2; return 1
+  fi
+  members="$(tar -tzf "${archive_path}")" || return 1
+  [[ -n "${members}" ]] || return 1
+  if ! awk '/^\// || /(^|\/)\.\.($|\/)/ {exit 1}' <<< "${members}"; then return 1; fi
+  roots="$(awk -F/ 'NF {print $1}' <<< "${members}" | LC_ALL=C sort -u)" || return 1
+  [[ "${roots}" =~ ^[a-zA-Z0-9._-]+$ ]] || return 1
+  if [[ -n "${commit}" && "${roots}" != "${BOOTSTRAP_REPO_NAME}-${commit}" ]]; then
+    printf '[错误] 脚本 bundle 根目录与已固定提交不一致。\n' >&2; return 1
+  fi
+  # tar 的链接可在解包期间越出目标目录；运行文件只接受普通文件/目录。
+  tar -tvzf "${archive_path}" | awk 'substr($0,1,1) != "-" && substr($0,1,1) != "d" {exit 1}' || return 1
+  tar -xzf "${archive_path}" --no-same-owner --no-same-permissions -C "${target_dir}" \
+    "${roots}/xtun.sh" "${roots}/lib" "${roots}/static" || return 1
+  bundle_root="${target_dir}/${roots}"
+  bundle_root_ready "${bundle_root}" || { printf '[错误] 脚本 bundle 缺少必需运行文件。\n' >&2; return 1; }
+  if [[ -n "${commit}" ]]; then
+    curl -fsSL --connect-timeout 10 --max-time 30 \
+      "https://raw.githubusercontent.com/${BOOTSTRAP_REPO_OWNER}/${BOOTSTRAP_REPO_NAME}/${commit}/xtun.sh" \
+      -o "${target_dir}/entry.sh" || return 1
+    cmp -s "${target_dir}/entry.sh" "${bundle_root}/xtun.sh" || {
+      printf '[错误] 固定提交入口与 bundle 内容不一致。\n' >&2; return 1;
+    }
+  fi
+  entry_digest="$(sha256sum "${bundle_root}/xtun.sh" | awk '{print $1}')" || return 1
+  signature="$(bundle_content_signature "${bundle_root}")" || return 1
+  printf 'source\t%s\nref\t%s\ncommit\t%s\narchive_sha256\t%s\nentry_sha256\t%s\ncontent_sha256\t%s\n' \
+    "${source}" "${BOOTSTRAP_BRANCH_REF}" "${commit}" "${digest}" "${entry_digest}" "${signature}" \
+    > "${bundle_root}/.xtun-source.tsv" || return 1
+  printf '%s' "${bundle_root}"
+}
+
+bootstrap_readonly_command() {
+  case "${1:-menu}" in
+    status|diagnose|show-links|check-sni|help|--help|-h|version|--version|-v) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 exec_bundle_root() {
@@ -94,7 +202,7 @@ exec_bundle_root() {
 
 bootstrap_known_command() {
   case "${1:-menu}" in
-    menu|install|update-script|upgrade|recover|check-sni|change-uuid|change-sni|change-path|change-h3|change-warp|change-warp-rules|change-cert-mode|renew-cert|uninstall|show-links|diagnose|status|restart|repair-perms|apply-config|apply-net-opt|version|--version|-v|help|--help|-h)
+    menu|install|update-script|upgrade|recover|check-sni|change-uuid|change-sni|change-path|change-h3|change-warp|change-warp-rules|change-cert-mode|renew-cert|acme-deploy|uninstall|show-links|export-client|rebuild-qr|diagnose|status|restart|repair-perms|apply-config|apply-net-opt|version|--version|-v|help|--help|-h)
       return 0
       ;;
     *)
@@ -160,8 +268,6 @@ bootstrap_run_temp_bundle() {
 bootstrap_script_root_if_needed() {
   local bundle_root=""
   local tmp_dir=""
-  local archive_path=""
-  local archive_url=""
 
   bundle_root_ready "${SCRIPT_ROOT}" && return 0
 
@@ -174,26 +280,23 @@ bootstrap_script_root_if_needed() {
   command -v curl >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 curl，无法自动拉取脚本 bundle。"
   command -v tar >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 tar，无法自动拉取脚本 bundle。"
 
-  tmp_dir="$(mktemp -d)"
-  archive_path="${tmp_dir}/xtun.tar.gz"
-  archive_url="$(bootstrap_resolve_archive_url)"
-  if curl -fsSL "${archive_url}" -o "${archive_path}" && tar -xzf "${archive_path}" -C "${tmp_dir}"; then
-    bundle_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-    if bundle_root_ready "${bundle_root}"; then
-      bootstrap_run_temp_bundle "${bundle_root}" "${tmp_dir}" "$@"
-    fi
+  tmp_dir="$(mktemp -d)" || return 1
+  if bundle_root="$(bootstrap_download_bundle "${tmp_dir}")"; then
+    bootstrap_run_temp_bundle "${bundle_root}" "${tmp_dir}" "$@"
   fi
 
   rm -rf "${tmp_dir}"
 
-  if bundle_root_ready "${BOOTSTRAP_SELF_INSTALL_DIR}"; then
+  if bootstrap_readonly_command "${1:-menu}" && bundle_root_ready "${BOOTSTRAP_SELF_INSTALL_DIR}"; then
+    printf '[警告] 候选获取失败；本次只读使用已安装 bundle：%s；内容 SHA256：%s。\n' \
+      "${BOOTSTRAP_SELF_INSTALL_DIR}" "$(bundle_content_signature "${BOOTSTRAP_SELF_INSTALL_DIR}")" >&2
     exec_bundle_root "${BOOTSTRAP_SELF_INSTALL_DIR}" "$@"
   fi
 
-  bootstrap_die "自动下载脚本 bundle 失败，且本机也没有可用的已安装 bundle。"
+  bootstrap_die "脚本候选获取或校验失败；未执行本次写动作，也未回用旧 bundle 执行变更。"
 }
 
-bootstrap_script_root_if_needed "$@"
+bootstrap_script_root_if_needed "$@" || exit 1
 # 操作日志默认关闭：只有 begin_mutation 之后的写操作才允许追加记录。
 OPERATION_LOG_ENABLED=0
 STATE_VERSION_CURRENT="2"
@@ -213,11 +316,6 @@ DEFAULT_XHTTP_XPADDING_KEY="x_padding"
 DEFAULT_XHTTP_XPADDING_HEADER="Referer"
 DEFAULT_XHTTP_XPADDING_PLACEMENT="queryInHeader"
 DEFAULT_XHTTP_XPADDING_METHOD="tokenish"
-DEFAULT_XHTTP_XMUX_MAX_CONCURRENCY="16-32"
-DEFAULT_XHTTP_XMUX_C_MAX_REUSE_TIMES="0"
-DEFAULT_XHTTP_XMUX_H_MAX_REUSABLE_SECS="1800-3000"
-DEFAULT_XHTTP_XMUX_H_KEEP_ALIVE_PERIOD="0"
-DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS="30"
 DEFAULT_REALITY_SNI=""
 JOEY_BBR_REPO="byJoey/Actions-bbr-v3"
 JOEY_BBR_RELEASES_PER_PAGE="100"
@@ -351,6 +449,9 @@ CF_DNS_ZONE_ID=""
 XHTTP_ECH_CONFIG_LIST="${DEFAULT_XHTTP_ECH_CONFIG_LIST}"
 XHTTP_ECH_FORCE_QUERY="${DEFAULT_XHTTP_ECH_FORCE_QUERY}"
 XHTTP_ECH_ENABLED=""
+PARAMETER_REVISION=""
+CLIENT_TUNING_JSON=""
+CLIENT_TUNING_SOURCE=""
 XHTTP_XPADDING_ENABLED="${DEFAULT_XHTTP_XPADDING_ENABLED}"
 XHTTP_XPADDING_KEY="${DEFAULT_XHTTP_XPADDING_KEY}"
 XHTTP_XPADDING_HEADER="${DEFAULT_XHTTP_XPADDING_HEADER}"
@@ -375,10 +476,12 @@ fi
 
 . "${SCRIPT_ROOT}/lib/base/helpers.sh"
 . "${SCRIPT_ROOT}/lib/base/versions.sh"
+. "${SCRIPT_ROOT}/lib/base/identity.sh"
 
 . "${SCRIPT_ROOT}/lib/install.sh"
 . "${SCRIPT_ROOT}/lib/generators.sh"
 . "${SCRIPT_ROOT}/lib/state.sh"
+. "${SCRIPT_ROOT}/lib/nodes.sh"
 . "${SCRIPT_ROOT}/lib/base/runtime.sh"
 . "${SCRIPT_ROOT}/lib/base/generation.sh"
 

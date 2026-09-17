@@ -432,6 +432,11 @@ finalize_installation() {
     return 1
   fi
 
+  if ! verify_served_tls_assets || ! write_certificate_receipt; then
+    generation_failed "安装后实际供证校验失败"
+    return 1
+  fi
+
   if ! write_state_file; then
     generation_failed "写入状态文件失败"
     return 1
@@ -506,6 +511,11 @@ apply_managed_files() {
 
   if ! restart_core_services; then
     generation_failed "核心服务未能达到 active"
+    return 1
+  fi
+
+  if [[ "${include_tls_assets}" == yes ]] && { ! verify_served_tls_assets || ! write_certificate_receipt; }; then
+    generation_failed "换证后实际供证校验失败"
     return 1
   fi
 

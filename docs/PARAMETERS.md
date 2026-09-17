@@ -1,13 +1,13 @@
 # v26.9.9 参数契约：REALITY、XHTTP、Cloudflare 与 ECH
 
-> 原参数核对日期：2026-09-12；现状与工单映射更新：2026-09-14。Xray 可复现基线仍为 `v26.9.9 / 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`，不把本机 `26.3.27` 当成同一核心。
-> 状态：批次 B 已实现 H3 意图/本地能力检查并修复节点 9 ALPN；节点 7、users/xmux/ECH 迁移、独立导出和三端仍未完整交付，见[批次 B 报告](REPORT-2026-09-14-BATCH-B.md)。
-> 当前依赖：[推进计划](PLAN-UX-RELIABILITY.md) 的 W09/W10/W11/W12/W13/W15，以及[决策 D01–D30](DECISIONS-UX-RELIABILITY.md)；现场步骤见[验收手册](TEST-VPS-RUNBOOK.md)。旧 T 编号仅作追溯。
+> 原参数核对日期：2026-09-12；实现与证据更新：2026-09-15。Xray 可复现基线仍为 `v26.9.9 / 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`，不把本机 `26.3.27` 当成同一核心。
+> 状态：节点 7/9 修正、users/xmux/ECH 迁移、同源 URI/PNG/原生 JSON 与独立导出已实现，参数修订为 `2`、state schema 保持 `2`。原生参照和历史迁移通过，真实三端/Cloudflare/ECH/H3 仍待验收，见[批次 C/D/E 报告](REPORT-2026-09-15-CDE.md)。
+> 当前依赖：[推进计划](PLAN-UX-RELIABILITY.md) 的 W09/W10/W11/W12/W13/W15，以及[决策 D01–D39](DECISIONS-UX-RELIABILITY.md)；现场步骤见[验收手册](TEST-VPS-RUNBOOK.md)。旧 T 编号仅作追溯。
 > 后续默认最新版仍包含预发布，一次候选锁定准确核心。真人/设备后排，独立参数工作可继续；源码支持不等于用户设备、域名和网络已经验证。
 
 ## 1. 当前结论与已作出的决定
 
-**参数规划已细化，但当前项目还没有达到“所有参数均已实现并验证可用”的状态。** 批次 B 修复了节点 9 的 H3 ALPN 层级；当前仍有节点 7 IPv6 split 地址、旧 `xmux` 输出和无效 ECH 开关等工作。`v26.9.9` 的原生核心、v2rayNG/v2rayN 的 URI 导入源码提供了实现 ECH 的基础；用户实际安装版本、Cloudflare zone 和大陆接入网络尚未验证。
+**本轮参数代码和隔离验证已完成，真实客户端及公网组合仍待验证。** 规范节点对象统一 URI/PNG/JSON：节点 7 只改变 REALITY 下行 IPv6，节点 9 的 H3 ALPN 位于下行 TLS 层；旧调优按来源保留，无效 ECH force 入口停止接受。`v26.9.9` 的五类原生节点及独立 ECH 夹具已完成双向内容校验；v2rayNG/v2rayN 的实际安装版本、Cloudflare zone 和大陆接入网络尚未验证。
 
 2026-09-12 参数审查查阅了 Xray 仓库的 XHTTP 主讨论、分享规范、ECH PR 和故障讨论；此次更新保留这些证据与日期，没有新增真实网络通过结论。社区案例用来设计测试，字段含义及默认值回到官方 `docs/stable/config/`、`source/` 和固定提交核对。`docs/stable/` 是滚动官方文档目录名，不保证与某个 stable release 配套；版本行为以对应固定源码为准，不能把旧评论原样写回新模板。
 
@@ -55,7 +55,7 @@
 | `H3_DECISION` | 每次应用前重算；nginx、Alt-Svc、节点 8/9 和说明共用 | transient；不能当作持久的公网能力证明 |
 | 节点 9 下行 | `D.tlsSettings.alpn=["h3"]`；D 根部不写 alpn | 外层 CDN 仍为 H2。字段依据 TLSConfig 和 XHTTP `decideHTTPVersion`，真实 UDP 路径待 W15.4 [P2]、[P4]、[P6] |
 
-W09.1 的共享证书检查供 W12 后续复用；人工/自动续期共锁、成对提升和实际供证核验尚未因此完成。自动用例中的自建测试根仅验证逻辑，不作为公网证书实证。
+W12 已复用共享证书检查，并实现人工/自动续期共锁、成对提升与失败恢复、nginx 实际供证核验。自动用例中的自建测试根仅验证逻辑；VPS 自签续证不作为公共 ACME 或公网 H3 实证。
 
 ## 3. REALITY 的确定参数与新版本兼容门槛
 
@@ -84,7 +84,7 @@ W09.1 的共享证书检查供 W12 后续复用；人工/自动续期共锁、�
 
 这里存在两条不同的回落：`realitySettings.target → 2444 → 远端 target` 处理 REALITY 鉴权失败流量；VLESS `fallbacks.dest → XHTTP 本地入站` 处理合法外层中的相应数据。保持前者的 SNI sniffing、routeOnly 与限制路由，不能在参数升级时顺手合并两条路径。
 
-users/clients 迁移不能只按“新字段优先”处理。目标版本 [VLESS 构建源码](../.claude/skills/xray-core-official-knowledge/source/config/vless.go) 在 `Clients != nil` 时用 clients 覆盖 users，因此显式空数组 `clients: []` 也覆盖非空 users。W10 需以实际生效身份为依据读取和迁移，分别覆盖缺字段、null、空数组和冲突内容，规范写出一种结构；不能从无效的另一数组猜测并恢复用户身份。[P1]
+users/clients 按实际生效身份迁移。目标版本 [VLESS 构建源码](../.claude/skills/xray-core-official-knowledge/source/config/vless.go) 在 `Clients != nil` 时用 clients 覆盖 users，因此显式空数组 `clients: []` 也覆盖非空 users。当前回读覆盖缺字段、null、空数组和冲突内容；有效列表为空时停止，不从 state 或另一数组重新造用户。当前单用户范围保留有效首用户的扩展字段及 flow。核心版本可识别且不低于 26.9.9 时写 users，旧版/版本未知时写 clients，不双写。[P1]
 
 ### 3.2 v26.9.9 新增的实际兼容检查
 
@@ -116,7 +116,7 @@ users/clients 迁移不能只按“新字段优先”处理。目标版本 [VLES
 | `C.xhttpSettings.downloadSettings` | optional / 客户端 | 仅 split 节点需要，按 §2 明确 address/port、security、SNI、path、host 和相关参数 | [P2]、[P7] |
 | `D.tlsSettings.alpn` | required / H3 split | 节点 9 下行为 `["h3"]`；外层仍 `["h2"]`，不能写到 D 根部 | [P2]、[P6] |
 
-### 4.2 保留核心默认，避免旧模板覆盖
+### 4.2 新装采用核心默认，迁移保留旧调优
 
 以下字段属于 XHTTPSettings；在 `extra` 中表达时，须确认导入后有效位置。不要同时维护两套互相冲突的顶层与 extra 值。[P7]
 
@@ -130,7 +130,11 @@ users/clients 迁移不能只按“新字段优先”处理。目标版本 [VLES
 | `S/C.xhttpSettings.noGRPCHeader/noSSEHeader` | default-kept / 对应请求或响应 | 保留核心默认；当前 nginx grpc_pass 链路先验证原样头部，不为通过 CDN 临时随意删除 |
 | `S/C.xhttpSettings.xPaddingObfsMode` 及 `xPaddingKey/Header/Placement/Method` | optional / 按字段匹配双方 | 新装高级混淆继续关闭。关闭高级混淆不等于核心没有默认 padding；开启时主链路、split 两层及 H3 全部审查 |
 
-`xmux.maxConnections` 与 `maxConcurrency` 的上限不能同时为正。旧项目输出的 `16-32` 等参数按主计划的配置修订迁移，不能只升级 bundle 就无记录地改变既有客户端策略。[P7]
+`xmux.maxConnections` 与 `maxConcurrency` 的上限不能同时为正。[P7] 上表的 default-kept 适用于新安装；已有节点不会因更新 bundle 自动采用新默认。
+
+参数修订 `2` 将可识别的旧 `xmux` / `scMinPostsIntervalMs` 按节点编号及上/下行保存到 `CLIENT_TUNING_JSON`，`CLIENT_TUNING_SOURCE` 记录来源。有效显式 state 优先，否则从旧 URI 的 `extra` 提取；数值等于旧默认仍保留。旧文档缺失且来源无法确认时使用兼容调优并警告 `legacy-unverified`，不无声删去旧参数。调优格式非法则停止。
+
+旧 bundle 更新与核心更新均不重写这些产物。显式 `apply-config` 才在同代中迁移 config/state/文档/PNG/清单；失败恢复旧内容和权限。缺少配对客户端 Encryption 时停止；缺少 REALITY 公钥时可从已有私钥只读推导，不轮换密钥。
 
 ### 4.3 Cloudflare 与源站约束
 
@@ -166,7 +170,7 @@ Cloudflare 官方文档说明 Free zone 默认开启 ECH，其他计划可调整
 | AliDNS 在当前网络不适用 | 用户明确指定的可达 HTTPS DoH | 使用相同 DNS wire/HTTPS RR/ECH 检查；不自动切到无法连接的公共 DNS |
 | 受控诊断，需要固定配置 | 标准 Base64 编码的完整 ECHConfigList | 仅诊断或有轮换维护的场景；保留 `+ / =`，不把它当 Base64URL，也不默认长期固定 Cloudflare 轮换密钥 |
 
-新实现优先在客户端所在网络进行上述选择；VPS 上探测成功只能标为“VPS 查询通过”。未取得真实域名结果时先报告缺项，提供共享名测试选择，不在后台无记录地改查询域名。当前代码开启 ECH 时使用的 `cloudflare-ech.com+https://223.5.5.5/dns-query` 属于上述共享名/IP DoH 组合，**不是已证实错误的语法**；旧 state 应保留用户原值。
+当前安装 `--enable-xhttp-ech` 与独立 ECH 导出在没有既有/显式值时使用 `https://dns.alidns.com/dns-query`，查询名来自真实 serverName。开启或导出只校验语法，不代表该域名记录已查询成功。来源的可用性要在客户端网络验证；VPS 上探测成功只能标为“VPS 查询通过”。旧 state 的 `cloudflare-ech.com+https://223.5.5.5/dns-query` 是合法的共享名/IP DoH 组合，原值保留；不在后台替换查询域名。
 
 2026-09-12 的只读探测结果：从本次工作环境向 AliDNS 域名入口与 `223.5.5.5` 入口，以 **HTTP/2 POST + DNS wire** 查询 `cloudflare-ech.com` 的 HTTPS 记录，两者均返回 HTTP 200、DNS rcode 0，提取到相同的 71 字节 ECHConfig；当时 TTL 分别为 225/227 秒。另一个被查询域名返回了 HTTPS RR，但没有 ech，因此检查不能停在“存在 type 65”。这只是当前环境的解析证据，没有运行 v26.9.9 的节点握手，也不是中国大陆各网络或用户域名的认证；不将本次短期配置固化为产品默认。
 
@@ -218,13 +222,22 @@ URI → 客户端字段 → 运行 JSON 应恰好还原一层编码。测试 `+`
 2. **保留旧配置意图。** 已有 `XHTTP_ECH_CONFIG_LIST` 非空的安装，原清单继续反映原 ECH 选择，不在 bundle 更新时静默清空。普通 TLS 变体需要用户显式选择，名称明确显示 ECH 未启用。
    现有 `--enable-xhttp-ech`、`--disable-xhttp-ech` 和 `--xhttp-ech-config-list` 的显式配置语义保持兼容；新增按需导出不改变它们所保存的状态。本轮停用的是没有实际效果的 force 选项。
 3. **复用同一份节点语义。** 从共同的节点描述生成 URI、PNG 和原生客户端 JSON；`node_link_entries` 仍是所选链接集合的共同来源。变体只改变相应 TLS 层和标签，不改变 UUID、服务器配置、Encryption 或路径。
-4. **保持查看操作简单。** `show-links` 继续查看当前产物。规划新增独立的 `export-client` 入口，建议参数为 `--node N`、`--variant current/plain/ech`、`--format uri/json/png`、`--output PATH`，ECH 变体可用 `--ech-config-list VALUE` 指定本次来源；这些是待实现接口，当前不可执行。`current` 保留原状态，`plain` 明确省略 ECH，`ech` 缺少有效来源时准确失败。
-5. **菜单只暴露必要选择。** 首层提供复制节点、二维码、NAS 配置；ECH 放在节点 3 的可选导出入口，允许填写 DoH 或使用经过检查的共享名方案。普通 GUI 导入不要求用户编辑 JSON。实现初期若某变体尚未通过支持矩阵，显示“待验证”及原因。
+4. **保持查看操作简单。** `show-links` 继续查看已交付产物。`export-client --node N --variant current|plain|ech --format uri|json|png --output PATH` 已可执行；`--ech-config-list VALUE` 只允许用于 ech 变体。`current` 保留原状态，`plain` 明确省略 ECH，`ech` 使用显式来源、既有值或 §5.2 默认。节点 1/2/6/8 不接受 ech；节点 8/9 还须通过当次 H3 条件。
+5. **菜单只暴露必要选择。** 获取节点菜单支持复制、二维码和 `j N` 原生 JSON 导出，可选择 current/plain/ech。自定义 ECH 来源使用 CLI；普通 GUI 导入不要求用户编辑 JSON。已有输出将“ECH 已配置”与客户端握手验证区分，真实兼容性仍以验收记录为准。
 6. **ECH 为客户端设置。** 本次导出覆盖值不自动写回全局 state，不触发 apply-config、服务重启或重装。普通/ECH 两份客户端可以使用同一个服务端入站，客户端明确选哪份就执行哪份。
-7. **NAS 有完整 JSON。** 导出实际可启动的客户端配置，并交付与指定镜像匹配的启动说明。测试镜像使用准确 digest，JSON 使用 v26.9.9 验证；所有待支持节点都须有原生配置参照，不要求容器自行读取 `vless://` 或扫码。
+7. **NAS 有完整 JSON。** 导出包含 `127.0.0.1:10808` SOCKS 入站与所选出站的完整配置，先使用当前核心 `run -test -format json` 校验。固定官方镜像及 Linux host 网络启动命令见[手册 §4.3](TEST-VPS-RUNBOOK.md#43-debian-nas-的-xray-core-docker)，不要求容器读取 URI/PNG。容器启动检查不代替真实 NAS 网络验收。
 8. **显示有证据的状态。** “ECH 已配置，客户端握手待验证”“查询到 ECH，地点/时间/解析器”“此客户端与网络的 ECH 验证通过”是不同状态。只读配置非空不能显示“ECH 可用”；状态不跨网络、客户端或密钥轮换永久沿用。VPS 不自动知道 GUI 的握手结果，默认显示待验证；客户端通过状态来自可追溯报告，不新增遥测或后台控制服务。
-9. **错误可恢复。** DNS 入口不可达、HTTPS RR 无 ech、格式错误、ECH 被拒绝、证书错误、CDN HTTP 错误分别提示；提供对应诊断或显式选择其他节点的下一步。保留原始原因，不把所有情况合并成“网络异常”。
-10. **派生产物保持一致。** 配置/凭据变更后，旧 URI、JSON、PNG 不能混用；新导出失败保留有效旧文件并说明归属。文件包含客户端凭据，权限沿用项目的私有输出约定；不把服务端 privateKey/decryption 私钥写进客户端 JSON。
+9. **错误可恢复。** 导出时拒绝无效 ECH 语法/端口/空白及不完整 Base64 ECHConfigList。运行时 DNS、ECH 拒绝、证书和 CDN HTTP 错误由实际客户端日志保留并按手册诊断；导出器不预先知道网络结果。原生负向测试已证明 ECH 获取失败不透明降级，真实网络提示与人工处理仍由 W15 验收。
+10. **派生产物保持一致。** `manifest.json` 绑定 config/state/文档摘要、节点对象和 PNG 摘要；导出拒绝 pending、代次不一致和托管/符号链接目标。默认不覆盖既有文件；显式 `--overwrite` 才替换，新文件 0600、新建目录 0700。`rebuild-qr --yes` 只在规范 URI 与文档一致时重建，失败恢复旧目录；缺整个 PNG 目录也可恢复。客户端 JSON 不含服务端 privateKey/decryption 私钥。配置或凭据变化后，外部导出副本须重新生成和导入。
+
+可执行示例（在已安装测试 VPS 上）：
+
+```bash
+xtun export-client --node 3 --variant plain --format json --output /root/xtun-clients/node3.json
+xtun export-client --node 3 --variant ech --format uri --output /root/xtun-clients/node3-ech.uri \
+  --ech-config-list https://dns.alidns.com/dns-query
+xtun rebuild-qr --yes
+```
 
 ## 7. 社区证据如何影响本计划
 
@@ -247,11 +260,11 @@ URI → 客户端字段 → 运行 JSON 应恰好还原一层编码。测试 `+`
 | --- | --- | --- | --- |
 | v2rayNG / Android | 提交 `173f60a1dabe57e822a56381931be6354f7c7f61` 的 FmtBase.kt、CoreOutboundBuilder.kt | URI `ech` 被读取/导出，运行 TLS 配置传入 echConfigList | 用户安装版本与内置核心、扫码/复制、编辑再保存、VPN 下 DoH 引导、REALITY key_share、split |
 | v2rayN / Windows | 提交 `cef40d38eec545dbe5a736602549d2b72c4f64bc` 的 BaseFmt.cs、V2rayOutboundService.cs | URI 与运行配置存在 ECH 流向；源码另写 echForceQuery 兼容旧核心，该额外字段在目标版本无效 | 实际使用 Xray 内核、URI 恰好一次解码、系统代理与 TUN、休眠、split/Encryption 字段保留 |
-| Xray-core Docker / Debian NAS | 本文固定 tag 的原生配置与 TLS 源码 | 可作为原生参照；核心本身不消费分享 URI/PNG | 镜像来源/tag/digest、实际 xray version、架构、卷、DNS、端口映射、冷启动与重启 |
+| Xray-core Docker / Debian NAS | 本文固定 tag 的原生配置/TLS 源码、官方 Dockerfile 与镜像 index | 已固定 26.9.9 的多架构 digest；实际导出 JSON/官方容器/SOCKS 启动由 CI 检查，结果见 C/D/E 报告 | 实际 NAS 的架构、挂载权限、DNS、网络、双向内容、冷启动与重启 |
 
 这是所核对提交的源码能力，**不是用户已经安装了这些提交或对应版本的证明**。不能以应用最新版、Docker `:latest` 标签或一个 ECH 输入框代替实际核心版本和握手记录。[P13]、[P14]
 
-前序恢复见[接手报告](REPORT-2026-09-14-W04R-W05R.md)，W07/W11.1/W09.1 见[批次 B 报告](REPORT-2026-09-14-BATCH-B.md)；G1 强制断电仍待验证。下一独立批次 C 为 W08.2/8.3 安装身份，随后按主计划推进 W09 余项、W10 参数迁移及 W11 导出；W12 完成证书生命周期，W13 全程提供回归。设备到位后补 W14/W15，两轮真人和真实三端仍是统一完整发布的必要证据。参数工作分项及旧编号映射如下：
+前序恢复见[接手报告](REPORT-2026-09-14-W04R-W05R.md)，菜单与 H3 意图见[批次 B 报告](REPORT-2026-09-14-BATCH-B.md)，W08 余项、W09/W10/W11/W12 和新增 W13 证据见[批次 C/D/E 报告](REPORT-2026-09-15-CDE.md)。后续补公共 ACME、G1 强制断电；设备到位后完成 W14/W15 两轮真人、三端和真实网络，再进入持续观察。参数工作分项及旧编号映射如下：
 
 | 当前工单（旧子项） | 交付 | 通过条件 |
 | --- | --- | --- |
@@ -261,7 +274,7 @@ URI → 客户端字段 → 运行 JSON 应恰好还原一层编码。测试 `+`
 | W13（T10-ECH） | 原生强制 ECH 正向/负向验证工具与报告格式 | 有运行配置证据，失败不降级；测试夹具不依赖生产域名 |
 | W14/W15（T11-ECH） | 真实 CF 域名 + AliDNS 候选 + 三端/实际网络 | 按验收手册完成冷启动、故障、轮换、休眠与人工操作；未通过组合准确列为待支持 |
 
-只完成 W10/W11 的生成和迁移时，如实记录代码及自动验证状态，不能写“大陆 ECH 已稳定可用”。迁移基线还需覆盖实际生产 `0.11.14 bundle / state v2 / core 26.3.27` 与历史 state v1；本轮不修改生产 state。
+当前隔离迁移已覆盖 `0.11.14 bundle / state v1 / core 26.3.27`、显式构造的实际生产 state v2 组合及 `1.1.0 / state v2 / core 26.9.9`，使用准确历史生成器与合成身份；本轮不修改生产 state。原生 17 场景已覆盖五类节点/ECH 正向与 UUID、REALITY key/shortId、路径、ECH、split 逐腿阻断负向；不能据此写“大陆 ECH 已稳定可用”。
 
 ## 9. 可追溯来源
 

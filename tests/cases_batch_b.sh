@@ -264,6 +264,7 @@ run_batch_b_certificate_capability_case() {
   workdir="$(mktemp -d)"
   batch_b_certificate_fixtures "${workdir}"
   certificate_public_trust_roots() { cat "${workdir}/root.pem"; }
+  certificate_origin_trust_roots() { cat "${workdir}/origin-root.pem"; }
   output="$(certificate_capability_report "${workdir}/chain.pem" "${workdir}/leaf.key" cdn.example.com)"
   [[ "${output}" == ready\|* ]]
   [[ "$(certificate_capability_report "${workdir}/leaf.pem" "${workdir}/leaf.key" cdn.example.com)" == untrusted\|* ]]

@@ -378,6 +378,8 @@ run_install_fresh_log_permissions_case() {
 
   # 使用真实核心创建首批日志；其它服务的配置不属于本用例。
   validate_configs() { validate_xray_config; }
+  verify_served_tls_assets() { :; }
+  write_certificate_receipt() { :; }
   restart_services() {
     setpriv --reuid="${XRAY_UID}" --regid="${XRAY_GID}" --clear-groups \
       "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}" > "${workdir}/service-user.log" 2>&1 || return 1
@@ -451,6 +453,7 @@ run_install_log_permission_failure_case() {
 run_generation_products_rollback_case() {
   local workdir=""
   local status=0
+  local old_config=""
 
   load_functions
   workdir="$(mktemp -d)"
@@ -472,8 +475,13 @@ run_generation_products_rollback_case() {
   ENABLE_WARP="no"
   ENABLE_NET_OPT="no"
   CERT_MODE="existing"
+  XHTTP_VLESS_ENCRYPTION_ENABLED=no
+  XHTTP_VLESS_DECRYPTION=none
+  XHTTP_VLESS_ENCRYPTION=""
 
-  printf 'old-config\n' > "${XRAY_CONFIG_FILE}"
+  ensure_managed_permissions() { :; }
+  write_xray_config
+  old_config="$(cat "${XRAY_CONFIG_FILE}")"
   printf 'old-state\n' > "${STATE_FILE}"
   printf 'old-output\n' > "${OUTPUT_FILE}"
   # 装着 xray 的机器上日志目录是安装时建好的；校验会真的去初始化日志。
@@ -498,7 +506,7 @@ run_generation_products_rollback_case() {
   [[ "${status}" -ne 0 ]]
   [[ -s "${workdir}/qr-attempts" ]] || { printf '[fail] 未到达二维码故障注入：%s\n' "${LOGGED}" >&2; return 1; }
   [[ "${GENERATION_RECOVERY_RESULT}" == "restored-verified" ]]
-  [[ "$(cat "${XRAY_CONFIG_FILE}")" == "old-config" ]]
+  [[ "$(cat "${XRAY_CONFIG_FILE}")" == "${old_config}" ]]
   [[ "$(cat "${STATE_FILE}")" == "old-state" ]]
   [[ "$(cat "${OUTPUT_FILE}")" == "old-output" ]]
   # 上一代的二维码原样留着，暂存目录一个都不剩

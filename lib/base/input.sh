@@ -15,8 +15,10 @@ usage() {
 用法:
   ${command_name}
   ${command_name} install [参数]
-  ${command_name} update-script
-  ${command_name} upgrade [--xray-version vX.Y.Z]
+  ${command_name} update-script [--reinstall]
+  ${command_name} upgrade [--xray-version vX.Y.Z] [--reinstall]
+  ${command_name} export-client --node N --variant current|plain|ech --format uri|json|png --output PATH [--overwrite]
+  ${command_name} rebuild-qr [--yes]
   ${command_name} recover [--yes]
   ${command_name} check-sni [域名] [--target host:port] [--timeout N]
   ${command_name} change-uuid [参数]
@@ -27,6 +29,7 @@ usage() {
   ${command_name} change-warp-rules [参数]
   ${command_name} change-cert-mode [参数]
   ${command_name} renew-cert [参数]
+  ${command_name} acme-deploy --domain DOMAIN
   ${command_name} uninstall [--yes] [--purge]
   ${command_name} show-links [--qr] [--summary] [--node N]
   ${command_name} diagnose
@@ -67,8 +70,7 @@ usage() {
   --disable-xhttp-vless-encryption  禁用 XHTTP CDN 的 VLESS Encryption。
   --enable-xhttp-ech         启用 XHTTP CDN ECH（默认关闭）。
   --disable-xhttp-ech        禁用 XHTTP CDN ECH。
-  --xhttp-ech-config-list VALUE      ECH 配置列表，默认启用值为 cloudflare-ech.com+https://223.5.5.5/dns-query。
-  --xhttp-ech-force-query VALUE      ECH 强制查询模式，默认 none。
+  --xhttp-ech-config-list VALUE      ECH 配置列表；显式开启时默认查询真实域名，使用 https://dns.alidns.com/dns-query。
   --enable-xhttp-xpadding    启用 XHTTP xpadding（默认关闭）。
   --disable-xhttp-xpadding   禁用 XHTTP xpadding。
   --xhttp-xpadding-key VALUE        xpadding 参数名，默认 x_padding。
@@ -193,7 +195,12 @@ check-sni 参数:
 
 脚本维护命令:
   修改与维护会先预览并确认；自动化使用 --non-interactive（维护也接受 --yes）。
-  update-script               下载并更新脚本自身的持久化 bundle 与管理命令。
+  update-script               下载并校验完整 bundle 后更新；--reinstall 显式重装。
+  upgrade --reinstall         显式重装核心和 geo；同版本身份未知时不会自动覆盖。
+  export-client              独立导出；只写目标文件，不重启服务。--overwrite 显式覆盖。
+                             ech 变体可用 --ech-config-list 指定 DoH / ECHConfigList。
+  rebuild-qr                 按当前节点重建全部 PNG，不应用服务配置。
+  acme-deploy                ACME 自动回调 / 重试暂存证书部署；使用共享锁并核对 nginx 实际供证。
   apply-net-opt               重新应用网络优化；--bbr-kernel joey|none 可切换内核策略并写回状态。
   apply-config                按当前状态重新生成托管配置；--manage-nginx-main 开启 nginx 主配置接管，
                               --no-manage-nginx-main 在找到首次原件时还原并停止接管。

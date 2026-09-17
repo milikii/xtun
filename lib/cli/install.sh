@@ -18,7 +18,7 @@ install_flag_specs() {
 --no-block-cn|ROUTE_BLOCK_CN|no|block-cn
 --enable-xhttp-vless-encryption|XHTTP_VLESS_ENCRYPTION_ENABLED|yes|xhttp-vless-encryption
 --disable-xhttp-vless-encryption|XHTTP_VLESS_ENCRYPTION_ENABLED|no|xhttp-vless-encryption
---enable-xhttp-ech|XHTTP_ECH_CONFIG_LIST|cloudflare-ech.com+https://223.5.5.5/dns-query|xhttp-ech
+--enable-xhttp-ech|XHTTP_ECH_CONFIG_LIST|https://dns.alidns.com/dns-query|xhttp-ech
 --disable-xhttp-ech|XHTTP_ECH_CONFIG_LIST||xhttp-ech
 --enable-xhttp-xpadding|XHTTP_XPADDING_ENABLED|yes|xhttp-xpadding
 --disable-xhttp-xpadding|XHTTP_XPADDING_ENABLED|no|xhttp-xpadding
@@ -52,7 +52,6 @@ install_value_specs() {
 --xhttp-domain|XHTTP_DOMAIN
 --xhttp-path|XHTTP_PATH
 --xhttp-ech-config-list|XHTTP_ECH_CONFIG_LIST
---xhttp-ech-force-query|XHTTP_ECH_FORCE_QUERY
 --xhttp-xpadding-key|XHTTP_XPADDING_KEY
 --xhttp-xpadding-header|XHTTP_XPADDING_HEADER
 --xhttp-xpadding-placement|XHTTP_XPADDING_PLACEMENT

@@ -210,9 +210,9 @@ run_ipv6_links_case() {
   vless_links_text > "${workdir}/links.txt"
   grep -qF "vless://${REALITY_UUID}@[2408:8120::1234]:443" "${workdir}/links.txt"
   grep -q "HKG-REALITY-V6" "${workdir}/links.txt"
-  grep -q "vless://${XHTTP_UUID}@\[2408:8120::1234\]:443" "${workdir}/links.txt"
-  # 节点 7 的 downloadSettings.address 是 IPv6（URL 编码后是 %22%5B...%5D%22）
-  grep -qF 'address%22%3A%22%5B2408%3A8120%3A%3A1234%5D%22' "${workdir}/links.txt"
+  grep -q "vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443" "${workdir}/links.txt"
+  # JSON 中的 IPv6 没有 URI authority 的方括号；只有下行改成 IPv6。
+  grep -qF 'address%22%3A%222408%3A8120%3A%3A1234%22' "${workdir}/links.txt"
   grep -q "HKG-XHTTP-SPLIT-CDN-REALITY-V6" "${workdir}/links.txt"
 
   # 输出文件有节点 6 / 节点 7

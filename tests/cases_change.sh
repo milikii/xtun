@@ -292,7 +292,7 @@ run_renew_cert_command_case() {
     XHTTP_PATH="/old"
   }
   ensure_xray_user() { :; }
-  apply_managed_update() {
+  apply_certificate_only_update() {
     applied=$((applied + 1))
   }
   show_links() {
@@ -313,9 +313,9 @@ run_renew_cert_command_case() {
 
   renew_cert_cmd --non-interactive --acme-email ops@example.com --cf-dns-token "@${workdir}/cf-dns-token.txt"
   [[ "${applied}" -eq 1 ]]
-  [[ "${shown_links}" -eq 1 ]]
+  [[ "${shown_links}" -eq 0 ]]
   printf '%s' "${logged}" | grep -q 'STEP:刷新 TLS 证书资产。'
-  printf '%s' "${logged}" | grep -q 'OK:证书已续期。'
+  printf '%s' "${logged}" | grep -q 'OK:证书刷新完成，已验证 nginx 实际供证。'
 }
 
 # renew-cert 是 acme.sh 的 cron 自动跑的：这里报「已续期」没人会去核对，
@@ -339,7 +339,7 @@ run_renew_cert_failure_case() {
   resolve_install_input_sources() { :; }
   prompt_cert_mode_inputs() { :; }
   validate_install_inputs() { :; }
-  apply_managed_update() { return 1; }
+  apply_certificate_only_update() { return 1; }
   show_links() { shown_links=$((shown_links + 1)); }
   log() { logged+="${1}"$'\n'; }
   log_step() { logged+="STEP:${1}"$'\n'; }
@@ -352,7 +352,7 @@ run_renew_cert_failure_case() {
 
   [[ "${status}" -ne 0 ]]
   [[ "${shown_links}" -eq 0 ]]
-  [[ "${logged}" != *"OK:证书已续期。"* ]]
+  [[ "${logged}" != *"OK:证书刷新完成，已验证 nginx 实际供证。"* ]]
 
   rm -rf "${workdir}"
   load_functions
@@ -375,7 +375,7 @@ run_change_cert_mode_failure_case() {
   ensure_xray_user() { :; }
   prompt_cert_mode_inputs() { :; }
   validate_install_inputs() { :; }
-  apply_managed_update() { return 1; }
+  apply_certificate_only_update() { return 1; }
   cleanup_previous_acme_cert() { cleanup_calls=$((cleanup_calls + 1)); }
   show_links() { shown_links=$((shown_links + 1)); }
   log() { logged+="${1}"$'\n'; }
@@ -420,6 +420,7 @@ run_upgrade_command_case() {
 
   need_root() { :; }
   ensure_debian_family() { :; }
+  xray_ensure_release_context() { XRAY_SELECTED_TAG=v26.9.9; }
   install_xray() {
     printf 'new-core\n' > "${XRAY_BIN}"
     printf 'new-geoip\n' > "${XRAY_ASSET_DIR}/geoip.dat"

@@ -127,15 +127,21 @@ xray_sniffing_json() {
 }
 
 xray_reality_clients_json() {
-  jq -cn --arg id "${REALITY_UUID}" '[{id: $id, flow: "xtls-rprx-vision", email: "reality-vision"}]'
+  local user=""
+  user="$(config_user_template reality-vision)" || return 1
+  jq -cn --arg id "${REALITY_UUID}" --argjson user "${user}" \
+    '[{flow:"xtls-rprx-vision",email:"reality-vision"} + $user + {id:$id}]'
 }
 
 xray_xhttp_clients_json() {
-  jq -cn --arg id "${XHTTP_UUID}" '[{id: $id, email: "xhttp-cdn"}]'
+  local user=""
+  user="$(config_user_template xhttp-cdn)" || return 1
+  jq -cn --arg id "${XHTTP_UUID}" --argjson user "${user}" '[{email:"xhttp-cdn"} + $user + {id:$id}]'
 }
 
 xray_reality_inbound_json() {
   jq -cn \
+    --arg user_key "$(xray_inbound_user_key)" \
     --argjson clients "$(xray_reality_clients_json)" \
     --arg xhttp_local_port "${XHTTP_LOCAL_PORT}" \
     --arg reality_target "127.0.0.1:${REALITY_FALLBACK_PORT}" \
@@ -154,7 +160,7 @@ xray_reality_inbound_json() {
       port: 2443,
       protocol: "vless",
       settings: {
-        clients: $clients,
+        ($user_key): $clients,
         decryption: "none",
         fallbacks: [
           {
@@ -222,6 +228,7 @@ xray_xhttp_inbound_json() {
 
   jq -cn \
     --arg xhttp_local_port "${XHTTP_LOCAL_PORT}" \
+    --arg user_key "$(xray_inbound_user_key)" \
     --argjson clients "$(xray_xhttp_clients_json)" \
     --arg xhttp_decryption "${XHTTP_VLESS_DECRYPTION:-none}" \
     --arg xhttp_path "${XHTTP_PATH}" \
@@ -241,7 +248,7 @@ xray_xhttp_inbound_json() {
       port: ($xhttp_local_port | tonumber),
       protocol: "vless",
       settings: {
-        clients: $clients,
+        ($user_key): $clients,
         decryption: $xhttp_decryption
       },
       streamSettings: {

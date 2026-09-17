@@ -22,6 +22,9 @@ fi
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_contract.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_install_wizard.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_batch_b.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_identity.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_nodes.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_certificates.sh"
 
 # 失败现场：哪条命令、在哪个函数的哪一行挂的。用例跑在子 shell 里，变量传不回来，
 # 所以走一个临时文件。
@@ -386,6 +389,36 @@ main() {
     run_batch_b_h3_matrix_case
     run_batch_b_udp_ownership_case
     run_batch_b_h3_enable_rejection_case
+    run_bundle_required_files_case
+    run_bootstrap_metadata_errors_case
+    run_bootstrap_fixed_entry_case
+    run_bootstrap_write_no_fallback_case
+    run_xray_api_failure_categories_case
+    run_xray_identity_noop_case
+    run_xray_identity_unknown_case
+    run_xray_identity_drift_case
+    run_xray_reinstall_recovery_case
+    run_xray_candidate_geo_required_case
+    run_certificate_candidate_validation_case
+    run_certificate_only_command_case
+    run_certificate_failure_recovery_case
+    run_certificate_recovery_retry_case
+    run_acme_deferred_callback_case
+    run_acme_automatic_callback_case
+    run_acme_callback_lock_case
+    run_served_certificate_socket_case
+    run_node_object_matrix_case
+    run_vless_users_migration_case
+    run_client_tuning_preservation_case
+    run_node_png_decode_case
+    run_export_client_independent_case
+    run_export_failure_preserves_target_case
+    run_rebuild_qr_independent_case
+    run_parameter_generation_rollback_case
+    run_export_argument_boundary_case
+    run_export_concurrent_target_case
+    run_ech_and_tuning_validation_case
+    run_rebuild_qr_document_consistency_case
   )
 
   load_functions

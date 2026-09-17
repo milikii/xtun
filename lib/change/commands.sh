@@ -8,17 +8,38 @@
 upgrade_cmd() {
   local previous_version=""
   local current_version=""
+  local XRAY_REINSTALL=0 before_digest="" installed_tag=""
 
   parse_upgrade_args "$@"
 
   need_root
   ensure_debian_family
   [[ -x "${XRAY_BIN}" ]] || die "找不到当前 Xray 可执行文件：${XRAY_BIN}"
+  if pending_operation_present; then warn "存在未完成操作，请先运行 xtun recover。"; return 1; fi
   previous_version="$("${XRAY_BIN}" version 2>/dev/null | head -n 1 || true)"
-  confirm_maintenance_action "Xray 核心：${previous_version:-未知} → ${XRAY_VERSION_REQUEST}" \
+  xray_ensure_release_context "${XRAY_VERSION_REQUEST}" || return 1
+  acquire_script_lock || return 1
+  if pending_operation_present; then warn "存在未完成操作，请先运行 xtun recover。"; return 1; fi
+  previous_version="$("${XRAY_BIN}" version 2>/dev/null | head -n 1 || true)"
+  installed_tag="$(awk '/^Xray [0-9]+\.[0-9]+\.[0-9]+ / {print "v" $2; exit}' <<< "${previous_version}")"
+  if [[ "${XRAY_REINSTALL}" -eq 0 && "${installed_tag}" == "${XRAY_SELECTED_TAG}" ]]; then
+    xray_resolve_release_digest || return 1
+    if xray_installed_matches_selected; then
+      log_success "当前核心与 ${XRAY_SELECTED_TAG} 的可信安装身份一致；未替换文件、未创建备份、未重启服务。"
+      return 0
+    fi
+    warn "版本号相同，但核心/geo/权限安装身份未核验或与候选不同。请显式运行 xtun upgrade --xray-version ${XRAY_SELECTED_TAG} --reinstall。"
+    return 1
+  fi
+  before_digest="$(identity_file_sha256 "${XRAY_BIN}")" || return 1
+  confirm_maintenance_action "Xray 核心：${previous_version:-未知} → ${XRAY_SELECTED_TAG}（显式重装=${XRAY_REINSTALL}）" \
     "${XRAY_BIN}、${XRAY_ASSET_DIR}；节点凭据保持" \
     "restart xray，所有 Xray 连接可能中断，无需重新导入链接" \
     "失败按同代清单恢复核心、资源和服务状态" || return 1
+  begin_mutation || return 1
+  if [[ "$(identity_file_sha256 "${XRAY_BIN}")" != "${before_digest}" ]]; then
+    warn "确认期间核心发生变化，请重新执行升级。"; return 1
+  fi
   start_backup_session || return 1
   # 核心文件也进同代边界：校验或重启失败时把二进制、资源目录一起退回去。
   begin_generation_paths "Xray 核心升级" xray.service -- "${XRAY_BIN}" "${XRAY_ASSET_DIR}" || return 1
@@ -57,9 +78,15 @@ upgrade_cmd() {
 }
 
 parse_upgrade_args() {
+  XRAY_VERSION_REQUEST="latest-published"
+  XRAY_REINSTALL=0
   while [[ $# -gt 0 ]]; do
     if handle_change_common_arg "${1}"; then shift; continue; fi
     case "${1}" in
+      --reinstall)
+        XRAY_REINSTALL=1
+        shift
+        ;;
       --xray-version|--xray-version=*)
         option_take_value "--xray-version" "${1}" "${@:2}"
         XRAY_VERSION_REQUEST="${OPTION_VALUE}"
@@ -219,6 +246,7 @@ change_cert_mode_cmd() {
   local old_xhttp_domain=""
   local -A request=()
   local before_digest=""
+  local scope=tls
 
   init_change_cert_mode_request request
   parse_change_cert_mode_args request "$@"
@@ -236,14 +264,27 @@ change_cert_mode_cmd() {
     log "证书、域名及设置没有变化，未创建备份、未重启服务。"
     return 0
   fi
-  confirm_change_preview "证书来源 / CDN 域名" tls || return 1
+  [[ "${XHTTP_DOMAIN}" != "${old_xhttp_domain}" ]] || scope=tls-only
+  confirm_change_preview "证书来源 / CDN 域名" "${scope}" || return 1
   open_change_session || return 1
   # 换证书失败时不能往下走：cleanup_previous_acme_cert 会把旧域名从 acme.sh 里摘掉，
   # 于是回滚回来的那张还在服务的证书从此不再自动续期，而用户看到的是「已更新」。
-  apply_managed_update || return 1
+  if [[ "${scope}" == tls-only ]]; then
+    apply_certificate_only_update change-cert-mode || return 1
+  else
+    if ! apply_managed_update; then
+      certificate_record_event change-cert-mode failed "${GENERATION_RECOVERY_RESULT}"
+      return 1
+    fi
+    certificate_record_event change-cert-mode success '域名与证书均已更新，并验证实际供证'
+  fi
   cleanup_previous_acme_cert "${old_cert_mode}" "${old_xhttp_domain}"
 
-  finish_managed_change "证书模式已更新。"
+  if [[ "${scope}" == tls-only ]]; then
+    finish_managed_change "证书模式已更新，已验证 nginx 实际供证。" no || return 1
+  else
+    finish_managed_change "证书模式已更新。" || return 1
+  fi
 }
 
 renew_cert_cmd() {
@@ -270,14 +311,12 @@ renew_cert_cmd() {
   resolve_install_input_sources
   prompt_cert_mode_inputs || return $?
   validate_install_inputs
-  confirm_change_preview "续期 / 刷新证书" tls || return 1
+  confirm_change_preview "续期 / 刷新证书" tls-only || return 1
   open_change_session || return 1
   log_step "刷新 TLS 证书资产。"
-  # renew-cert 是 acme.sh 定时自动跑的，这里报成功没人会去核对，
-  # 所以「续期失败被报成已续期」是这条命令上最贵的一种错。
-  apply_managed_update || return 1
+  apply_certificate_only_update renew-cert || return 1
 
-  finish_managed_change "证书已续期。"
+  finish_managed_change "证书刷新完成，已验证 nginx 实际供证。" no
 }
 
 change_warp_rules_cmd() {

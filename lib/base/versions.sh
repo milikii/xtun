@@ -134,14 +134,25 @@ xray_git_tag_url() {
 }
 
 xray_fetch_json() {
-  curl -fsSL \
+  local response="" http_status="" status=0
+  response="$(curl -sSL \
     --connect-timeout 10 \
     --max-time "${XRAY_GITHUB_TIMEOUT_SECONDS}" \
     --retry 2 \
     --retry-all-errors \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${1}"
+    -w '\n%{http_code}' "${1}")" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    printf 'Xray GitHub 元数据网络请求失败（curl %s）。\n' "${status}" >&2; return 1
+  fi
+  http_status="${response##*$'\n'}"
+  case "${http_status}" in
+    200) printf '%s' "${response%$'\n'*}" ;;
+    403|429) printf 'Xray GitHub API 限流或拒绝访问（HTTP %s）；显式 tag 同样需要元数据，请稍后重试。\n' "${http_status}" >&2; return 1 ;;
+    404) printf 'Xray 发布或 tag 不存在（HTTP 404）。\n' >&2; return 1 ;;
+    *) printf 'Xray 元数据 HTTP 状态异常：%s。\n' "${http_status}" >&2; return 1 ;;
+  esac
 }
 
 xray_fetch_latest_release_json() {
@@ -260,6 +271,7 @@ xray_reset_release_context() {
   XRAY_SELECTED_DGST_URL=""
   XRAY_SELECTED_EXPECTED_SHA256=""
   XRAY_SELECTED_CHECKSUM_SOURCE=""
+  XRAY_SELECTED_DIGEST_VERIFIED="no"
   XRAY_SELECTED_RESOLVED_AT=""
   XRAY_CONTEXT_REQUEST=""
   XRAY_CONTEXT_ARCH=""
@@ -371,50 +383,55 @@ xray_prepare_release_context() {
   XRAY_CONTEXT_ARCH="${arch}"
 }
 
-xray_download_release() {
-  local target_dir="${1}"
-  local archive_path=""
+xray_resolve_release_digest() {
   local digest_path=""
-  local expected_sha256=""
+  local expected_sha256="${XRAY_SELECTED_EXPECTED_SHA256:-}"
   local dgst_sha256=""
-  local actual_sha256=""
 
   xray_release_context_ready || return 1
-  archive_path="${target_dir}/${XRAY_SELECTED_ARCHIVE_NAME}"
-  expected_sha256="${XRAY_SELECTED_EXPECTED_SHA256}"
-
-  curl -fsSL \
-    --connect-timeout 10 \
-    --max-time "${XRAY_GITHUB_TIMEOUT_SECONDS}" \
-    --retry 2 \
-    --retry-all-errors \
-    "${XRAY_SELECTED_ARCHIVE_URL}" \
-    -o "${archive_path}" || return 1
-
+  [[ "${XRAY_SELECTED_DIGEST_VERIFIED:-no}" != yes ]] || return 0
   if [[ -n "${XRAY_SELECTED_DGST_URL}" ]]; then
-    digest_path="${target_dir}/${XRAY_SELECTED_ARCHIVE_NAME}.dgst"
-    curl -fsSL \
+    digest_path="$(mktemp "${TMPDIR:-/tmp}/xtun-digest.XXXXXX")" || return 1
+    if ! curl -fsSL \
       --connect-timeout 10 \
       --max-time "${XRAY_GITHUB_TIMEOUT_SECONDS}" \
       --retry 2 \
       --retry-all-errors \
       "${XRAY_SELECTED_DGST_URL}" \
-      -o "${digest_path}" || return 1
-    dgst_sha256="$(xray_parse_dgst_sha256 "${digest_path}" "${XRAY_SELECTED_ARCHIVE_NAME}")" || return 1
+      -o "${digest_path}"; then
+      rm -f "${digest_path}"
+      printf 'Xray .dgst 摘要下载失败。\n' >&2; return 1
+    fi
+    dgst_sha256="$(xray_parse_dgst_sha256 "${digest_path}" "${XRAY_SELECTED_ARCHIVE_NAME}")" || {
+      rm -f "${digest_path}"; printf 'Xray .dgst 摘要格式无效。\n' >&2; return 1;
+    }
+    rm -f "${digest_path}" || return 1
     if [[ -n "${expected_sha256}" && "${dgst_sha256}" != "${expected_sha256}" ]]; then
       printf 'Xray 发布 API 摘要与 .dgst 摘要冲突。\n' >&2
       return 1
     fi
     expected_sha256="${dgst_sha256}"
-    XRAY_SELECTED_CHECKSUM_SOURCE="${XRAY_SELECTED_ARCHIVE_NAME}.dgst"
+    XRAY_SELECTED_CHECKSUM_SOURCE="${XRAY_SELECTED_CHECKSUM_SOURCE:-GitHub Release} and ${XRAY_SELECTED_ARCHIVE_NAME}.dgst"
   fi
 
   [[ -n "${expected_sha256}" ]] || {
     printf 'Xray 安装包缺少 SHA256 校验值。\n' >&2
     return 1
   }
-  actual_sha256="$(sha256sum "${archive_path}" | awk '{print tolower($1)}')"
-  [[ "${actual_sha256}" == "${expected_sha256}" ]] || {
+  XRAY_SELECTED_EXPECTED_SHA256="${expected_sha256}"
+  XRAY_SELECTED_DIGEST_VERIFIED=yes
+}
+
+xray_download_release() {
+  local target_dir="${1}" archive_path="" actual_sha256=""
+  xray_resolve_release_digest || return 1
+  archive_path="${target_dir}/${XRAY_SELECTED_ARCHIVE_NAME}"
+  curl -fsSL --connect-timeout 10 --max-time "${XRAY_GITHUB_TIMEOUT_SECONDS}" \
+    --retry 2 --retry-all-errors "${XRAY_SELECTED_ARCHIVE_URL}" -o "${archive_path}" || {
+    printf 'Xray 核心资产下载失败：%s。\n' "${XRAY_SELECTED_ARCHIVE_NAME}" >&2; return 1;
+  }
+  actual_sha256="$(sha256sum "${archive_path}" | awk '{print tolower($1)}')" || return 1
+  [[ "${actual_sha256}" == "${XRAY_SELECTED_EXPECTED_SHA256}" ]] || {
     printf 'Xray 安装包 SHA256 校验失败。\n' >&2
     return 1
   }
@@ -466,6 +483,7 @@ xray_validate_x25519_output() {
 xray_validate_candidate_commands() (
   local binary_path="${1:-}"
   local expected_tag="${2:-}"
+  local expected_commit="${3:-}"
   local expected_version="${expected_tag#v}"
   local work_dir=""
   local config_path=""
@@ -485,6 +503,9 @@ xray_validate_candidate_commands() (
   version_output="$("${binary_path}" version 2>&1)" || return 1
   version_line="$(printf '%s\n' "${version_output}" | head -n 1)"
   [[ "${version_line}" == "Xray ${expected_version} "* ]] || return 1
+  if [[ -n "${expected_commit}" ]]; then
+    [[ "${expected_commit}" =~ ^[0-9a-f]{40}$ && "${version_line}" == *" ${expected_commit:0:7} "* ]] || return 1
+  fi
 
   key_output="$("${binary_path}" x25519 2>&1)" || return 1
   xray_validate_x25519_output "${key_output}" || return 1
@@ -527,5 +548,5 @@ xray_validate_candidate_archive() {
   [[ -n "${target_dir}" ]] || return 1
   [[ -x "${binary_path}" ]] || return 1
   [[ -n "${XRAY_SELECTED_TAG:-}" ]] || return 1
-  xray_validate_candidate_commands "${binary_path}" "${XRAY_SELECTED_TAG}"
+  xray_validate_candidate_commands "${binary_path}" "${XRAY_SELECTED_TAG}" "${XRAY_SELECTED_COMMIT:-}"
 }

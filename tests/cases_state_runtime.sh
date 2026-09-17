@@ -143,8 +143,8 @@ EOF
   [[ "${WARP_MTU}" == "1280" ]]
   [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]
   [[ "${ENABLE_NET_OPT}" == "no" ]]
-  [[ -z "${XHTTP_ECH_CONFIG_LIST}" ]]
-  [[ -z "${XHTTP_ECH_FORCE_QUERY}" ]]
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == "https://1.1.1.1/dns-query" ]]
+  [[ "${XHTTP_ECH_FORCE_QUERY}" == none ]]
   [[ "${XHTTP_XPADDING_ENABLED}" == "no" ]]
   [[ "${XHTTP_XPADDING_KEY}" == "x_padding" ]]
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
@@ -1339,6 +1339,8 @@ run_managed_apply_case() {
   workdir="$(mktemp -d)"
   generation_case_setup "${workdir}"
   ensure_xray_user() { :; }
+  verify_served_tls_assets() { :; }
+  write_certificate_receipt() { :; }
 
   write_tls_assets() {
     tls_calls=$((tls_calls + 1))

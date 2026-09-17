@@ -515,7 +515,7 @@ sni_check_cmd() {
   if [[ "${sni_given}" -eq 0 || "${target_given}" -eq 0 || "${server_ip_given}" -eq 0 ]]; then
     load_existing_state
     if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
-      load_config_runtime_context
+      load_config_runtime_context || return 1
     fi
   fi
 

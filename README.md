@@ -4,7 +4,7 @@
 
 当前代码声明版本：`1.1.0`。
 
-推进状态见 [当前计划](docs/PLAN.md) 与 [批次 B 报告](docs/REPORT-2026-09-14-BATCH-B.md)。任务菜单、维护预览、单节点取用和 H3 显式意图已实现；入口与恢复的前序证据见 [接手报告](docs/REPORT-2026-09-14-W04R-W05R.md)。提交到 `main` 是测试候选，正式发布仍需强制断电、完整真人、三端、生命周期与观察验收。
+推进状态见 [当前计划](docs/PLAN.md) 与 [批次 C/D/E 报告](docs/REPORT-2026-09-15-CDE.md)。安装身份、同版本重装、节点参数迁移、URI/PNG/原生 JSON 导出、独立二维码重建和证书生命周期已实现；state schema 为 `2`，参数修订为 `2`。提交到 `main` 是测试候选，正式发布仍需公共 ACME、强制断电、真人与三端、真实 Cloudflare/ECH/H3 及持续观察验收。
 
 ## 能安装什么
 
@@ -73,7 +73,7 @@ xtun
 xtun upgrade --xray-version vX.Y.Z
 ```
 
-仓库 CI 用 `v26.9.9` 作为可复现基线；`latest-check` 单独检查默认追新的版本解析、下载及候选命令。它尚未验证五类节点的真实传输，不能据此认定所有客户端兼容。
+仓库 CI 用 `v26.9.9` 作为可复现基线，覆盖配置、五类节点的隔离原生双向传输、历史迁移和导出容器启动。定时/手动运行的 `latest-check` 对一次解析并校验的候选运行完整 smoke 与原生传输，安装矩阵另测 baseline/latest。原生夹具不经过 Cloudflare，不能据此认定真实 CDN、GUI 或 NAS 网络已兼容。
 
 后续维护都可以直接运行 `xtun`，不用再进入仓库目录。
 
@@ -215,8 +215,8 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | 命令 | 作用 |
 | --- | --- |
 | `install [参数]` | 安装或重装 |
-| `update-script` | 更新脚本本体 |
-| `upgrade [--xray-version vX.Y.Z]` | 升级 Xray 核心；默认追踪最新已发布版本 |
+| `update-script [--reinstall]` | 更新脚本 bundle；可显式重装相同版本 |
+| `upgrade [--xray-version vX.Y.Z] [--reinstall]` | 升级核心及配套 geo；可显式重装身份未知或漂移的相同版本 |
 | `recover [--yes]` | 按持久清单恢复未完成操作；已提交的操作只完成清理 |
 | `check-sni [域名] [--target host:port] [--timeout N]` | Reality 目标域名预检；默认探测已保存的 `REALITY_TARGET`（显式域名时用该域名:443），有公布出来的等待上界 |
 | `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
@@ -224,6 +224,8 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `change-h3 [--enable-h3\|--disable-h3]` | 显式选择 H3；启用前校验证书、模块和 UDP 归属 |
 | `change-cert-mode` / `renew-cert` | 换证书模式 / 续期证书 |
 | `show-links [--node N] [--qr\|--summary]` | 全文、单节点、摘要或二维码；查看不重写产物 |
+| `export-client --node N --variant current\|plain\|ech --format uri\|json\|png --output PATH [--overwrite]` | 独立导出节点，不改服务或 state |
+| `rebuild-qr [--yes]` | 按已提交的节点定义重建 PNG，不重启服务 |
 | `diagnose [--warp-probe] [--net]` | 一次性诊断 / 网络栈体检 |
 | `status [--raw]` | 状态面板 / 原始 systemctl 输出 |
 | `restart` / `repair-perms` | 重启服务 / 抢修文件权限 |
@@ -239,6 +241,8 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | --- | --- |
 | `/usr/local/sbin/xtun` | 安装后的管理命令 |
 | `/usr/local/lib/xtun` | 脚本 bundle |
+| `/usr/local/lib/xtun/.xtun-bundle.json` | bundle 来源、完整运行文件摘要与安装回执 |
+| `/usr/local/share/xray/.xtun-core.json` | 核心/geo/官方归档摘要、权限和 capability 回执 |
 | `/usr/local/etc/xray/config.json` | Xray 配置 |
 | `/etc/nginx/conf.d/xtun.conf` | nginx 托管配置 |
 | `/etc/nginx/nginx.conf` | 仅 `--manage-nginx-main` 接管时由 xtun 整体重写 |
@@ -248,8 +252,11 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `/usr/local/etc/xray/node-meta.env` | xtun 状态文件 |
 | `/root/xtun-output.md` | 人类可读节点输出（节点 1–9 + 二维码段） |
 | `/root/xtun-qr/` | 节点二维码 PNG（每条节点一张，随链接重建） |
+| `/root/xtun-qr/manifest.json` | 绑定配置、state、文档、节点对象和 PNG 的当前代清单 |
+| `/etc/ssl/xtun/.xtun-certificate.json` | 证书元数据及实际供证核验回执 |
 | `/root/xtun-backups/` | 变更备份目录 |
 | `/var/log/xtun/operations.log` | 全局操作日志 |
+| `/var/log/xtun/certificate.json` | 最近证书事件、结果与续期信息 |
 | `/var/www/xtun-fallback` | 本地静态伪装站 |
 
 ## 日常命令
@@ -260,7 +267,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 xtun status
 ```
 
-状态面板会显示服务状态、监听端口、证书到期时间、WARP 出站模式、WARP 规则数量和最近备份。
+状态面板会显示服务状态、监听端口、证书到期时间、核心和 bundle 身份、WARP 出站模式、WARP 规则数量和最近备份。版本相同但没有可信回执时，身份显示未知，不冒充已核验。
 
 查看原始 systemd 输出：
 
@@ -303,7 +310,7 @@ xtun change-h3 --disable-h3
 
 证书模式只表示来源，不代替上述检查。缺依赖或条件不满足时明确失败，不停止外来 UDP 服务。旧 state 没有 H3 字段时，从完整的托管配置识别 `legacy-on` 或 `off`；证据不完整则标为 `unknown`，要求显式选择，不能用新默认删除旧配置。查看状态不写回迁移结果。
 
-nginx 的 QUIC 监听、`Alt-Svc`、节点 8/9 和输出说明使用同一次判定。节点 9 的下行 ALPN 已置于 `downloadSettings.tlsSettings.alpn=["h3"]`，外层 CDN 仍走 H2。本地检查通过不代表公网 UDP、客户端信任库或真实 H3 传输通过。节点 7 的 IPv6 split 路径问题和其它参数工作仍见 [参数契约](docs/PARAMETERS.md)。
+nginx 的 QUIC 监听、`Alt-Svc`、节点 8/9 和输出说明使用同一次判定。节点 9 的下行 ALPN 已置于 `downloadSettings.tlsSettings.alpn=["h3"]`，外层 CDN 仍走 H2。节点 7 保持 CDN 上行，仅 REALITY 下行使用 VPS IPv6。本地检查通过不代表公网 UDP、客户端信任库或真实 H3 传输通过；字段与兼容边界见 [参数契约](docs/PARAMETERS.md)。
 
 ### 一次性诊断
 
@@ -340,7 +347,20 @@ xtun show-links --qr --node 3
 
 - PNG 目录在 `/root/xtun-qr/`（`0700`），每条节点一张，文件名「位次-节点名.png」（`01-…` 到 `09-…`），随链接一起重新生成
 - 取回本地：`scp root@<本机 IP>:/root/xtun-qr/'*.png' .`
-- `qrencode` 由安装器安装；独立补齐缺失 PNG 与 NAS JSON 导出属于 W11.2/11.3，尚未交付。`apply-config` 会重建托管配置并应用服务，不属于查看或独立二维码重建
+- `qrencode` 由安装器安装；补齐丢失的二维码使用 `xtun rebuild-qr --yes`。当前文档与节点定义不一致时会停止，旧安装需先检查并显式执行参数迁移
+
+独立导出示例：
+
+```bash
+xtun export-client --node 3 --variant current --format uri --output /root/xtun-clients/node3.uri
+xtun export-client --node 3 --variant plain --format json --output /root/xtun-clients/node3.json
+xtun export-client --node 3 --variant ech --format png --output /root/xtun-clients/node3-ech.png \
+  --ech-config-list https://dns.alidns.com/dns-query
+```
+
+`current` 保留当前 ECH 选择；`plain` 省略 ECH，保留原有 VLESS Encryption；`ech` 只作用于节点 3/4/5/7/9 的 CDN TLS 层。未单独指定 ECH 来源时，优先保留已配置值，否则使用 AliDNS 查询真实 CDN 域名；这不表示已验证该域名或客户端网络支持 ECH。
+
+导出文件权限为 `0600`，新建父目录为 `0700`；目标存在时需显式 `--overwrite`。托管文件、符号链接、不支持组合、pending 或代次不一致会阻止导出。JSON 先经当前核心校验，再发布；导出不改 state、不重启服务。节点菜单 `j N` 可导出原生 JSON，适配官方固定镜像的 NAS 启动命令见 [验收手册](docs/TEST-VPS-RUNBOOK.md#43-debian-nas-的-xray-core-docker)。
 
 ### 常用变更
 
@@ -376,20 +396,25 @@ xtun version
 | --- | --- |
 | `restart` | 重启 xray、haproxy、nginx |
 | `repair-perms` | 修复托管配置、证书、日志权限并尝试重启 |
-| `upgrade [--xray-version vX.Y.Z]` | 升级 Xray core，校验发布 API / `.dgst` SHA256 |
-| `update-script` | 更新 `/usr/local/lib/xtun` bundle 和 `/usr/local/sbin/xtun` wrapper |
+| `upgrade [--xray-version vX.Y.Z] [--reinstall]` | 校验官方核心/geo 与安装身份，仅应用 Xray 服务 |
+| `update-script [--reinstall]` | 更新 `/usr/local/lib/xtun` bundle、安装回执和管理入口，不应用服务 |
 | `apply-net-opt` | 重新应用 Joey BBRv3 网络优化和 qdisc/sysctl 配置 |
 | `apply-config` | 按当前状态重新生成 xray / haproxy / nginx 托管配置 |
 | `version` | 打印脚本版本（也支持 `--version` / `-v`） |
 
-`update-script` 只换脚本 bundle，不会碰已经落盘的托管配置。所以升级脚本后想让新版模板里的参数生效，还要再跑一次：
+核心、脚本和参数是三个独立维护范围。`update-script` 只换 bundle；`upgrade` 只换核心和配套 geo。让新版模板生效需显式执行 `apply-config`，该步骤会重启 Xray。旧核心迁移到本轮参数基线的顺序为：
 
 ```bash
 xtun update-script
+xtun upgrade --xray-version v26.9.9
 xtun apply-config
 ```
 
-`apply-config` 走和 `change-*` 一样的备份、校验、重启、回滚流程，但不改节点参数，所以不会重刷部署文档。
+每一步有各自的预览、备份和恢复边界，三步不是一个整体事务。相同且可信的产物为 noop；同版本核心身份未知或字节/权限漂移时，先检查原因，再显式运行 `xtun upgrade --xray-version v26.9.9 --reinstall`。需要重装脚本时使用 `xtun update-script --reinstall`。
+
+`apply-config` 保留既有 UUID、REALITY 密钥、配对 Encryption、路径和已识别的客户端调优，同时重新生成托管配置、state、文档、PNG 与清单。目标核心支持时写出 `users` 和参数修订 `2`；旧核心保留兼容 `clients`。旧安装缺配对凭据或有效用户时停止，不靠重新生成身份补齐。导出到其它位置或已导入客户端的副本不会自动更新；参数或凭据变化后需要重新导出/导入。
+
+默认公开引导将 ref 解析为固定 commit，校验同一 commit 的完整归档和入口。自定义远程包须提供 SHA256；本地包记录本地来源。安装回执用于核对产物，不等同于上游签名。
 
 ### 从 1.0.x 升级到 1.1.0 的注意点
 
@@ -401,7 +426,7 @@ xtun apply-config
 
 ### 托管配置里的自定义片段
 
-`haproxy.cfg` 和 `/etc/nginx/conf.d/xtun.conf` 是整份重写的：每次 `change-*`、`apply-config`，以及自动跑的 `renew-cert`，都会按当前状态重新生成一遍。直接手工加的参数会被无声抹掉。
+`haproxy.cfg` 和 `/etc/nginx/conf.d/xtun.conf` 在完整配置应用（如 `apply-config`）时按当前状态重新生成；标记之外的手工参数会丢失。同域名续证或更换证书来源只更新证书及相关元数据，不重写这两份配置。
 
 要让手工调优活下来，把它写进生成器留出的标记之间：
 
@@ -433,7 +458,7 @@ xtun apply-config
 
 ### 变更时的重启与重载
 
-`change-*`、`apply-config`、`renew-cert` 应用完新配置后：
+完整配置应用（如 `apply-config`）的服务动作如下；局部变更按操作预览列出的范围执行：
 
 | 服务 | 动作 | 原因 |
 | --- | --- | --- |
@@ -443,7 +468,9 @@ xtun apply-config
 
 服务当前没在跑时才退回 `restart`。唯一例外是 fd 限额 drop-in 有变化时：`LimitNOFILE` 是进程 rlimit，reload 套不上，这一次会走 `daemon-reload` + `restart nginx`。
 
-`renew-cert` 装给 acme.sh 的续期钩子只 `reload nginx`，不碰 xray——这张证书只有 nginx 在用（Reality 有自己的密钥对，XHTTP 入站是挂在 nginx 后面的明文 h2c），重启 xray 只会把所有在跑的 Reality 会话白白掐断一次。钩子里的失败也不吞：acme.sh 会把 `reloadcmd` 的非 0 退出记成续期失败，「证书换了但没生效」正是该被看见的那一类失败。
+同域名 `renew-cert`、`change-cert-mode` 及自动 ACME 部署只 reload nginx，保留 Xray/HAProxy、节点 URI 和 PNG。候选证书先校验密钥、SAN、有效期、用途和信任链，再成对提升；重载后检查本地 TLS 监听实际提供的证书指纹。失败时恢复旧文件并核对旧证书重新供出，恢复不完整则保留 pending。
+
+人工续证和自动 `acme-deploy` 使用同一维护锁。已核对的 acme.sh 3.1.1 可能记录 reload 错误却返回成功，因此人工调用还必须收到本次候选摘要与 nonce 对应的回调确认；不能只凭 acme.sh 的退出码认定已部署。证书来源与结果记录在证书回执和事件文件，公共 ACME 的真实签发/自动续期仍需单独验收。
 
 ### nginx 的连接与 fd 限额
 

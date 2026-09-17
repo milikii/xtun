@@ -29,7 +29,7 @@ output_field_value() {
 
 state_file_key_allowed() {
   case "${1}" in
-    H3_INTENT)
+    H3_INTENT|PARAMETER_REVISION|CLIENT_TUNING_JSON|CLIENT_TUNING_SOURCE)
       return 0
       ;;
     STATE_VERSION|XRAY_VERSION_REQUEST|SERVER_IP|SERVER_IP6|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|NET_BBR_KERNEL|WARP_PRIVATE_KEY|WARP_ADDRESS_V4|WARP_ADDRESS_V6|WARP_PEER_PUBLIC_KEY|WARP_ENDPOINT|WARP_RESERVED|WARP_MTU|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|ROUTE_BLOCK_CN|NGINX_MAIN_MANAGED)
@@ -248,6 +248,9 @@ reset_loaded_runtime_context() {
   CF_DNS_ZONE_ID=""
   XHTTP_ECH_CONFIG_LIST=""
   XHTTP_ECH_FORCE_QUERY=""
+  PARAMETER_REVISION=""
+  CLIENT_TUNING_JSON=""
+  CLIENT_TUNING_SOURCE=""
   XHTTP_XPADDING_ENABLED=""
   XHTTP_XPADDING_KEY=""
   XHTTP_XPADDING_HEADER=""
@@ -362,9 +365,8 @@ load_existing_state() {
       migrate_state_v1_to_v2
     fi
   fi
-  if [[ "${XHTTP_ECH_CONFIG_LIST:-}" == "https://1.1.1.1/dns-query" && "${XHTTP_ECH_FORCE_QUERY:-}" == "none" ]]; then
-    XHTTP_ECH_CONFIG_LIST=""
-    XHTTP_ECH_FORCE_QUERY=""
+  if [[ -n "${XHTTP_ECH_FORCE_QUERY:-}" ]]; then
+    warn "旧 XHTTP_ECH_FORCE_QUERY 不属于核心有效字段，已忽略；原 ECH 配置保留。"
   fi
   load_h3_intent
 }
@@ -384,8 +386,31 @@ config_has_warp_outbound() {
   [[ "$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag')" == "WARP" ]]
 }
 
+# v26.9.9 的 clients 非 null 时优先于 users，包括空数组；不可用 // 偷换空数组语义。
+config_user_template() {
+  local tag="${1}"
+  if [[ ! -f "${XRAY_CONFIG_FILE}" ]]; then printf '{}'; return 0; fi
+  jq -ce --arg tag "${tag}" '
+    [.inbounds[]? | select(.tag == $tag)] | if length == 0 then {} else .[0].settings as $s |
+      (if $s.clients != null then $s.clients else $s.users end) as $users |
+      if ($users|type) != "array" or ($users|length) == 0 then error("no effective VLESS users")
+      else $users[0] | .flow = (if (.flow // "") == "" then ($s.flow // "") else .flow end) end
+    end' "${XRAY_CONFIG_FILE}"
+}
+
+xray_inbound_user_key() {
+  local version=""
+  version="$("${XRAY_BIN}" version 2>/dev/null | awk '/^Xray / {print "v" $2; exit}')" || return 1
+  if ! xray_valid_release_tag "${version}" || [[ "$(xray_version_rank "${version}")" < "$(xray_version_rank v26.9.9)" ]]; then
+    printf clients
+  else printf users; fi
+}
+
 load_config_runtime_context() {
-  REALITY_UUID="${REALITY_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .settings.clients[0].id')}"
+  local reality_user="" xhttp_user=""
+  reality_user="$(config_user_template reality-vision)" || { warn "无法识别有效 REALITY 用户，未从另一字段或 state 重建被清空的用户。"; return 1; }
+  xhttp_user="$(config_user_template xhttp-cdn)" || { warn "无法识别有效 XHTTP 用户，未从另一字段或 state 重建被清空的用户。"; return 1; }
+  REALITY_UUID="${REALITY_UUID:-$(jq -r '.id // empty' <<< "${reality_user}")}"
   REALITY_SNI="${REALITY_SNI:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.serverNames[0]')}"
   # 新版回落走 dokodemo-door，真实目标写在 reality-fallback 入站里；
   # v1 生成的 config.json 再退回 realitySettings.target，但那是 127.0.0.1:2444 时视为无效。
@@ -398,7 +423,7 @@ load_config_runtime_context() {
   fi
   REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.shortIds[0]')}"
   REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.privateKey')}"
-  XHTTP_UUID="${XHTTP_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')}"
+  XHTTP_UUID="${XHTTP_UUID:-$(jq -r '.id // empty' <<< "${xhttp_user}")}"
   XHTTP_PATH="${XHTTP_PATH:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')}"
   XHTTP_VLESS_DECRYPTION="${XHTTP_VLESS_DECRYPTION:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.decryption')}"
   TLS_ALPN="${TLS_ALPN:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.tlsSettings.alpn[0]')}"
@@ -420,10 +445,19 @@ load_config_runtime_context() {
 }
 
 load_output_runtime_context() {
+  local uri=""
   SERVER_IP="${SERVER_IP:-$(output_field_value '地址')}"
   NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value '节点名前缀')}"
   REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value '公钥')}"
+  if [[ -z "${REALITY_PUBLIC_KEY}" && -n "${REALITY_PRIVATE_KEY:-}" ]]; then
+    generate_reality_keys_if_needed || return 1
+  fi
   FINGERPRINT="${FINGERPRINT:-$(output_field_value '指纹')}"
+  if [[ -z "${XHTTP_VLESS_ENCRYPTION:-}" && -f "${OUTPUT_FILE}" ]]; then
+    uri="$(awk -v prefix="vless://${XHTTP_UUID}@" 'index($0,prefix)==1 {print; exit}' "${OUTPUT_FILE}")" || return 1
+    XHTTP_VLESS_ENCRYPTION="$(node_uri_query_value "${uri}" encryption)" || return 1
+  fi
+  load_client_tuning_context
 }
 
 normalize_runtime_defaults() {
@@ -462,8 +496,8 @@ load_managed_runtime_context() {
   # 托管上下文只在这里回填一次
   # UI 与 change-* 共用同一份事实来源
   # ------------------------------
-  load_config_runtime_context
-  load_output_runtime_context
+  load_config_runtime_context || return 1
+  load_output_runtime_context || return 1
   normalize_runtime_defaults
   sync_xhttp_vless_encryption_state
 }
@@ -472,7 +506,7 @@ load_dashboard_context() {
   load_existing_state
 
   [[ -f "${XRAY_CONFIG_FILE}" ]] || return 0
-  load_managed_runtime_context
+  load_managed_runtime_context || return 1
 }
 
 require_current_install_context() {
@@ -490,7 +524,7 @@ load_current_install_context() {
   load_existing_state
 
   [[ -f "${XRAY_CONFIG_FILE}" ]] || die "找不到当前 Xray 配置：${XRAY_CONFIG_FILE}"
-  load_managed_runtime_context
+  load_managed_runtime_context || return 1
   require_current_install_context
 }
 
@@ -533,11 +567,16 @@ write_state_kv() {
 }
 
 state_file_text() {
+  local client_tuning="${CLIENT_TUNING_JSON:-}"
+  [[ -n "${client_tuning}" ]] || client_tuning='{}'
   # ------------------------------
   # 状态文件统一走 shell 转义
   # 避免密钥或路径里的特殊字符污染 source
   # ------------------------------
   write_state_kv "STATE_VERSION" "${STATE_VERSION_CURRENT}"
+  write_state_kv "PARAMETER_REVISION" "${PARAMETER_REVISION_CURRENT}"
+  write_state_kv "CLIENT_TUNING_JSON" "${client_tuning}"
+  write_state_kv "CLIENT_TUNING_SOURCE" "${CLIENT_TUNING_SOURCE:-core-default}"
   write_state_kv "SERVER_IP" "${SERVER_IP}"
   write_state_kv "SERVER_IP6" "${SERVER_IP6}"
   write_state_kv "NODE_LABEL_PREFIX" "${NODE_LABEL_PREFIX}"
@@ -572,7 +611,6 @@ state_file_text() {
   write_state_kv "CF_DNS_ACCOUNT_ID" "${CF_DNS_ACCOUNT_ID}"
   write_state_kv "CF_DNS_ZONE_ID" "${CF_DNS_ZONE_ID}"
   write_state_kv "XHTTP_ECH_CONFIG_LIST" "${XHTTP_ECH_CONFIG_LIST}"
-  write_state_kv "XHTTP_ECH_FORCE_QUERY" "${XHTTP_ECH_FORCE_QUERY}"
   write_state_kv "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED}"
   write_state_kv "XHTTP_XPADDING_KEY" "${XHTTP_XPADDING_KEY}"
   write_state_kv "XHTTP_XPADDING_HEADER" "${XHTTP_XPADDING_HEADER}"

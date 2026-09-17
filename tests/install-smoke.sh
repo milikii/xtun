@@ -90,6 +90,16 @@ check_latest() {
     "${XRAY_SELECTED_COMMIT}" \
     "${XRAY_SELECTED_ARCHIVE_NAME}" \
     "${XRAY_SELECTED_EXPECTED_SHA256}"
+
+  # Use this same resolved archive for semantics and real native transfers.
+  # Do not install it over any host binary while checking latest.
+  local -a runner=()
+  if [[ "${EUID}" -ne 0 ]]; then runner=(sudo); fi
+  "${runner[@]}" env TEST_HOST_XRAY_BIN="${SMOKE_TMP_DIR}/xray/xray" \
+    TEST_HOST_XRAY_ASSET_DIR="${SMOKE_TMP_DIR}/xray" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" \
+    bash "${SCRIPT_ROOT}/tests/smoke.sh"
+  "${runner[@]}" python3 "${SCRIPT_ROOT}/tests/native-transport.py" \
+    --core "${SMOKE_TMP_DIR}/xray/xray" --assets "${SMOKE_TMP_DIR}/xray"
 }
 
 container_install() {
