@@ -173,8 +173,11 @@ port_listening_snapshot() {
     return 0
   fi
 
-  addresses="$(printf '%s\n' "${lines}" | awk '{print $4}' | sort -u | paste -sd, -)"
-  owners="$(printf '%s\n' "${lines}" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | sort -u | paste -sd, -)"
+  # LC_ALL=C：地址/归属的顺序是给人看的事实，但不该随宿主 locale 变。
+  # 用 en_US.UTF-8 时 sort 会把 127.0.0.1 排在 * 前面，同一台机器就出现两种
+  # 文案，测试与人工核对都对不上。按字节序固定下来。
+  addresses="$(printf '%s\n' "${lines}" | awk '{print $4}' | LC_ALL=C sort -u | paste -sd, -)"
+  owners="$(printf '%s\n' "${lines}" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | LC_ALL=C sort -u | paste -sd, -)"
   text="TCP 运行中 (${addresses})"
   if [[ -n "${owners}" ]]; then
     text="TCP 运行中 (${addresses} · ${owners})"

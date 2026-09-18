@@ -79,7 +79,7 @@ run_warp_enabled_case() {
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
   assert_contains '已启用: 是' "${OUTPUT_FILE}"
   assert_contains '## XHTTP 缓存绕过（重要）' "${OUTPUT_FILE}"
-  assert_contains '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
+  assert_contains '(http.host eq "cdn.example.com") and (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
   assert_contains '推荐操作步骤：' "${OUTPUT_FILE}"
   assert_contains 'Cache eligibility' "${OUTPUT_FILE}"
   [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 5 ]]
@@ -187,7 +187,7 @@ run_output_helper_case() {
   [[ "$(cloudflare_ssl_mode_text)" == "Full (strict)" ]]
   XHTTP_DOMAIN="cdn.example.com"
   XHTTP_PATH="/assets/v3"
-  [[ "$(cloudflare_xhttp_cache_bypass_expression)" == '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' ]]
+  [[ "$(cloudflare_xhttp_cache_bypass_expression)" == '(http.host eq "cdn.example.com") and (http.request.uri.path contains "/assets/v3")' ]]
 
   uri="$(build_node_objects | jq -c '.[] | select(.number==1)' | node_object_uri)"
   [[ "${uri}" == *"vless://${REALITY_UUID}@${SERVER_IP}:443"* ]]
@@ -421,6 +421,68 @@ run_user_block_marker_whitespace_case() {
   rm -rf "${workdir}"
 }
 
+run_cloudflare_cache_scope_case() {
+  local expression="" workdir="" site=""
+
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/api/v2/metrics"
+  expression="$(cloudflare_xhttp_cache_bypass_expression)"
+
+  # 必须是「本域名 且 本路径」。旧的 or 写法会让同 zone 里其它主机名只要命中同样
+  # 路径前缀也被绕过缓存，共享域名的站点会被默默改掉缓存行为。
+  [[ "${expression}" == '(http.host eq "cdn.example.com") and (http.request.uri.path contains "/api/v2/metrics")' ]]
+  [[ "${expression}" != *' or '* ]]
+
+  # 独立子域名与共享域名用同一表达式；不提供会扩大或缩小范围的替代写法。
+  XHTTP_DOMAIN="edge-tyo-03.example.com"
+  XHTTP_PATH="/assets/"
+  expression="$(cloudflare_xhttp_cache_bypass_expression)"
+  [[ "${expression}" == '(http.host eq "edge-tyo-03.example.com") and (http.request.uri.path contains "/assets/")' ]]
+
+  # B02 要求覆盖四种范围：其它主机同路径、本主机其它路径都不能命中，本主机本路径才命中。
+  # 这里用 python 的表达式求值把上述 AND 语义真的跑一遍，避免以后谁把 and 换成 or
+  # 只改文案却骗过纯字符串断言。
+  python3 - "${expression}" "${XHTTP_DOMAIN}" "${XHTTP_PATH}" <<'PY'
+import re
+import sys
+
+expression, domain, path = sys.argv[1], sys.argv[2], sys.argv[3]
+# 按 Cloudflare 规则本身的意思：host eq 是相等，uri.path contains 是子串包含。
+def evaluate(host, uri_path):
+    host_ok = host == domain
+    path_ok = path in uri_path
+    if re.search(r'\bor\b', expression):
+        return host_ok or path_ok
+    assert re.search(r'\band\b', expression), expression
+    return host_ok and path_ok
+
+assert evaluate(domain, path + "chunk"), "本主机本路径必须命中"
+assert not evaluate("other.example.com", path + "chunk"), "同 zone 其它主机同路径不得命中"
+assert not evaluate(domain, "/unrelated/path"), "本主机其它路径不得命中"
+assert not evaluate("other.example.com", "/unrelated/path")
+# 只有单边条件的请求在 or 下会误命中，在 and 下必须被排除。
+assert evaluate("other.example.com", path + "chunk") is False
+assert evaluate(domain, "/unrelated/path") is False
+print("cloudflare cache scope agrees")
+PY
+
+  # B01：伪装站不能再有指向不存在后端的行动入口，页面上要有一句真实说明。
+  workdir="$(mktemp -d)"
+  site="${workdir}/site"
+  FALLBACK_SITE_SOURCE_DIR="${ROOT_DIR}/static/fallback"
+  FALLBACK_SITE_DIR="${site}"
+  deploy_fallback_site >/dev/null
+  assert_absent '<form' "${site}/index.html"
+  assert_absent '<input' "${site}/index.html"
+  assert_absent '<button' "${site}/index.html"
+  assert_absent 'Subscribe' "${site}/index.html"
+  assert_contains '不收集邮箱' "${site}/index.html"
+  assert_contains 'Sources' "${site}/index.html"
+  # 样式里不能留下刚被删掉的表单类，否则 CSS 继续指向不存在的元素。
+  assert_absent '.form-row' "${site}/desk-assets/styles.css"
+  rm -rf "${workdir}"
+}
+
 run_fallback_site_deploy_case() {
   local workdir=""
 
@@ -436,6 +498,13 @@ run_fallback_site_deploy_case() {
   [[ -f "${FALLBACK_SITE_DIR}/desk-assets/styles.css" ]]
   [[ -f "${FALLBACK_SITE_DIR}/desk-assets/site.js" ]]
   grep -q 'AI Signals Review' "${FALLBACK_SITE_DIR}/index.html"
+  # B01：伪装站不得再出现无后端的订阅表单（表单 GET / 没有任何处理方）。
+  assert_absent '<form' "${FALLBACK_SITE_DIR}/index.html"
+  assert_absent '<input' "${FALLBACK_SITE_DIR}/index.html"
+  assert_absent '<button' "${FALLBACK_SITE_DIR}/index.html"
+  assert_absent 'Subscribe' "${FALLBACK_SITE_DIR}/index.html"
+  # 对应样式也别留成孤块，否则删表单后 CSS 会继续指向不存在的元素。
+  assert_absent '.form-row' "${FALLBACK_SITE_DIR}/desk-assets/styles.css"
 }
 
 run_xray_config_escape_case() {
@@ -740,7 +809,7 @@ run_output_no_subscription_block_case() {
   assert_absent 'mihomo' "${OUTPUT_FILE}"
   assert_absent 'change-sub-token' "${OUTPUT_FILE}"
   assert_absent '/sub/' "${OUTPUT_FILE}"
-  assert_contains '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
+  assert_contains '(http.host eq "cdn.example.com") and (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
 }
 
 run_node_link_entries_case() {

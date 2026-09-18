@@ -234,6 +234,7 @@ main() {
     run_install_cli_menu_parity_case
     run_install_menu_task_dispatch_case
     run_service_config_helper_case
+    run_cloudflare_cache_scope_case
     run_fallback_site_deploy_case
     run_user_block_preserve_case
     run_user_block_marker_whitespace_case

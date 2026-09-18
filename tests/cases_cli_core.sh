@@ -120,6 +120,13 @@ run_port_listening_snapshot_case() {
   [[ "$(listening_port_text 443)" == "TCP 运行中 (*:443,127.0.0.1:443 · haproxy,nginx)" ]]
   is_port_listening 443
 
+  # 地址/归属顺序不能跟着宿主 locale 变。开发机是 en_US.UTF-8，此时 sort 会把
+  # 127.0.0.1 排在 * 前面；没有 LC_ALL=C 时同一台机器会出现两种文案，"
+  # 「面板/诊断对不上」和「测试在本机红、在 CI 绿」都是这么来的。
+  if command -v locale >/dev/null 2>&1 && LC_ALL=en_US.UTF-8 locale charmap >/dev/null 2>&1; then
+    [[ "$(LC_ALL=en_US.UTF-8 port_listening_snapshot 443)" == "listening|TCP 运行中 (*:443,127.0.0.1:443 · haproxy,nginx)" ]]
+  fi
+
   # 读不到进程归属时只报地址，不编造归属
   ss() { printf '%s\n' 'LISTEN 0 511 *:443 *:*'; }
   [[ "$(port_listening_snapshot 443)" == "listening|TCP 运行中 (*:443)" ]]

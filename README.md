@@ -647,8 +647,12 @@ xtun renew-cert
 缓存规则表达式示例：
 
 ```text
-(http.host eq "cdn.example.com") or (http.request.uri.path contains "/your-xhttp-path")
+(http.host eq "cdn.example.com") and (http.request.uri.path contains "/your-xhttp-path")
 ```
+
+用 `and` 而不是 `or`：同一 zone 里若还有其它子域名，`or` 会让它们只要命中同样的路径
+也被一并绕过缓存。表达式已限定为「本域名 且 本路径」，共享 zone 与独立子域名都适用，
+也不需要为共享域名另写一套保守规则。
 
 面板路径：
 

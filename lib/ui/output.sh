@@ -107,7 +107,11 @@ cloudflare_ssl_mode_text() {
 }
 
 cloudflare_xhttp_cache_bypass_expression() {
-  printf '(http.host eq "%s") or (http.request.uri.path contains "%s")' \
+  # 只能用 AND。旧写法是 (host eq X) or (path contains P)，于是同一 zone 里
+  # 任何其它主机名只要命中同样的路径前缀都会被一并绕过缓存——共享域名的站点
+  # 会被悄悄改掉缓存行为。AND 对独立子域名和共享域名都正确：只覆盖本域名的
+  # XHTTP 路径。
+  printf '(http.host eq "%s") and (http.request.uri.path contains "%s")' \
     "${XHTTP_DOMAIN}" \
     "${XHTTP_PATH}"
 }
@@ -381,16 +385,17 @@ $(cloudflare_xhttp_cache_bypass_expression)
 7. 点击右侧的“编辑表达式”。
 8. 粘贴上面的表达式：
    作用：
-   - http.host eq "${XHTTP_DOMAIN}"：按整个 XHTTP 域名匹配。
-   - http.request.uri.path contains "${XHTTP_PATH}"：按 XHTTP 路径匹配。
+   - http.host eq "${XHTTP_DOMAIN}"：只匹配本 XHTTP 域名。
+   - http.request.uri.path contains "${XHTTP_PATH}"：只匹配 XHTTP 路径。
+   两个条件是 AND：其它主机名即使命中同样路径也不会被影响。
 9. 在规则动作里找到 Cache eligibility。
 10. 将 Cache eligibility 设置为 Bypass cache。
 11. 保存并点击 部署。
 
 补充建议：
 
-- 如果 ${XHTTP_DOMAIN} 是专门给 XHTTP 使用的独立子域名，按整个 Host 绕过缓存通常最省事。
-- 如果这个域名还承载了别的静态资源，建议保留上面的路径条件，避免把整站缓存一起关掉。
+- 表达式已是「本域名 且 本路径」，共享 zone 下的其它站点不会被误伤，独立子域名直接用即可，无需改写。
+- 若该域名还承载别的静态资源：路径条件已把绕过范围限制在 XHTTP 路径，其余路径继续走正常缓存。
 - 修改完成后，建议用新的 XHTTP 链接重新测试，避免客户端还在复用旧连接。
 EOF
 }
