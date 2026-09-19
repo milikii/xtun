@@ -472,6 +472,8 @@ CI 的官方容器检查验证实际导出的 JSON、固定镜像和 SOCKS 启�
 <a id="d40"></a>
 ### D40：接管宿主已有的 xray.service 与核心必须登记并可还原
 
-安装到一台已经有自己 Xray 服务的机器时，`/etc/systemd/system/xray.service` 与 `/usr/local/bin/xray` 属于别人，不是 xtun 的产物。首次接管必须登记原件与当时的启用/运行状态；卸载时按登记**还原**这两条路径并报告结果，只有确认是 xtun 自己创建的（`existed=0`）才删除，且不因还原成功改变原动作的失败码。安装摘要应说明发生了接管，不能静默覆盖。
+安装到一台已经有自己 Xray 服务的机器时，`/etc/systemd/system/xray.service` 与 `/usr/local/bin/xray` 属于别人，不是 xtun 的产物。首次接管必须登记原件与当时的启用/运行状态；卸载时按登记**还原**这些路径并报告结果，只有确认是 xtun 自己创建的（`existed=0`）才删除，且不因还原成功改变原动作的失败码。
 
-宿主服务依赖的运行目录（例如其 unit 的 `ReadWritePaths` 指向的 `/var/log/xray`、`/var/lib/xray`）属于同一边界：接管前已存在就应登记并在卸载时还原，不能让还原后的服务因为目录消失而起不来。目录接管已补齐——`record_takeover_original` 对目录用 `mktemp -d`，`restore_takeover_original` 增加目录分支（先拷临时目录校验，再移除目标改名）。依据 H31–H33 与 D11/D20.1/D20.4。
+接管范围包括宿主服务依赖的运行目录与资源/配置目录（`/var/log/xray`、`/var/lib/xray`、`/usr/local/share/xray`、`/usr/local/etc/xray`）：接管前已存在就应登记并在卸载时还原，不能让还原后的服务因为目录消失而起不来。目录接管已补齐——`record_takeover_original` 对目录用 `mktemp -d`，`restore_takeover_original` 增加目录分支（先拷临时目录校验，再移除目标改名）。
+
+**安装前必须告知**：只读检查的「端口与资源归属」要列出安装前已存在、会被接管的托管路径（unit 附 enabled/active 状态），安装摘要同时给出一行接管说明；不能只报端口占用，也不能静默覆盖。依据 H31–H33 与 D11/D20.1/D20.4。

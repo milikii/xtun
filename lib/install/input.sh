@@ -555,6 +555,39 @@ install_resource_ownership_report() {
     printf '  nginx 主配置: 不接管；worker_connections/fd 限额保持系统现状，\n'
     printf '               需要时执行 xtun apply-config --manage-nginx-main（会先展示原件与影响）。\n'
   fi
+
+  install_takeover_report
+}
+
+# 安装前已存在、会被本次接管并在卸载时还原的托管路径。端口占用只能说明"有东西
+# 在监听"，说明不了用户自己的 unit/核心/目录会被替换；这一项必须在确认前说清楚，
+# 否则就是静默接管（D40）。
+install_takeover_path_list() {
+  local path=""
+  local suffix=""
+
+  for path in "${XRAY_SERVICE_FILE}" "${XRAY_BIN}" "${XRAY_ASSET_DIR}" \
+    "${XRAY_CONFIG_DIR}" "${XRAY_LOG_DIR}" "${XRAY_STATE_DIR}"; do
+    [[ -n "${path}" ]] || continue
+    [[ -e "${path}" || -L "${path}" ]] || continue
+    suffix=""
+    if [[ "${path}" == "${XRAY_SERVICE_FILE}" ]]; then
+      suffix="（$(service_enable_state "xray.service")/$(service_active_state "xray.service")）"
+    fi
+    printf '%s%s\n' "${path}" "${suffix}"
+  done
+}
+
+install_takeover_report() {
+  local list=""
+  local line=""
+
+  list="$(install_takeover_path_list)"
+  [[ -n "${list}" ]] || return 0
+  printf '  待接管（安装前已存在；卸载时会按登记还原）:\n'
+  while IFS= read -r line; do
+    printf '    %s\n' "${line}"
+  done <<< "${list}"
 }
 
 install_readonly_prechecks() {
@@ -656,6 +689,9 @@ install_summary_text() {
   install_summary_line "      拦截回国=$(yes_no_text "${ROUTE_BLOCK_CN:-no}") WARP=$(yes_no_text "${ENABLE_WARP:-no}")"
   install_summary_line "H3: $(h3_intent_text)；应用前核对模块/证书/UDP，条件不足会失败并恢复。"
   install_summary_line "影响: 安装/更新依赖包；写入托管配置与服务单元；重启托管服务；写 state 与节点链接。"
+  if [[ -n "$(install_takeover_path_list)" ]]; then
+    install_summary_line "接管: 覆盖安装前已存在的托管路径，卸载时按登记还原（清单见上方端口与资源归属）。"
+  fi
   install_summary_line "说明: 自动凭据（UUID/短ID/路径）本次只生成一次；重试与重建不会更换。"
   if [[ "${NGINX_MAIN_MANAGED:-no}" != "yes" ]]; then
     install_summary_line "说明: 未接管 nginx 主配置，连接数上限保持现状（见上方端口与资源归属）。"

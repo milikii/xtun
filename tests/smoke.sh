@@ -371,6 +371,7 @@ main() {
     run_uninstall_ownership_case
     run_uninstall_takeover_restore_case
     run_xray_takeover_record_case
+    run_install_takeover_notice_case
     run_install_no_ipv6_case
     run_switch_conflict_case
     run_address_validation_case

@@ -806,24 +806,28 @@ uninstall_cmd() {
   local xray_bin_preexisted=0
   local xray_log_preexisted=0
   local xray_state_preexisted=0
+  local xray_asset_preexisted=0
+  local xray_config_preexisted=0
   if [[ -e "$(takeover_original_record_file)" || -L "$(takeover_original_record_file)" ]]; then
     xray_service_preexisted="$(takeover_original_existed "${XRAY_SERVICE_FILE}" 2>/dev/null || printf '0')"
     xray_bin_preexisted="$(takeover_original_existed "${XRAY_BIN}" 2>/dev/null || printf '0')"
     xray_log_preexisted="$(takeover_original_existed "${XRAY_LOG_DIR}" 2>/dev/null || printf '0')"
     xray_state_preexisted="$(takeover_original_existed "${XRAY_STATE_DIR}" 2>/dev/null || printf '0')"
+    xray_asset_preexisted="$(takeover_original_existed "${XRAY_ASSET_DIR}" 2>/dev/null || printf '0')"
+    xray_config_preexisted="$(takeover_original_existed "${XRAY_CONFIG_DIR}" 2>/dev/null || printf '0')"
   fi
 
   managed_paths=(
     "${SELF_COMMAND_PATH}"
     "${SELF_INSTALL_DIR}"
-    "${XRAY_CONFIG_DIR}"
-    "${XRAY_ASSET_DIR}"
     "${WARP_RULES_FILE}"
     "${XRAY_LOGROTATE_FILE}"
   )
-  # 只有确认是 xtun 自己创建的核心与 unit 才删除；接管来的留给下面的还原分支。
+  # 只有确认是 xtun 自己创建的核心、unit、资源/配置目录才删除；接管来的留给还原分支。
   [[ "${xray_bin_preexisted}" == 1 ]] || managed_paths+=("${XRAY_BIN}")
   [[ "${xray_service_preexisted}" == 1 ]] || managed_paths+=("${XRAY_SERVICE_FILE}")
+  [[ "${xray_asset_preexisted}" == 1 ]] || managed_paths+=("${XRAY_ASSET_DIR}")
+  [[ "${xray_config_preexisted}" == 1 ]] || managed_paths+=("${XRAY_CONFIG_DIR}")
   if [[ "${haproxy_shared}" -eq 0 || "${haproxy_config_remove}" -eq 1 ]]; then
     managed_paths+=("${HAPROXY_CONFIG}")
   fi
@@ -879,6 +883,22 @@ uninstall_cmd() {
     else
       warn "xray 状态目录的首次原件或登记校验失败，保留原件副本与登记表。"
       UNINSTALL_UNCONFIRMED+=("${XRAY_STATE_DIR}（接管前已存在，但还原失败）")
+    fi
+  fi
+  if [[ "${xray_asset_preexisted}" == 1 ]]; then
+    if restore_takeover_original "${XRAY_ASSET_DIR}"; then
+      UNINSTALL_KEPT+=("${XRAY_ASSET_DIR}（已还原安装前的资源目录）")
+    else
+      warn "xray 资源目录的首次原件或登记校验失败，保留原件副本与登记表。"
+      UNINSTALL_UNCONFIRMED+=("${XRAY_ASSET_DIR}（接管前已存在，但还原失败）")
+    fi
+  fi
+  if [[ "${xray_config_preexisted}" == 1 ]]; then
+    if restore_takeover_original "${XRAY_CONFIG_DIR}"; then
+      UNINSTALL_KEPT+=("${XRAY_CONFIG_DIR}（已还原安装前的配置目录）")
+    else
+      warn "xray 配置目录的首次原件或登记校验失败，保留原件副本与登记表。"
+      UNINSTALL_UNCONFIRMED+=("${XRAY_CONFIG_DIR}（接管前已存在，但还原失败）")
     fi
   fi
 

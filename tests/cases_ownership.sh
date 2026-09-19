@@ -674,20 +674,27 @@ run_uninstall_takeover_restore_case() {
     "${ORIGINALS_ROOT}/service-state" "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}"
   printf 'foreign-xray-unit\n' > "$(takeover_original_path "${XRAY_SERVICE_FILE}")"
   printf 'foreign-xray-core\n' > "$(takeover_original_path "${XRAY_BIN}")"
-  mkdir -p "$(takeover_original_path "${XRAY_LOG_DIR}")" "$(takeover_original_path "${XRAY_STATE_DIR}")"
+  mkdir -p "$(takeover_original_path "${XRAY_LOG_DIR}")" "$(takeover_original_path "${XRAY_STATE_DIR}")" \
+    "$(takeover_original_path "${XRAY_ASSET_DIR}")" "$(takeover_original_path "${XRAY_CONFIG_DIR}")"
   printf 'foreign-log\n' > "$(takeover_original_path "${XRAY_LOG_DIR}")/error.log"
   printf 'foreign-state\n' > "$(takeover_original_path "${XRAY_STATE_DIR}")/state.db"
+  printf 'foreign-geo\n' > "$(takeover_original_path "${XRAY_ASSET_DIR}")/geoip.dat"
+  printf 'foreign-config\n' > "$(takeover_original_path "${XRAY_CONFIG_DIR}")/config.json"
   printf 'xtun-xray-unit\n' > "${XRAY_SERVICE_FILE}"
   printf 'xtun-xray-core\n' > "${XRAY_BIN}"
-  mkdir -p "${XRAY_LOG_DIR}" "${XRAY_STATE_DIR}"
+  mkdir -p "${XRAY_LOG_DIR}" "${XRAY_STATE_DIR}" "${XRAY_ASSET_DIR}" "${XRAY_CONFIG_DIR}"
   printf 'xtun-log\n' > "${XRAY_LOG_DIR}/error.log"
   printf 'xtun-state\n' > "${XRAY_STATE_DIR}/state.db"
+  printf 'xtun-geo\n' > "${XRAY_ASSET_DIR}/geoip.dat"
+  printf 'xtun-config\n' > "${XRAY_CONFIG_DIR}/config.json"
   printf '{"xray":true}\n' > "${XRAY_CONFIG_FILE}"
 
   service_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_SERVICE_FILE}")")"
   binary_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_BIN}")")"
   log_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_LOG_DIR}")")"
   state_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_STATE_DIR}")")"
+  asset_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_ASSET_DIR}")")"
+  config_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_CONFIG_DIR}")")"
   {
     printf '# xtun-takeover-manifest\tv2\n'
     # nginx/haproxy 记为 xtun 自己装的（existed=0），避免走进共享 HAProxy 分支
@@ -697,6 +704,8 @@ run_uninstall_takeover_restore_case() {
     printf '%s\t1\t2026-09-19T00:00:00Z\t%s\n' "${XRAY_BIN}" "${binary_digest}"
     printf '%s\t1\t2026-09-19T00:00:00Z\t%s\n' "${XRAY_LOG_DIR}" "${log_digest}"
     printf '%s\t1\t2026-09-19T00:00:00Z\t%s\n' "${XRAY_STATE_DIR}" "${state_digest}"
+    printf '%s\t1\t2026-09-19T00:00:00Z\t%s\n' "${XRAY_ASSET_DIR}" "${asset_digest}"
+    printf '%s\t1\t2026-09-19T00:00:00Z\t%s\n' "${XRAY_CONFIG_DIR}" "${config_digest}"
   } > "${ORIGINALS_ROOT}/manifest.tsv"
   # 接管前 xray.service 是启用且运行中的
   printf 'ENABLED=enabled\nACTIVE=active\n' > "${ORIGINALS_ROOT}/service-state/xray.service.state"
@@ -734,12 +743,58 @@ run_uninstall_takeover_restore_case() {
   [[ "$(cat "${XRAY_LOG_DIR}/error.log")" == 'foreign-log' ]]
   [[ "$(cat "${XRAY_STATE_DIR}/state.db")" == 'foreign-state' ]]
   [[ ! -e "${XRAY_LOG_DIR}/xtun-log" ]]
+  # 资源目录与配置目录同样还原
+  [[ "$(cat "${XRAY_ASSET_DIR}/geoip.dat")" == 'foreign-geo' ]]
+  [[ "$(cat "${XRAY_CONFIG_DIR}/config.json")" == 'foreign-config' ]]
   # 启用/运行状态按接管前记录恢复
   grep -q '^enable$' "${workdir}/systemctl.log"
   grep -q '^start$' "${workdir}/systemctl.log"
   # 报告要说明这两条是还原的
   [[ "${output}" == *"已还原安装前的 xray.service"* ]]
   [[ "${output}" == *"已还原安装前的核心二进制"* ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# D40：安装前必须告知"哪些已有的托管路径会被接管"，不能只报端口占用。
+run_install_takeover_notice_case() {
+  local workdir=""
+  local output=""
+
+  load_functions
+  workdir="$(mktemp -d)"
+
+  XRAY_SERVICE_FILE="${workdir}/etc/systemd/system/xray.service"
+  XRAY_BIN="${workdir}/usr/local/bin/xray"
+  XRAY_ASSET_DIR="${workdir}/usr/local/share/xray"
+  XRAY_CONFIG_DIR="${workdir}/usr/local/etc/xray"
+  XRAY_LOG_DIR="${workdir}/var/log/xray"
+  XRAY_STATE_DIR="${workdir}/var/lib/xray"
+  SYSTEMD_UNIT_DIRS=("${workdir}/etc/systemd/system")
+  mkdir -p "$(dirname "${XRAY_BIN}")" "${SYSTEMD_UNIT_DIRS[0]}"
+
+  # 这些路径都不存在时不应产生"待接管"段落
+  output="$(install_takeover_report)"
+  [[ -z "${output}" ]]
+
+  printf 'foreign-unit\n' > "${XRAY_SERVICE_FILE}"
+  printf 'foreign-core\n' > "${XRAY_BIN}"
+  systemctl() {
+    case "$*" in
+      'show xray.service -p UnitFileState --value') printf 'enabled\n' ;;
+      'show xray.service -p ActiveState --value') printf 'active\n' ;;
+    esac
+    return 0
+  }
+
+  output="$(install_takeover_report)"
+  [[ "${output}" == *'待接管（安装前已存在；卸载时会按登记还原）'* ]]
+  [[ "${output}" == *"${XRAY_SERVICE_FILE}（enabled/active）"* ]]
+  [[ "${output}" == *"${XRAY_BIN}"* ]]
+  # 没创建的路径不能列进来
+  [[ "${output}" != *"${XRAY_LOG_DIR}"* ]]
+  [[ "${output}" != *"${XRAY_CONFIG_DIR}"* ]]
 
   rm -rf "${workdir}"
   load_functions
@@ -759,13 +814,18 @@ run_xray_takeover_record_case() {
   XRAY_SERVICE_FILE="${workdir}/etc/systemd/system/xray.service"
   XRAY_LOG_DIR="${workdir}/var/log/xray"
   XRAY_STATE_DIR="${workdir}/var/lib/xray"
+  XRAY_ASSET_DIR="${workdir}/usr/local/share/xray"
+  XRAY_CONFIG_DIR="${workdir}/usr/local/etc/xray"
   SYSTEMD_UNIT_DIRS=("${workdir}/etc/systemd/system")
 
-  mkdir -p "$(dirname "${XRAY_BIN}")" "${SYSTEMD_UNIT_DIRS[0]}" "${XRAY_LOG_DIR}" "${XRAY_STATE_DIR}"
+  mkdir -p "$(dirname "${XRAY_BIN}")" "${SYSTEMD_UNIT_DIRS[0]}" "${XRAY_LOG_DIR}" "${XRAY_STATE_DIR}" \
+    "${XRAY_ASSET_DIR}" "${XRAY_CONFIG_DIR}"
   printf 'foreign-xray-unit\n' > "${XRAY_SERVICE_FILE}"
   printf 'foreign-xray-core\n' > "${XRAY_BIN}"
   printf 'foreign-log\n' > "${XRAY_LOG_DIR}/error.log"
   printf 'foreign-state\n' > "${XRAY_STATE_DIR}/state.db"
+  printf 'foreign-geo\n' > "${XRAY_ASSET_DIR}/geoip.dat"
+  printf 'foreign-config\n' > "${XRAY_CONFIG_DIR}/config.json"
 
   systemctl() {
     case "$*" in
@@ -790,10 +850,14 @@ run_xray_takeover_record_case() {
   [[ "$(takeover_original_existed "${XRAY_BIN}")" == 1 ]]
   [[ "$(takeover_original_existed "${XRAY_LOG_DIR}")" == 1 ]]
   [[ "$(takeover_original_existed "${XRAY_STATE_DIR}")" == 1 ]]
+  [[ "$(takeover_original_existed "${XRAY_ASSET_DIR}")" == 1 ]]
+  [[ "$(takeover_original_existed "${XRAY_CONFIG_DIR}")" == 1 ]]
   [[ "$(cat "$(takeover_original_path "${XRAY_SERVICE_FILE}")")" == 'foreign-xray-unit' ]]
   [[ "$(cat "$(takeover_original_path "${XRAY_BIN}")")" == 'foreign-xray-core' ]]
   [[ "$(cat "$(takeover_original_path "${XRAY_LOG_DIR}")/error.log")" == 'foreign-log' ]]
   [[ "$(cat "$(takeover_original_path "${XRAY_STATE_DIR}")/state.db")" == 'foreign-state' ]]
+  [[ "$(cat "$(takeover_original_path "${XRAY_ASSET_DIR}")/geoip.dat")" == 'foreign-geo' ]]
+  [[ "$(cat "$(takeover_original_path "${XRAY_CONFIG_DIR}")/config.json")" == 'foreign-config' ]]
   # 接管前的启用/运行状态被记下来
   grep -q '^ENABLED=enabled$' "${ORIGINALS_ROOT}/service-state/xray.service.state"
   grep -q '^ACTIVE=active$' "${ORIGINALS_ROOT}/service-state/xray.service.state"
