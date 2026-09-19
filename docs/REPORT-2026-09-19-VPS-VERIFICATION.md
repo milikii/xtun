@@ -141,5 +141,5 @@ bash xtun.sh install --non-interactive --task fresh \
 ## 9. 证据位置
 
 - 测试 VPS（私有）：`/root/xtun-evidence/`（`smoke-clean.log`、`pty-install.log`、`pty-menu.log`、`native/summary.json`、`migration.log`、各恢复套件日志、`results.txt`、`results-final.txt`、`maintenance.log`）。
-- 本机副本（私有）：`/root/xtun-vps-backups/evidence-172.239.117.239-20260919/`。
+- 本机精简副本（私有）：`/root/xtun-vps-backups/evidence-172.239.117.239-20260919/`（各套件日志、`results.txt`/`results-final.txt`、`native/summary.json`、PTY `results.json`、维护快照；不含每用例重复 37 MB 核心的沙箱目录）。
 - 宿主备份与还原步骤（私有）：`/root/xtun-voxi-backup-20260919-072403/RESTORE.md`（VPS）与 `/root/xtun-vps-backups/xtun-voxi-backup-20260919-072403/`（本机）。
