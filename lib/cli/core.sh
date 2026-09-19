@@ -804,9 +804,13 @@ uninstall_cmd() {
   # 这两条路径属于别人，卸载要还原而不是删除（D11/D20.4，复核 H31/H32）。
   local xray_service_preexisted=0
   local xray_bin_preexisted=0
+  local xray_log_preexisted=0
+  local xray_state_preexisted=0
   if [[ -e "$(takeover_original_record_file)" || -L "$(takeover_original_record_file)" ]]; then
     xray_service_preexisted="$(takeover_original_existed "${XRAY_SERVICE_FILE}" 2>/dev/null || printf '0')"
     xray_bin_preexisted="$(takeover_original_existed "${XRAY_BIN}" 2>/dev/null || printf '0')"
+    xray_log_preexisted="$(takeover_original_existed "${XRAY_LOG_DIR}" 2>/dev/null || printf '0')"
+    xray_state_preexisted="$(takeover_original_existed "${XRAY_STATE_DIR}" 2>/dev/null || printf '0')"
   fi
 
   managed_paths=(
@@ -834,10 +838,11 @@ uninstall_cmd() {
     "${ACME_RELOAD_HELPER}"
     "${OUTPUT_FILE}"
     "${QR_OUTPUT_DIR}"
-    "${XRAY_LOG_DIR}"
-    "${XRAY_STATE_DIR}"
     "${OP_LOG_DIR}"
   )
+  # 宿主服务预先存在的日志/状态目录同样只还原、不删除（H33）。
+  [[ "${xray_log_preexisted}" == 1 ]] || managed_paths+=("${XRAY_LOG_DIR}")
+  [[ "${xray_state_preexisted}" == 1 ]] || managed_paths+=("${XRAY_STATE_DIR}")
   # 删不掉就别往下报「已卸载」：config.json 和证书里有机密，留在盘上而用户以为
   # 已经清干净了，是这条命令上最糟的结果。重跑一次是幂等的。
   remove_managed_paths "${managed_paths[@]}" || return 1
@@ -858,6 +863,22 @@ uninstall_cmd() {
     else
       warn "xray 核心的首次原件或登记校验失败，保留原件副本与登记表。"
       UNINSTALL_UNCONFIRMED+=("${XRAY_BIN}（接管前已存在，但还原失败）")
+    fi
+  fi
+  if [[ "${xray_log_preexisted}" == 1 ]]; then
+    if restore_takeover_original "${XRAY_LOG_DIR}"; then
+      UNINSTALL_KEPT+=("${XRAY_LOG_DIR}（已还原安装前的日志目录）")
+    else
+      warn "xray 日志目录的首次原件或登记校验失败，保留原件副本与登记表。"
+      UNINSTALL_UNCONFIRMED+=("${XRAY_LOG_DIR}（接管前已存在，但还原失败）")
+    fi
+  fi
+  if [[ "${xray_state_preexisted}" == 1 ]]; then
+    if restore_takeover_original "${XRAY_STATE_DIR}"; then
+      UNINSTALL_KEPT+=("${XRAY_STATE_DIR}（已还原安装前的状态目录）")
+    else
+      warn "xray 状态目录的首次原件或登记校验失败，保留原件副本与登记表。"
+      UNINSTALL_UNCONFIRMED+=("${XRAY_STATE_DIR}（接管前已存在，但还原失败）")
     fi
   fi
 

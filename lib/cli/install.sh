@@ -269,6 +269,10 @@ install_xray_runtime() {
   # 不再直接删掉用户原来的核心（复核 H32）。
   record_takeover_original "${XRAY_BIN}" || return 1
   backup_path "${XRAY_ASSET_DIR}" || return 1
+  # 宿主服务用的日志/状态目录（例如别人家的 xray.service 把 ReadWritePaths 指到
+  # /var/log/xray、/var/lib/xray）：卸载直接删会让还原后的服务起不来（复核 H33）。
+  record_takeover_original "${XRAY_LOG_DIR}" || return 1
+  record_takeover_original "${XRAY_STATE_DIR}" || return 1
   install_xray || return 1
   ensure_xray_bind_capability || return 1
   ensure_xray_user || return 1

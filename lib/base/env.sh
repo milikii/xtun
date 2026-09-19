@@ -703,13 +703,31 @@ restore_takeover_original() {
   takeover_original_verify "${path}" || return 1
   original="$(takeover_original_path "${path}")"
   mkdir -p "$(dirname "${path}")" || return 1
-  temporary="$(mktemp "$(dirname "${path}")/.$(basename "${path}").restore.XXXXXX")" || return 1
-  if ! cp -aT -- "${original}" "${temporary}" \
-    || [[ "$(backup_file_digest "${temporary}")" != "$(backup_file_digest "${original}")" ]] \
-    || [[ "$(stat -c '%a:%u:%g' "${temporary}")" != "$(stat -c '%a:%u:%g' "${original}")" ]] \
-    || ! sync_required_path "${temporary}" || ! mv -fT -- "${temporary}" "${path}"; then
-    rm -f "${temporary}"
-    return 1
+  # 目录与文件分两条路：mktemp 默认建普通文件，`cp -aT 目录 文件` 会失败；
+  # 而且 mv 不能覆盖已存在的非空目录。目录先把原件拷进临时目录、校验通过后
+  # 再移除目标并改名——原件副本与登记表仍在，中途失败按未确认上报，不静默丢数据。
+  if [[ -d "${original}" && ! -L "${original}" ]]; then
+    temporary="$(mktemp -d "$(dirname "${path}")/.$(basename "${path}").restore.XXXXXX")" || return 1
+    if ! cp -aT -- "${original}" "${temporary}" \
+      || [[ "$(backup_file_digest "${temporary}")" != "$(backup_file_digest "${original}")" ]] \
+      || [[ "$(stat -c '%a:%u:%g' "${temporary}")" != "$(stat -c '%a:%u:%g' "${original}")" ]] \
+      || ! sync_required_path "${temporary}"; then
+      rm -rf -- "${temporary}"
+      return 1
+    fi
+    if ! rm -rf -- "${path}" || ! mv -fT -- "${temporary}" "${path}"; then
+      rm -rf -- "${temporary}"
+      return 1
+    fi
+  else
+    temporary="$(mktemp "$(dirname "${path}")/.$(basename "${path}").restore.XXXXXX")" || return 1
+    if ! cp -aT -- "${original}" "${temporary}" \
+      || [[ "$(backup_file_digest "${temporary}")" != "$(backup_file_digest "${original}")" ]] \
+      || [[ "$(stat -c '%a:%u:%g' "${temporary}")" != "$(stat -c '%a:%u:%g' "${original}")" ]] \
+      || ! sync_required_path "${temporary}" || ! mv -fT -- "${temporary}" "${path}"; then
+      rm -f "${temporary}"
+      return 1
+    fi
   fi
   sync_required_path "${path}"
 }
@@ -741,10 +759,15 @@ record_takeover_original() {
   chmod 0700 "${ORIGINALS_ROOT}" || return 1
   if [[ -e "${path}" || -L "${path}" ]]; then
     if [[ ! -e "${original}" && ! -L "${original}" ]]; then
-      temporary="$(mktemp "${original}.tmp.XXXXXX")" || return 1
+      # 目录要建临时目录：mktemp 默认建普通文件，`cp -aT 目录 文件` 会直接失败。
+      if [[ -d "${path}" && ! -L "${path}" ]]; then
+        temporary="$(mktemp -d "${original}.tmp.XXXXXX")" || return 1
+      else
+        temporary="$(mktemp "${original}.tmp.XXXXXX")" || return 1
+      fi
       if ! cp -aT -- "${path}" "${temporary}" || ! sync_required_path "${temporary}" \
         || ! mv -fT -- "${temporary}" "${original}" || ! sync_required_path "$(dirname "${original}")"; then
-        rm -f "${temporary}"
+        rm -rf -- "${temporary}"
         return 1
       fi
     else
