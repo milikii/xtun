@@ -265,6 +265,9 @@ install_xray_runtime() {
   install_packages || return 1
   install_self_command || return 1
   backup_path "${XRAY_BIN}" || return 1
+  # 宿主自带的 /usr/local/bin/xray（别人的核心）也按首次接管登记；卸载时还原，
+  # 不再直接删掉用户原来的核心（复核 H32）。
+  record_takeover_original "${XRAY_BIN}" || return 1
   backup_path "${XRAY_ASSET_DIR}" || return 1
   install_xray || return 1
   ensure_xray_bind_capability || return 1

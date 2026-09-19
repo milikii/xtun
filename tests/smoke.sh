@@ -369,6 +369,8 @@ main() {
     run_package_origin_metadata_failure_case
     run_nginx_original_restore_case
     run_uninstall_ownership_case
+    run_uninstall_takeover_restore_case
+    run_xray_takeover_record_case
     run_install_no_ipv6_case
     run_switch_conflict_case
     run_address_validation_case

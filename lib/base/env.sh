@@ -765,6 +765,52 @@ takeover_original_existed() {
   takeover_manifest_field "${1}" 2
 }
 
+# 接管一个「原本属于别人」的 systemd unit 时，光记住文件还不够：卸载只还原文件、
+# 不还原当时的启用/运行状态，用户的服务会静静地不上线。首次接管时记一次，
+# 之后不再改写（和原件一样只认第一次）。状态与原件同放在 xtun 私有目录，
+# 卸载确认还原成功后才随 ORIGINALS_ROOT 一起清理。
+takeover_service_state_file() {
+  printf '%s/service-state/%s.state' "${ORIGINALS_ROOT}" "${1}"
+}
+
+record_takeover_original_service_state() {
+  local unit_name="${1}"
+  local state_file=""
+  local directory=""
+
+  state_file="$(takeover_service_state_file "${unit_name}")"
+  if [[ -e "${state_file}" || -L "${state_file}" ]]; then return 0; fi
+  directory="$(dirname "${state_file}")"
+  [[ ! -L "${ORIGINALS_ROOT}" ]] || return 1
+  mkdir -p "${directory}" || return 1
+  chmod 0700 "${directory}" 2>/dev/null || true
+  printf 'ENABLED=%s\nACTIVE=%s\n' \
+    "$(service_enable_state "${unit_name}")" \
+    "$(service_active_state "${unit_name}")" > "${state_file}" || return 1
+}
+
+restore_takeover_original_service_state() {
+  local unit_name="${1}"
+  local state_file=""
+  local enabled=""
+  local active=""
+
+  state_file="$(takeover_service_state_file "${unit_name}")"
+  [[ -f "${state_file}" && ! -L "${state_file}" ]] || return 1
+  enabled="$(sed -n 's/^ENABLED=//p' "${state_file}" | head -n 1)"
+  active="$(sed -n 's/^ACTIVE=//p' "${state_file}" | head -n 1)"
+  [[ -n "${enabled}" && -n "${active}" ]] || return 1
+  case "${enabled}" in
+    enabled) systemctl enable "${unit_name}" >/dev/null 2>&1 || return 1 ;;
+    # installed / not-installed：接管前本来就没启用，保持不启用即可
+    # （xtun 的 unit 在卸载服务循环里已经 disable 过）。
+    *) : ;;
+  esac
+  if [[ "${active}" == "active" ]]; then
+    systemctl start "${unit_name}" >/dev/null 2>&1 || return 1
+  fi
+}
+
 # 只保留成功的操作记录：失败或中断的那一份是排障现场，
 # 保留规则不能把唯一一份现场清掉。
 prune_backup_sessions() {

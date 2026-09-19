@@ -800,16 +800,26 @@ uninstall_cmd() {
 
   restore_nginx_main_config || return 1
 
+  # 安装时若宿主已有自己的 xray.service / xray 核心，登记表里会是 existed=1。
+  # 这两条路径属于别人，卸载要还原而不是删除（D11/D20.4，复核 H31/H32）。
+  local xray_service_preexisted=0
+  local xray_bin_preexisted=0
+  if [[ -e "$(takeover_original_record_file)" || -L "$(takeover_original_record_file)" ]]; then
+    xray_service_preexisted="$(takeover_original_existed "${XRAY_SERVICE_FILE}" 2>/dev/null || printf '0')"
+    xray_bin_preexisted="$(takeover_original_existed "${XRAY_BIN}" 2>/dev/null || printf '0')"
+  fi
+
   managed_paths=(
     "${SELF_COMMAND_PATH}"
     "${SELF_INSTALL_DIR}"
-    "${XRAY_BIN}"
     "${XRAY_CONFIG_DIR}"
     "${XRAY_ASSET_DIR}"
     "${WARP_RULES_FILE}"
-    "${XRAY_SERVICE_FILE}"
     "${XRAY_LOGROTATE_FILE}"
   )
+  # 只有确认是 xtun 自己创建的核心与 unit 才删除；接管来的留给下面的还原分支。
+  [[ "${xray_bin_preexisted}" == 1 ]] || managed_paths+=("${XRAY_BIN}")
+  [[ "${xray_service_preexisted}" == 1 ]] || managed_paths+=("${XRAY_SERVICE_FILE}")
   if [[ "${haproxy_shared}" -eq 0 || "${haproxy_config_remove}" -eq 1 ]]; then
     managed_paths+=("${HAPROXY_CONFIG}")
   fi
@@ -833,7 +843,36 @@ uninstall_cmd() {
   remove_managed_paths "${managed_paths[@]}" || return 1
   remove_legacy_managed_paths || return 1
 
+  # 接管来的文件还原回原路径；失败时保留登记表与原件副本作为用户退路。
+  if [[ "${xray_service_preexisted}" == 1 ]]; then
+    if restore_takeover_original "${XRAY_SERVICE_FILE}"; then
+      UNINSTALL_KEPT+=("${XRAY_SERVICE_FILE}（已还原安装前的 xray.service）")
+    else
+      warn "xray.service 的首次原件或登记校验失败，保留原件副本与登记表。"
+      UNINSTALL_UNCONFIRMED+=("${XRAY_SERVICE_FILE}（接管前已存在，但还原失败）")
+    fi
+  fi
+  if [[ "${xray_bin_preexisted}" == 1 ]]; then
+    if restore_takeover_original "${XRAY_BIN}"; then
+      UNINSTALL_KEPT+=("${XRAY_BIN}（已还原安装前的核心二进制）")
+    else
+      warn "xray 核心的首次原件或登记校验失败，保留原件副本与登记表。"
+      UNINSTALL_UNCONFIRMED+=("${XRAY_BIN}（接管前已存在，但还原失败）")
+    fi
+  fi
+
   systemctl daemon-reload || return 1
+
+  # 文件还原后按接管前记录恢复启用/运行状态；只还原文件不还原状态，
+  # 用户的服务会静静地不上线（D20.4）。
+  if [[ "${xray_service_preexisted}" == 1 ]]; then
+    if restore_takeover_original_service_state "xray.service"; then
+      UNINSTALL_KEPT+=("xray.service（已按接管前记录还原启用/运行状态）")
+    else
+      warn "xray.service 文件已还原，但缺少可核对的状态记录，未自动启用。"
+      UNINSTALL_UNCONFIRMED+=("xray.service（已还原文件，未还原启用/运行状态）")
+    fi
+  fi
   for item in "${kept_services[@]}"; do
     [[ "$(service_active_state "${item}")" == "active" ]] || continue
     if ! systemctl reload "${item}" >/dev/null 2>&1 \

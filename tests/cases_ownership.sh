@@ -517,9 +517,11 @@ run_uninstall_ownership_case() {
 
   # 托管文件：卸载应当删掉
   mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" "${SSL_DIR}" "${QR_OUTPUT_DIR}" \
-    "$(dirname "${XRAY_BIN}")" "$(dirname "${NGINX_CONFIG_FILE}")" "$(dirname "${OUTPUT_FILE}")"
+    "$(dirname "${XRAY_BIN}")" "$(dirname "${XRAY_SERVICE_FILE}")" \
+    "$(dirname "${NGINX_CONFIG_FILE}")" "$(dirname "${OUTPUT_FILE}")"
   printf '{"xray":true}\n' > "${XRAY_CONFIG_FILE}"
   printf 'xray binary\n' > "${XRAY_BIN}"
+  printf 'xtun 自己写的 unit\n' > "${XRAY_SERVICE_FILE}"
   printf 'managed nginx drop-in\n' > "${NGINX_CONFIG_FILE}"
   printf 'managed output\n' > "${OUTPUT_FILE}"
   printf 'png\n' > "${QR_OUTPUT_DIR}/node-1.png"
@@ -581,6 +583,8 @@ run_uninstall_ownership_case() {
 
   # 托管文件与我们的证书目录被删掉
   [[ ! -e "${XRAY_CONFIG_FILE}" ]]
+  [[ ! -e "${XRAY_SERVICE_FILE}" ]]
+  [[ ! -e "${XRAY_BIN}" ]]
   [[ ! -e "${NGINX_CONFIG_FILE}" ]]
   [[ ! -e "${ACME_HOME}/cdn.example.com_ecc" ]]
   [[ ! -e "${OUTPUT_FILE}" ]]
@@ -614,4 +618,164 @@ run_uninstall_ownership_case() {
   fi
 
   rm -rf "${workdir}"
+}
+
+# 复核 H31/H32：安装前宿主已有自己的 xray.service 与 /usr/local/bin/xray 时，
+# 卸载必须还原这两条路径（含启用/运行状态），而不是删掉用户的东西。
+run_uninstall_takeover_restore_case() {
+  local workdir=""
+  local output=""
+  local status=0
+  local service_digest=""
+  local binary_digest=""
+
+  load_functions
+  workdir="$(mktemp -d)"
+
+  BACKUP_ROOT="${workdir}/backups"
+  ORIGINALS_ROOT="${workdir}/originals"
+  SELF_COMMAND_PATH="${workdir}/usr/local/sbin/xtun"
+  SELF_INSTALL_DIR="${workdir}/usr/local/lib/xtun"
+  XRAY_BIN="${workdir}/usr/local/bin/xray"
+  XRAY_CONFIG_DIR="${workdir}/usr/local/etc/xray"
+  XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
+  XRAY_ASSET_DIR="${workdir}/usr/local/share/xray"
+  XRAY_SERVICE_FILE="${workdir}/etc/systemd/system/xray.service"
+  XRAY_LOGROTATE_FILE="${workdir}/etc/logrotate.d/xtun"
+  WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
+  STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
+  HAPROXY_CONFIG="${workdir}/etc/haproxy/haproxy.cfg"
+  NGINX_CONFIG_FILE="${workdir}/etc/nginx/conf.d/xtun.conf"
+  NGINX_LIMITS_DROPIN_FILE="${workdir}/etc/systemd/system/nginx.service.d/xtun-limits.conf"
+  NGINX_MAIN_CONFIG="${workdir}/etc/nginx/nginx.conf"
+  FALLBACK_SITE_DIR="${workdir}/var/www/xtun-fallback"
+  SSL_DIR="${workdir}/etc/ssl/xtun"
+  NET_SYSCTL_CONF="${workdir}/etc/sysctl.d/98-xtun-net.conf"
+  NET_HELPER_PATH="${workdir}/usr/local/sbin/xtun-net-optimize.sh"
+  NET_SERVICE_FILE="${workdir}/etc/systemd/system/${NET_SERVICE_NAME}"
+  ACME_HOME="${workdir}/root/.acme.sh"
+  ACME_SH_BIN="${ACME_HOME}/acme.sh"
+  ACME_RELOAD_HELPER="${workdir}/usr/local/sbin/xtun-cert-reload.sh"
+  OUTPUT_FILE="${workdir}/root/xtun-output.md"
+  QR_OUTPUT_DIR="${workdir}/root/xtun-qr"
+  OP_LOG_DIR="${workdir}/var/log/xtun"
+  OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
+  LEGACY_PATH_ROOT="${workdir}"
+  INSTALL_DRAFT_FILE="${workdir}/root/.xtun-install-draft.env"
+  SCRIPT_LOCK_FILE="${workdir}/run/xtun.lock"
+
+  # 宿主的原件与 xtun 接管后的当前文件
+  mkdir -p "$(dirname "$(takeover_original_path "${XRAY_SERVICE_FILE}")")" \
+    "$(dirname "$(takeover_original_path "${XRAY_BIN}")")" \
+    "$(dirname "${XRAY_SERVICE_FILE}")" "$(dirname "${XRAY_BIN}")" \
+    "${ORIGINALS_ROOT}/service-state" "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}"
+  printf 'foreign-xray-unit\n' > "$(takeover_original_path "${XRAY_SERVICE_FILE}")"
+  printf 'foreign-xray-core\n' > "$(takeover_original_path "${XRAY_BIN}")"
+  printf 'xtun-xray-unit\n' > "${XRAY_SERVICE_FILE}"
+  printf 'xtun-xray-core\n' > "${XRAY_BIN}"
+  printf '{"xray":true}\n' > "${XRAY_CONFIG_FILE}"
+
+  service_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_SERVICE_FILE}")")"
+  binary_digest="$(backup_file_digest "$(takeover_original_path "${XRAY_BIN}")")"
+  {
+    printf '# xtun-takeover-manifest\tv2\n'
+    # nginx/haproxy 记为 xtun 自己装的（existed=0），避免走进共享 HAProxy 分支
+    printf 'haproxy\t0\t2026-09-19T00:00:00Z\t-\n'
+    printf 'nginx\t0\t2026-09-19T00:00:00Z\t-\n'
+    printf '%s\t1\t2026-09-19T00:00:00Z\t%s\n' "${XRAY_SERVICE_FILE}" "${service_digest}"
+    printf '%s\t1\t2026-09-19T00:00:00Z\t%s\n' "${XRAY_BIN}" "${binary_digest}"
+  } > "${ORIGINALS_ROOT}/manifest.tsv"
+  # 接管前 xray.service 是启用且运行中的
+  printf 'ENABLED=enabled\nACTIVE=active\n' > "${ORIGINALS_ROOT}/service-state/xray.service.state"
+
+  SYSTEMD_UNIT_DIRS=("${workdir}/etc/systemd/system")
+
+  need_root() { :; }
+  load_existing_state() {
+    CERT_MODE="self-signed"
+    XHTTP_DOMAIN=""
+    NGINX_MAIN_MANAGED="no"
+    ENABLE_NET_OPT="no"
+  }
+  stop_and_disable_service_if_present() { :; }
+  systemctl() {
+    case "$*" in
+      'enable xray.service'*) printf 'enable\n' >> "${workdir}/systemctl.log" ;;
+      'start xray.service'*) printf 'start\n' >> "${workdir}/systemctl.log" ;;
+      'show '*' -p ActiveState --value') printf 'active\n' ;;
+    esac
+    return 0
+  }
+  sysctl() { :; }
+  apt-get() { :; }
+
+  status=0
+  uninstall_cmd --yes > "${workdir}/uninstall.out" 2>&1 || status=$?
+  output="$(cat "${workdir}/uninstall.out")"
+
+  [[ "${status}" -eq 0 ]]
+  # 文件还原成宿主原来的内容，而不是被删掉
+  [[ "$(cat "${XRAY_SERVICE_FILE}")" == 'foreign-xray-unit' ]]
+  [[ "$(cat "${XRAY_BIN}")" == 'foreign-xray-core' ]]
+  # 启用/运行状态按接管前记录恢复
+  grep -q '^enable$' "${workdir}/systemctl.log"
+  grep -q '^start$' "${workdir}/systemctl.log"
+  # 报告要说明这两条是还原的
+  [[ "${output}" == *"已还原安装前的 xray.service"* ]]
+  [[ "${output}" == *"已还原安装前的核心二进制"* ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# 复核 H31/H32 的另一半：安装时就要把宿主原有的 xray.service / xray 核心登记成
+# 「接管前已存在」，并记住 service 当时的启用/运行状态；否则卸载无从还原。
+run_xray_takeover_record_case() {
+  local workdir=""
+
+  load_functions
+  workdir="$(mktemp -d)"
+
+  BACKUP_ROOT="${workdir}/backups"
+  ORIGINALS_ROOT="${workdir}/originals"
+  XRAY_BIN="${workdir}/usr/local/bin/xray"
+  XRAY_SERVICE_FILE="${workdir}/etc/systemd/system/xray.service"
+  SYSTEMD_UNIT_DIRS=("${workdir}/etc/systemd/system")
+
+  mkdir -p "$(dirname "${XRAY_BIN}")" "${SYSTEMD_UNIT_DIRS[0]}"
+  printf 'foreign-xray-unit\n' > "${XRAY_SERVICE_FILE}"
+  printf 'foreign-xray-core\n' > "${XRAY_BIN}"
+
+  systemctl() {
+    case "$*" in
+      'show xray.service -p UnitFileState --value') printf 'enabled\n' ;;
+      'show xray.service -p ActiveState --value') printf 'active\n' ;;
+    esac
+    return 0
+  }
+  backup_path() { :; }
+  install_packages() { :; }
+  install_self_command() { :; }
+  install_xray() { printf 'xtun-new-core\n' > "${XRAY_BIN}"; }
+  ensure_xray_bind_capability() { :; }
+  ensure_xray_user() { :; }
+  generate_reality_keys_if_needed() { :; }
+
+  install_xray_runtime
+  write_xray_service
+
+  # 两条路径都登记为「接管前已存在」，原件保存的是宿主原来的内容
+  [[ "$(takeover_original_existed "${XRAY_SERVICE_FILE}")" == 1 ]]
+  [[ "$(takeover_original_existed "${XRAY_BIN}")" == 1 ]]
+  [[ "$(cat "$(takeover_original_path "${XRAY_SERVICE_FILE}")")" == 'foreign-xray-unit' ]]
+  [[ "$(cat "$(takeover_original_path "${XRAY_BIN}")")" == 'foreign-xray-core' ]]
+  # 接管前的启用/运行状态被记下来
+  grep -q '^ENABLED=enabled$' "${ORIGINALS_ROOT}/service-state/xray.service.state"
+  grep -q '^ACTIVE=active$' "${ORIGINALS_ROOT}/service-state/xray.service.state"
+  # 当前文件确实是 xtun 写的新内容
+  grep -q 'Description=Xray Service' "${XRAY_SERVICE_FILE}"
+  [[ "$(cat "${XRAY_BIN}")" == 'xtun-new-core' ]]
+
+  rm -rf "${workdir}"
+  load_functions
 }

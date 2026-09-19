@@ -36,6 +36,12 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
+  # 首次遇到已存在的 xray.service 时按「接管别人的 unit」登记原件与当时状态；
+  # 不登记的话卸载会直接把用户自己的服务定义删掉（复核 H31）。只认第一次：
+  # xtun 自己创建的 unit 记为 existed=0，卸载仍按删除处理。
+  record_takeover_original "${XRAY_SERVICE_FILE}" || return 1
+  record_takeover_original_service_state "xray.service" || return 1
+
   backup_path "${XRAY_SERVICE_FILE}" || return 1
   install -m 0644 "${tmp_file}" "${XRAY_SERVICE_FILE}" || return 1
   rm -f "${tmp_file}"
