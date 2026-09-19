@@ -339,6 +339,7 @@ main() {
     run_sni_timeout_validation_case
     run_sni_check_target_resolution_case
     run_sni_bounded_probe_case
+    run_sni_judge_pq_case
     run_install_preflight_sni_case
     run_reality_fallback_inbound_case
     run_routing_block_rules_case

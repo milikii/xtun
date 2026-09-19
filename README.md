@@ -218,7 +218,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `update-script [--reinstall]` | 更新脚本 bundle；可显式重装相同版本 |
 | `upgrade [--xray-version vX.Y.Z] [--reinstall]` | 升级核心及配套 geo；可显式重装身份未知或漂移的相同版本 |
 | `recover [--yes]` | 按持久清单恢复未完成操作；已提交的操作只完成清理 |
-| `check-sni [域名] [--target host:port] [--timeout N]` | Reality 目标域名预检；默认探测已保存的 `REALITY_TARGET`（显式域名时用该域名:443），有公布出来的等待上界 |
+| `check-sni [域名] [--target host:port] [--timeout N]` | Reality 目标域名预检；默认探测已保存的 `REALITY_TARGET`（显式域名时用该域名:443），有公布出来的等待上界；含不阻断的「后量子就绪度」观察项 |
 | `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
 | `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
 | `change-h3 [--enable-h3\|--disable-h3]` | 显式选择 H3；启用前校验证书、模块和 UDP 归属 |

@@ -193,6 +193,8 @@ run_sni_check_cmd_case() {
       "${2}" "$(date -d '+76 days' '+%b %e %H:%M:%S %Y GMT')"
   }
   sni_probe_http() { printf '200 2  0.02 nginx\n'; }
+  # 后量子观察桩：协商到混合组且链长 >3500，属 PASS 情形
+  sni_probe_pq() { printf 'STATUS=ok\nPQ=true\nGROUP=X25519MLKEM768\nCHAIN_BYTES=4000\n'; }
 
   set +e
   run_sni_checks 'www.stanford.edu' 'www.stanford.edu:443' '203.0.113.9' 10 > "${workdir}/out.txt"
@@ -471,7 +473,7 @@ EOF
   load_functions
 }
 
-# 有界探测：四个探针各跑一次、连同一个实际 target、输出阶段进度与总预算上界。
+# 有界探测：五个探针各跑一次、连同一个实际 target、输出阶段进度与总预算上界。
 run_sni_bounded_probe_case() {
   local workdir=""
   local status=0
@@ -496,6 +498,10 @@ run_sni_bounded_probe_case() {
     printf 'http %s %s %s\n' "${1}" "${2}" "${3}" >> "${workdir}/calls.txt"
     printf '200 2  0.02 nginx\n'
   }
+  sni_probe_pq() {
+    printf 'pq %s %s %s %s\n' "${1}" "${2}" "${3}" "${4}" >> "${workdir}/calls.txt"
+    printf 'STATUS=ok\nPQ=true\nGROUP=X25519MLKEM768\nCHAIN_BYTES=4000\n'
+  }
 
   : > "${workdir}/calls.txt"
   set +e
@@ -509,21 +515,24 @@ run_sni_bounded_probe_case() {
   [[ "$(grep -c '^tls ' "${workdir}/calls.txt")" -eq 1 ]]
   [[ "$(grep -c '^cert ' "${workdir}/calls.txt")" -eq 1 ]]
   [[ "$(grep -c '^http ' "${workdir}/calls.txt")" -eq 1 ]]
+  [[ "$(grep -c '^pq ' "${workdir}/calls.txt")" -eq 1 ]]
 
-  # 所有探针连同一个实际 target/端口；DNS 走主机名，TLS/证书/HTTP 走同一 host:port
+  # 所有探针连同一个实际 target/端口；DNS 走主机名，TLS/证书/HTTP/PQ 走同一 host:port
   grep -q '^dns upstream.example 10$' "${workdir}/calls.txt"
   grep -q '^tls upstream.example:8443 front.example 10$' "${workdir}/calls.txt"
   grep -q '^cert upstream.example:8443 front.example 10$' "${workdir}/calls.txt"
   grep -q '^http front.example upstream.example:8443 10$' "${workdir}/calls.txt"
+  grep -q '^pq upstream.example:8443 front.example 10 203.0.113.9$' "${workdir}/calls.txt"
 
   # 阶段进度与总预算上界
   output="$(cat "${workdir}/out.txt")"
-  printf '%s\n' "${output}" | grep -Fq '[1/4] DNS 解析（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '[2/4] TLS 1.3 握手（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '[3/4] 证书读取（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '[4/4] HTTP 探测（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '等待上界: 4 个探针 × 10s = 40s'
-  printf '%s\n' "${output}" | grep -Fq '本轮等待上界 40s'
+  printf '%s\n' "${output}" | grep -Fq '[1/5] DNS 解析（预算 10s）… 完成'
+  printf '%s\n' "${output}" | grep -Fq '[2/5] TLS 1.3 握手（预算 10s）… 完成'
+  printf '%s\n' "${output}" | grep -Fq '[3/5] 证书读取（预算 10s）… 完成'
+  printf '%s\n' "${output}" | grep -Fq '[4/5] HTTP 探测（预算 10s）… 完成'
+  printf '%s\n' "${output}" | grep -Fq '[5/5] 后量子就绪度（预算 10s）… 完成'
+  printf '%s\n' "${output}" | grep -Fq '等待上界: 5 个探针 × 10s = 50s'
+  printf '%s\n' "${output}" | grep -Fq '本轮等待上界 50s'
   printf '%s\n' "${output}" | grep -Fq '结论: 通过（0 FAIL, 0 WARN, 1 未验证）'
 
   # 探针挂住时也不会超过预算：DNS 单独跑一次也要带 timeout
@@ -540,6 +549,59 @@ run_sni_bounded_probe_case() {
   grep -q '^timeout 10$' "${workdir}/timeout.txt"
 
   unset -f timeout getent
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# W17 / 归档计划 §3.2：后量子就绪度是观察项，只有「协商到混合组且链长 >3500」
+# 才 PASS；其它已测得情况一律 WARN，不产生 FAIL、不改变退出码。
+run_sni_judge_pq_case() {
+  local out=""
+  local workdir=""
+  local status=0
+
+  # 协商到后量子混合组且链长严格大于 3500：PASS
+  out="$(sni_judge_pq "$(printf 'STATUS=ok\nPQ=true\nGROUP=X25519MLKEM768\nCHAIN_BYTES=3501\n')")"
+  [[ "${out}" == PASS\|后量子就绪度\|* ]]
+  [[ "${out}" == *'3501'* ]]
+
+  # 3500 本身不通过
+  out="$(sni_judge_pq "$(printf 'STATUS=ok\nPQ=true\nGROUP=X25519MLKEM768\nCHAIN_BYTES=3500\n')")"
+  [[ "${out}" == WARN\|后量子就绪度\|* ]]
+  [[ "${out}" == *'未超过 3500'* ]]
+
+  # 没协商到后量子组：WARN，并如实说明当前协商到的组
+  out="$(sni_judge_pq "$(printf 'STATUS=ok\nPQ=false\nGROUP=X25519\nCHAIN_BYTES=4000\n')")"
+  [[ "${out}" == WARN\|后量子就绪度\|* ]]
+  [[ "${out}" == *'X25519'* ]]
+
+  # 探测不可用 / 长度非数字 / 缺字段：都只 WARN，绝不 FAIL
+  out="$(sni_judge_pq "$(printf 'STATUS=unavailable\nREASON=本机缺少 openssl\n')")"
+  [[ "${out}" == WARN\|后量子就绪度\|* ]]
+  out="$(sni_judge_pq "$(printf 'STATUS=ok\nPQ=true\nCHAIN_BYTES=abc\n')")"
+  [[ "${out}" == WARN\|后量子就绪度\|* ]]
+  out="$(sni_judge_pq '')"
+  [[ "${out}" == WARN\|后量子就绪度\|* ]]
+
+  # 只 WARN 不改变整体结果：真实 run_sni_checks 在 PQ 不合格时仍应退 0
+  workdir="$(mktemp -d)"
+  sni_probe_dns() { printf '203.0.113.5\n'; }
+  sni_probe_tls() { printf 'Protocol  : TLSv1.3\nPeer Temp Key: X25519, 253 bits\nALPN protocol: h2\nVerify return code: 0 (ok)\n'; }
+  sni_probe_cert() {
+    printf 'SAN=DNS:%s\nNOTAFTER=%s\nISSUER=C=US, O=Some CA\n' \
+      "${2}" "$(date -d '+76 days' '+%b %e %H:%M:%S %Y GMT')"
+  }
+  sni_probe_http() { printf '200 2  0.02 nginx\n'; }
+  sni_probe_pq() { printf 'STATUS=ok\nPQ=false\nGROUP=X25519\nCHAIN_BYTES=4000\n'; }
+
+  set +e
+  run_sni_checks 'front.example' 'upstream.example:443' '203.0.113.9' 10 > "${workdir}/out.txt"
+  status=$?
+  set -e
+  [[ "${status}" -eq 0 ]]
+  grep -Fq '结论: 通过（0 FAIL, 1 WARN, 1 未验证）' "${workdir}/out.txt"
+  grep -Fq '后量子就绪度' "${workdir}/out.txt"
+
   rm -rf "${workdir}"
   load_functions
 }

@@ -109,6 +109,64 @@ sni_probe_http() {
   printf '%s %s\n' "${meta}" "${server_header}"
 }
 
+# 后量子就绪度观察（W17）。输出归一化记录：
+#   STATUS=ok|unavailable / PQ=true|false / GROUP=<协商组> / CHAIN_BYTES=<非负整数> / REASON=<单行原因>
+# 关键点：不锁 `-groups`，让本机 openssl 用它自己的默认分组，才有机会协商到
+# X25519MLKEM768 这类混合组（OpenSSL 3.5+ 才带 ML-KEM）。本机不支持时握手照常
+# 走经典分组，这里只如实记录协商结果，不据此断言目标站不支持。
+sni_probe_pq() {
+  local target="${1}"
+  local sni="${2}"
+  local timeout="${3}"
+  local resolved_ip="${4:-}"
+  local output=""
+  local group=""
+  local chain_bytes=0
+
+  # resolved_ip 保留与其它探针一致的签名；连接仍走同一个 target（D09/§3.1）。
+  : "${resolved_ip}"
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    printf 'STATUS=unavailable\nREASON=本机缺少 openssl\n'
+    return 0
+  fi
+
+  output="$(timeout "${timeout}" openssl s_client \
+    -connect "${target}" \
+    -servername "${sni}" \
+    -tls1_3 \
+    -showcerts \
+    </dev/null 2>&1)" || true
+
+  if [[ -z "${output}" ]]; then
+    printf 'STATUS=unavailable\nREASON=握手无输出（超时或连接失败）\n'
+    return 0
+  fi
+
+  group="$(printf '%s\n' "${output}" | sed -n 's/^\(Peer\|Server\) Temp Key: *\([^,]*\),.*/\2/p' | head -n 1 | tr -d ' ')"
+  if [[ -z "${group}" ]]; then
+    printf 'STATUS=unavailable\nREASON=未取到握手密钥组（握手失败或输出格式未知）\n'
+    return 0
+  fi
+
+  # 证书链总长度：把 -showcerts 输出的每段 PEM 按字节累加（含换行）。
+  chain_bytes="$(printf '%s\n' "${output}" | awk '
+    /^-----BEGIN CERTIFICATE-----$/ {in_block=1}
+    in_block {total += length($0) + 1}
+    /^-----END CERTIFICATE-----$/ {in_block=0}
+    END {print total + 0}
+  ')"
+
+  case "${group^^}" in
+    *MLKEM*|*KYBER*|*ML-KEM*)
+      printf 'STATUS=ok\nPQ=true\nGROUP=%s\nCHAIN_BYTES=%s\n' "${group}" "${chain_bytes}"
+      ;;
+    *)
+      printf 'STATUS=ok\nPQ=false\nGROUP=%s\nCHAIN_BYTES=%s\n' "${group}" "${chain_bytes}"
+      ;;
+  esac
+}
+
 # 判定层 ----------------------------------------------------------------
 
 sni_judge_line() {
@@ -230,6 +288,54 @@ sni_judge_tls() {
   else
     sni_judge_line FAIL "证书链" "$(printf '%s\n' "${tls_output}" | sed -n 's/^Verify return code://p' | head -n 1 | sed 's/^ *//' | sed 's/^$/校验失败/')"
   fi
+}
+
+# 后量子就绪度是观察项：只有「协商到后量子混合组且证书链严格大于 3500 字节」
+# 才 PASS，其它已测得的情况一律 WARN——增加告警计数，不改变 FAIL/退出码，也不阻断安装。
+sni_judge_pq() {
+  local probe_output="${1}"
+  local status=""
+  local pq=""
+  local group=""
+  local chain_bytes=""
+  local reason=""
+  local key_text=""
+  local chain_text=""
+
+  status="$(printf '%s\n' "${probe_output}" | sed -n 's/^STATUS=//p' | head -n 1)"
+  pq="$(printf '%s\n' "${probe_output}" | sed -n 's/^PQ=//p' | head -n 1)"
+  group="$(printf '%s\n' "${probe_output}" | sed -n 's/^GROUP=//p' | head -n 1)"
+  chain_bytes="$(printf '%s\n' "${probe_output}" | sed -n 's/^CHAIN_BYTES=//p' | head -n 1)"
+  reason="$(printf '%s\n' "${probe_output}" | sed -n 's/^REASON=//p' | head -n 1)"
+
+  # 缺字段、非数字长度、命令缺失都只 WARN：不伪称目标不支持，也不阻断普通安装。
+  if [[ "${status}" != "ok" ]]; then
+    sni_judge_line WARN "后量子就绪度" "未取得握手信息（${reason:-未知原因}）"
+    return 0
+  fi
+  if [[ ! "${chain_bytes}" =~ ^[0-9]+$ ]]; then
+    sni_judge_line WARN "后量子就绪度" "证书链长度缺失或非数字（${reason:-未知}）"
+    return 0
+  fi
+
+  if [[ "${pq}" == "true" && "${chain_bytes}" -gt 3500 ]]; then
+    sni_judge_line PASS "后量子就绪度" "协商 ${group:-后量子混合组}；证书链 ${chain_bytes} 字节（>3500）"
+    return 0
+  fi
+
+  if [[ "${pq}" == "true" ]]; then
+    key_text="已协商 ${group:-后量子混合组}"
+  elif [[ -n "${group}" ]]; then
+    key_text="未协商后量子混合组（当前 ${group}）"
+  else
+    key_text="未协商后量子混合组"
+  fi
+  if [[ "${chain_bytes}" -gt 3500 ]]; then
+    chain_text="证书链 ${chain_bytes} 字节（>3500）"
+  else
+    chain_text="证书链 ${chain_bytes} 字节（未超过 3500）"
+  fi
+  sni_judge_line WARN "后量子就绪度" "${key_text}；${chain_text}"
 }
 
 sni_judge_cert() {
@@ -382,8 +488,9 @@ run_sni_checks() {
   local tls_output=""
   local cert_output=""
   local http_output=""
+  local pq_output=""
   local target_host="${target%:*}"
-  local stage_count=4
+  local stage_count=5
   local dns_status=0
   local stage_start=0
   local round_start=0
@@ -422,6 +529,11 @@ run_sni_checks() {
   http_output="$(sni_probe_http "${sni}" "${target}" "${timeout}")" || http_output=""
   printf '完成 %ss\n' "$(( $(sni_now_epoch) - stage_start ))"
 
+  stage_start="$(sni_now_epoch)"
+  printf '[5/%s] 后量子就绪度（预算 %ss）… ' "${stage_count}" "${timeout}"
+  pq_output="$(sni_probe_pq "${target}" "${sni}" "${timeout}" "${server_ip}")" || pq_output=""
+  printf '完成 %ss\n' "$(( $(sni_now_epoch) - stage_start ))"
+
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
     level="${line%%|*}"
@@ -447,6 +559,7 @@ run_sni_checks() {
 $(sni_judge_hostname "${sni}")
 $(sni_judge_dns "${sni}" "${target_host}" "${dns_output}" "${server_ip}" "${dns_status}")
 $(sni_judge_tls "${tls_output}")
+$(sni_judge_pq "${pq_output}")
 $(sni_judge_cert "${sni}" "${cert_output}" "$(date '+%s')")
 $(sni_judge_http "${sni}" "${http_output}")
 EOF
