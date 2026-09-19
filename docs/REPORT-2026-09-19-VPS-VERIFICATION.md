@@ -119,7 +119,9 @@ bash xtun.sh install --non-interactive --task fresh \
 | 35370804957 | `cd8a9aa` | failure | install-smoke (ubuntu:24.04, baseline) → Wait for systemd |
 | 35280649878 / 35165787041 | `27aa967` | success | — |
 
-判定为**环境抖动，非确定性回归**，依据：两次失败点不同；`debian:12 baseline` 在一次失败、在另一次成功；本机真实 Debian 12 amd64 全新安装 exit 0。仓库 job 日志 API 返回 403（需 admin），未能读到容器内细节，因此保留"需一次新 CI 运行确认"的说法。
+判定为**环境抖动，非确定性回归**，依据：两次失败点不同；`debian:12 baseline` 在一次失败、在另一次成功；本机真实 Debian 12 amd64 全新安装 exit 0。仓库 job 日志 API 返回 403（需 admin），未能读到容器内细节。
+
+**已确认**：本报告提交 `5ed4230` 后触发的 [CI run 35431016627](https://github.com/milikii/xtun/actions/runs/35431016627) **全部成功**——`shellcheck-and-smoke`、`install-smoke (debian:12 baseline)`、`install-smoke (debian:13 baseline)`、`install-smoke (ubuntu:24.04 baseline)` 均 success（`latest-check` 非 schedule 触发，按设计跳过）。该提交是纯文档变更，因此 CI 通过不能证明代码修复，但足以证明安装路径**不存在确定性失败**，两次失败确认为环境抖动，`main` 恢复绿色。
 
 ### 7.3 R1：`lib/generators.sh` 的私有 DSH 路由
 
