@@ -479,7 +479,12 @@ write_runtime_managed_files() {
   deploy_fallback_site || return 1
   write_warp_rules_file || return 1
   write_xray_config || return 1
+  # 包是别人装的、服务却是 xtun 起来的，这种情况很常见。在写配置、起服务之前
+  # 记下安装前 haproxy/nginx 到底有没有在跑，卸载时才知道该停用清理还是当共享
+  # 服务保留（H34）。
+  record_takeover_original_service_state "haproxy.service" || return 1
   write_haproxy_config || return 1
+  record_takeover_original_service_state "nginx.service" || return 1
   write_nginx_config || return 1
   write_nginx_main_config || return 1
   write_nginx_limits_dropin || return 1

@@ -544,7 +544,9 @@ run_uninstall_ownership_case() {
   printf '[Unit]\nDescription=shared haproxy\n' > "${SYSTEMD_UNIT_DIRS[0]}/haproxy.service"
   printf 'foreign-haproxy-config\n' > "$(takeover_original_path "${HAPROXY_CONFIG}")"
   printf 'managed-haproxy-config\n' > "${HAPROXY_CONFIG}"
-  mkdir -p "${ORIGINALS_ROOT}"
+  mkdir -p "${ORIGINALS_ROOT}/service-state"
+  # haproxy 安装前就在跑：明确记为共享在用，仍应保留
+  printf 'ENABLED=enabled\nACTIVE=active\n' > "${ORIGINALS_ROOT}/service-state/haproxy.service.state"
   {
     printf '# xtun-takeover-manifest\tv1\n'
     printf 'nginx\t0\t2026-09-13T00:00:00Z\n'
@@ -795,6 +797,102 @@ run_install_takeover_notice_case() {
   # 没创建的路径不能列进来
   [[ "${output}" != *"${XRAY_LOG_DIR}"* ]]
   [[ "${output}" != *"${XRAY_CONFIG_DIR}"* ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# 复核 H34：包是宿主装的，但服务安装前从没启用/运行——那是 xtun 起起来的，
+# 卸载应当停用并清理配置，而不是当共享服务保留（否则 443/80 一直被占，
+# 还原后的宿主服务起不来，卸载还会恒返回 1）。
+run_uninstall_idle_preinstalled_service_case() {
+  local workdir=""
+  local output=""
+  local status=0
+  local -a stopped=()
+
+  load_functions
+  workdir="$(mktemp -d)"
+
+  BACKUP_ROOT="${workdir}/backups"
+  ORIGINALS_ROOT="${workdir}/originals"
+  SELF_COMMAND_PATH="${workdir}/usr/local/sbin/xtun"
+  SELF_INSTALL_DIR="${workdir}/usr/local/lib/xtun"
+  XRAY_BIN="${workdir}/usr/local/bin/xray"
+  XRAY_CONFIG_DIR="${workdir}/usr/local/etc/xray"
+  XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
+  XRAY_ASSET_DIR="${workdir}/usr/local/share/xray"
+  XRAY_LOG_DIR="${workdir}/var/log/xray"
+  XRAY_STATE_DIR="${workdir}/var/lib/xray"
+  XRAY_SERVICE_FILE="${workdir}/etc/systemd/system/xray.service"
+  XRAY_LOGROTATE_FILE="${workdir}/etc/logrotate.d/xtun"
+  WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
+  STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
+  HAPROXY_CONFIG="${workdir}/etc/haproxy/haproxy.cfg"
+  NGINX_CONFIG_FILE="${workdir}/etc/nginx/conf.d/xtun.conf"
+  NGINX_LIMITS_DROPIN_FILE="${workdir}/etc/systemd/system/nginx.service.d/xtun-limits.conf"
+  NGINX_MAIN_CONFIG="${workdir}/etc/nginx/nginx.conf"
+  FALLBACK_SITE_DIR="${workdir}/var/www/xtun-fallback"
+  SSL_DIR="${workdir}/etc/ssl/xtun"
+  NET_SYSCTL_CONF="${workdir}/etc/sysctl.d/98-xtun-net.conf"
+  NET_HELPER_PATH="${workdir}/usr/local/sbin/xtun-net-optimize.sh"
+  NET_SERVICE_FILE="${workdir}/etc/systemd/system/${NET_SERVICE_NAME}"
+  ACME_HOME="${workdir}/root/.acme.sh"
+  ACME_SH_BIN="${ACME_HOME}/acme.sh"
+  ACME_RELOAD_HELPER="${workdir}/usr/local/sbin/xtun-cert-reload.sh"
+  OUTPUT_FILE="${workdir}/root/xtun-output.md"
+  QR_OUTPUT_DIR="${workdir}/root/xtun-qr"
+  OP_LOG_DIR="${workdir}/var/log/xtun"
+  OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
+  LEGACY_PATH_ROOT="${workdir}"
+  INSTALL_DRAFT_FILE="${workdir}/root/.xtun-install-draft.env"
+  SCRIPT_LOCK_FILE="${workdir}/run/xtun.lock"
+  SYSTEMD_UNIT_DIRS=("${workdir}/etc/systemd/system")
+
+  mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" "$(dirname "${HAPROXY_CONFIG}")" \
+    "$(dirname "${NGINX_CONFIG_FILE}")" "$(dirname "${OUTPUT_FILE}")" "${ORIGINALS_ROOT}/service-state"
+  printf '{"xray":true}\n' > "${XRAY_CONFIG_FILE}"
+  printf 'managed-haproxy\n' > "${HAPROXY_CONFIG}"
+  printf 'managed-nginx\n' > "${NGINX_CONFIG_FILE}"
+  printf 'managed-output\n' > "${OUTPUT_FILE}"
+
+  # 包是宿主装的（existed=1），但服务安装前并未启用/运行
+  printf 'ENABLED=installed\nACTIVE=inactive\n' > "${ORIGINALS_ROOT}/service-state/haproxy.service.state"
+  printf 'ENABLED=installed\nACTIVE=inactive\n' > "${ORIGINALS_ROOT}/service-state/nginx.service.state"
+  {
+    printf '# xtun-takeover-manifest\tv2\n'
+    printf 'haproxy\t1\t2026-09-19T00:00:00Z\t-\n'
+    printf 'nginx\t1\t2026-09-19T00:00:00Z\t-\n'
+  } > "${ORIGINALS_ROOT}/manifest.tsv"
+
+  need_root() { :; }
+  load_existing_state() {
+    CERT_MODE="self-signed"
+    XHTTP_DOMAIN=""
+    NGINX_MAIN_MANAGED="no"
+    ENABLE_NET_OPT="no"
+  }
+  stop_and_disable_service_if_present() { stopped+=("${1}"); }
+  systemctl() {
+    case "$*" in
+      'show '*' -p ActiveState --value') printf 'active\n' ;;
+    esac
+    return 0
+  }
+  sysctl() { :; }
+  apt-get() { :; }
+
+  status=0
+  uninstall_cmd --yes > "${workdir}/uninstall.out" 2>&1 || status=$?
+  output="$(cat "${workdir}/uninstall.out")"
+
+  # 退出码必须干净，不能因为"共享 HAProxy 未确认"而恒为 1
+  [[ "${status}" -eq 0 ]]
+  [[ " ${stopped[*]} " == *' haproxy.service '* ]]
+  [[ " ${stopped[*]} " == *' nginx.service '* ]]
+  [[ ! -e "${HAPROXY_CONFIG}" ]]
+  [[ ! -e "${NGINX_CONFIG_FILE}" ]]
+  [[ "${output}" != *'未能确认'* ]]
 
   rm -rf "${workdir}"
   load_functions

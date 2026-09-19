@@ -501,7 +501,9 @@ xtun uninstall --purge --yes
 
 `--purge` 按安装归属记录尝试卸载脚本安装的软件包，预先存在或归属不明的共享包保留。ACME 流程移除本节点域名的证书，保留共享 `acme.sh` 本体和其它域名；旧 WARP 等资源按归属处理。结果分别列出删除、保留和未能确认项。
 
-不带 `--yes` 时先回答 `y` 确认卸载；同时指定 `--purge` 时，再输入 `purge` 确认软件包清理。共享 HAProxy 的配置删除/reload 失败仍有已知遗留，见 [W02-R](docs/PLAN-UX-RELIABILITY.md#w02-r)；当前结果不能作为所有共享服务均已完整清理的证明。
+不带 `--yes` 时先回答 `y` 确认卸载；同时指定 `--purge` 时，再输入 `purge` 确认软件包清理。
+
+`haproxy`/`nginx` 是否按共享服务保留，看的是**服务在安装前有没有真的在用**，不是包是谁装的：安装前已经 active 或 enabled 的按共享服务保留运行，还原并 reload 它原来的配置；只是装了包、从没启用的视为 xtun 引入，卸载时停用并清掉 xtun 的配置——否则 443/80 会一直被占着，自己原来的服务起不来。同理，安装前已存在的 `/etc/systemd/system/xray.service`、`/usr/local/bin/xray` 及其运行目录（`/var/log/xray`、`/var/lib/xray`）和资源/配置目录（`/usr/local/share/xray`、`/usr/local/etc/xray`）都会先登记后接管，卸载时按登记还原；这些路径在安装前的只读检查里会以「待接管」列出。
 
 ## WARP 出站
 

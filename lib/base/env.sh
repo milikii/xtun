@@ -796,6 +796,18 @@ takeover_service_state_file() {
   printf '%s/service-state/%s.state' "${ORIGINALS_ROOT}" "${1}"
 }
 
+# 读回首次接管时记下的启用/运行状态；没有记录（老安装）返回非零，
+# 由调用方决定保守默认。
+takeover_original_service_state_field() {
+  local unit_name="${1}"
+  local field="${2}"
+  local state_file=""
+
+  state_file="$(takeover_service_state_file "${unit_name}")"
+  [[ -f "${state_file}" && ! -L "${state_file}" ]] || return 1
+  sed -n "s/^${field}=//p" "${state_file}" | head -n 1
+}
+
 record_takeover_original_service_state() {
   local unit_name="${1}"
   local state_file=""

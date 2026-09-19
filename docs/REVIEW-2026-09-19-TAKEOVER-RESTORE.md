@@ -64,5 +64,20 @@ xtun uninstall --yes
 
 ## 6. 残留（未在本次修复）
 
-- **共享 HAProxy 遗留**：卸载把共享 HAProxy 服务留着运行时，`/etc/haproxy/haproxy.cfg` 未清理、443 仍被 haproxy 占用，还原后的 xray 起不来——README「卸载」一节已有记载，本次真机 cycle 4/5b 再次复现（停掉 haproxy 后 xray 一次启动成功）。它与接管还原无关，未改。
 - **宿主 config.json 不合法时的提示**：此时安装会因配置迁移读取失败而回滚（见 §5）。当前行为是"拒绝覆盖"，但日志只给 jq 错误，用户不容易看出是自己的配置无法迁移；是否加一句明确提示，另行评估。
+
+## 7. 追加：共享服务误判（H34，同日修复）
+
+§6 原先记的「共享 HAProxy 遗留」不是接管还原的问题，而是**判定依据错了**：`managed_service_preinstalled` 只看包是谁装的（`package_installed_by_xtun`），于是「宿主装过 haproxy/nginx 但从没启用」被当成"共享在用"保留——xtun 自己起来的 haproxy 继续占着 443、`/etc/haproxy/haproxy.cfg` 不清、卸载恒返回 1，还原后的宿主 xray 起不来。
+
+**修复**：
+
+- 安装写配置、起服务之前记录 `haproxy.service` / `nginx.service` 的首次接管状态（复用 H31 的服务状态机制；记录点放在 `write_runtime_managed_files`，不改用户工作区里已改动的 `generators.sh`）。
+- `managed_service_preinstalled` 改为：包不属于 xtun，**且**服务安装前 active/enabled，才算共享在用；否则按 xtun 引入处理（停用 + 清理）。没有状态记录的老安装保守地按共享在用处理，行为不变。
+- 卸载清理原件登记表后，顺手 `rmdir` 其空的父目录 `/var/lib/xtun`。
+
+**验证**：
+
+- 自动：新增 `run_uninstall_idle_preinstalled_service_case`（包预装但服务未启用 → 停用、清配置、无「未能确认」、退出 0）；`run_uninstall_ownership_case` 补上 `ENABLED=enabled/ACTIVE=active` 状态记录，显式钉住"共享在用仍保留"这条分支。
+- canonical smoke：**257 组通过**；ShellCheck 干净。
+- 真机 cycle 6：预装但停用/禁用的 haproxy/nginx，安装时记录为 `ENABLED=installed`/`ACTIVE=inactive`；卸载后两者 `inactive`+`disabled`、`/etc/haproxy/haproxy.cfg` 与 `/etc/nginx/conf.d/xtun.conf` 均被删除、`443/80 空闲`、报告无任何「未能确认」并清理了原件登记表（即退出 0）；unit/核心/日志/状态全部还原后，**直接 `systemctl start xray` 即占住 443，没有手工停任何服务**。

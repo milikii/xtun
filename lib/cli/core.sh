@@ -397,20 +397,38 @@ diagnose_cmd() {
 
 # 只有能证明「这个包是 xtun 装进来的」才允许在卸载时停掉对应服务。
 # 没有归属记录（旧安装）时按保守处理：不停。
+# 包是别人装的，不等于服务是别人在用的：很多人装了 haproxy/nginx 却从没启用，
+# 是 xtun 把它起来并写了自己的配置。只有安装前就 active/enabled 才算「共享在用」，
+# 否则按 xtun 自己引入处理——卸载要停用并清理，不然 443/80 会一直被占着，
+# 还原后的宿主服务起不来（H34）。没有状态记录的老安装保守当作共享在用。
+service_was_in_use_before_xtun() {
+  local unit_name="${1}"
+  local recorded_active=""
+  local recorded_enabled=""
+
+  recorded_active="$(takeover_original_service_state_field "${unit_name}" ACTIVE 2>/dev/null || true)"
+  recorded_enabled="$(takeover_original_service_state_field "${unit_name}" ENABLED 2>/dev/null || true)"
+  if [[ -z "${recorded_active}" && -z "${recorded_enabled}" ]]; then
+    return 0
+  fi
+  [[ "${recorded_active}" == "active" || "${recorded_enabled}" == "enabled" ]]
+}
+
 managed_service_preinstalled() {
   local unit_name="${1}"
 
   case "${unit_name}" in
     haproxy.service)
-      ! package_installed_by_xtun haproxy
+      package_installed_by_xtun haproxy && return 1
       ;;
     nginx.service)
-      ! package_installed_by_xtun nginx
+      package_installed_by_xtun nginx && return 1
       ;;
     *)
       return 1
       ;;
   esac
+  service_was_in_use_before_xtun "${unit_name}"
 }
 
 restart_cmd() {
@@ -941,6 +959,8 @@ uninstall_cmd() {
       UNINSTALL_KEPT+=("${ORIGINALS_ROOT}（原件副本，确认不再需要后可自行删除）")
     else
       rm -rf "${ORIGINALS_ROOT}" || return 1
+      # 原件登记表的父目录只放这一份数据；空掉就顺手删掉，别给用户留个空目录。
+      rmdir "$(dirname "${ORIGINALS_ROOT}")" 2>/dev/null || true
       UNINSTALL_REMOVED+=("${ORIGINALS_ROOT}（原件与包归属登记表）")
     fi
   fi
