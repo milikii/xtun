@@ -109,7 +109,9 @@ bash xtun.sh install --non-interactive --task fresh \
 
 ### 7.1 R2：旧测试 VPS 的 nginx 故障
 
-本次在真实 nginx 1.22.1 上全新安装，生成器正确输出 `listen … ssl http2;`，`nginx -t` 与启动均通过。**生成器没有缺陷**；旧机 `194.195.251.247` 的问题是那份 `xtun.conf` 由 ≥1.25.1 的环境生成（生成时 `nginx_version_at_least 1.25.1` 为真），之后二进制回落到 1.22.1，配置与新二进制不匹配。修复方向不变：在旧机上用当前二进制重建配置，或恢复 ≥1.25.1 的 nginx。
+本次在真实 nginx 1.22.1 上全新安装，生成器正确输出 `listen … ssl http2;`，`nginx -t` 与启动均通过。**生成器没有缺陷**；旧机 `194.195.251.247` 的问题是那份 `xtun.conf` 由 ≥1.25.1 的环境生成（生成时 `nginx_version_at_least 1.25.1` 为真），之后二进制回落到 1.22.1，配置与新二进制不匹配。
+
+**已于同日修正**：把 `194.195.251.247` 的托管配置改回 1.22 兼容写法（`listen 127.0.0.1:8443 ssl http2;`），`nginx -t` 通过，服务 `active` 且 `NRestarts=0`，自 2026-09-18 起的两天重启循环停止；原文件备份为 `/root/xtun-nginx-xtun.conf.bak-20260919-082835`。该机 haproxy 与 `dsh.564672.xyz` 用户自加反代路由均未受影响（未执行 `apply-config`，避免用旧 bundle 覆盖 haproxy 用户块）。
 
 ### 7.2 R3：HEAD 的 CI 红灯
 

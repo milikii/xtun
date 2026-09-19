@@ -223,6 +223,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
 | `change-h3 [--enable-h3\|--disable-h3]` | 显式选择 H3；启用前校验证书、模块和 UDP 归属 |
 | `change-cert-mode` / `renew-cert` | 换证书模式 / 续期证书 |
+| `acme-deploy --domain DOMAIN` | ACME 回调/重试暂存证书部署；使用共享锁并核对 nginx 实际供证，通常由 acme.sh 的 reload 钩子调用 |
 | `show-links [--node N] [--qr\|--summary]` | 全文、单节点、摘要或二维码；查看不重写产物 |
 | `export-client --node N --variant current\|plain\|ech --format uri\|json\|png --output PATH [--overwrite]` | 独立导出节点，不改服务或 state |
 | `rebuild-qr [--yes]` | 按已提交的节点定义重建 PNG，不重启服务 |
