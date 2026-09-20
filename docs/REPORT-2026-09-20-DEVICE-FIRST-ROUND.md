@@ -13,8 +13,9 @@
 | 1 `LI-REALITY` | VLESS + REALITY + Vision | 可用 |
 | 2 `LI-XHTTP-REALITY` | XHTTP + REALITY（含 VLESS Encryption） | 可用 |
 | 3 `LI-XHTTP-CDN` | XHTTP + TLS（真实域名 + 公网可信证书） | 可用 |
+| 3 `LI-XHTTP-CDN-ECH` | 同节点 3，CDN TLS 层启用 ECH（`ech=` 指向 AliDNS DoH 查询真实域名 ECHConfig） | 可用 |
 
-这是 G2「第一轮真人 + 基础节点真实传输」的第一手证据：**基础节点 1/3 与可选加密变体 2 在真实设备与真实网络上连通**。
+这是 G2「第一轮真人 + 基础节点真实传输」与 G4「ECH 组合」的第一手证据：**基础节点 1/2/3 与 ECH 变体在真实设备与真实网络上连通**。ECH 通过说明该域名 HTTPS 记录里的 ECHConfig 可被客户端取到、Cloudflare 边缘接受该握手。
 
 ## 2. 尚未记录 / 仍缺
 
@@ -25,7 +26,7 @@
 - 双向内容校验（下载与上传的具体结果、速度量级）。
 - 导入后「编辑节点再保存」字段是否保留。
 - 节点 4/5（split：CDN 上行 / REALITY 下行，及其反向）未报告。
-- 节点 3 的 **ECH 变体**（本次已导出链接，见 §3，未测）。
+- 节点 3 的普通变体与 **ECH 变体均已通过**；ECH 的 DoH/边缘细节（解析到的 ECHConfig 版本、是否命中 AliDNS 缓存）未留证据。
 - Windows v2rayN 与 Debian NAS Docker（G4 的其余两端）。
 - IPv6、H3、WARP、xpadding 等组合。
 
