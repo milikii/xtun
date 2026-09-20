@@ -317,8 +317,8 @@ run_main_menu_eof_case() {
   [[ "${menu_count}" == '2' ]]
 }
 
-# 主菜单一级入口「升级脚本到最新版」：未安装菜单第 5 项、已安装菜单第 7 项，
-# 都走公开的 update-script（2026-09-20 需求：交互式升级脚本到最新版）。
+# 主菜单一级入口「升级脚本」：未安装菜单第 5 项、已安装菜单第 7 项，
+# 都走公开的 update-script（2026-09-20 需求：交互式升级脚本）。
 run_main_menu_script_update_case() {
   local workdir=""
   local calls=""
@@ -334,9 +334,9 @@ run_main_menu_script_update_case() {
   # 存在性判断用 here-string，避免 `show_main_menu | grep -q` 命中即退出、
   # 生产端吃 SIGPIPE 被 pipefail 抬成 141。
   menu_install_present() { return 1; }
-  grep -q '5\. 升级脚本到最新版' <<< "$(show_main_menu)"
+  grep -q '5\. 升级脚本' <<< "$(show_main_menu)"
   menu_install_present() { return 0; }
-  grep -q '7\. 升级脚本到最新版' <<< "$(show_main_menu)"
+  grep -q '7\. 升级脚本' <<< "$(show_main_menu)"
 
   show_dashboard_brief() { :; }
   show_main_menu() { printf 'MENU\n'; }
