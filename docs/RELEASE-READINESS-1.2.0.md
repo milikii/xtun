@@ -42,6 +42,7 @@
 | 真机全新安装 | `172.239.117.239`（Debian 12 amd64）走公开入口安装候选：三配置校验、三服务 active、5 节点、`diagnose` 无关键问题 | 通过，退出 0 |
 | 真机维护 | `recover` 无操作、同值 `change-path`/`change-uuid` noop、同版本 `upgrade` 可信 noop、前后快照一致 | 通过 |
 | 真机卸载 | 停机、清理配置、退出 **0**、443/80 空闲；宿主原有 `xray.service`/核心/运行目录/资源配置目录按登记逐字节还原，还原后直接 `systemctl start xray` 即占住 443 | 通过 |
+| 真机 ACME（HTTP-01） | 用 `li.miliki.us.ci` 经 `acme-http` 完成真实签发（新序列号）、`acme.sh --cron --force` 续期、`acme-deploy` 回调部署与"核对实际供证"；失败路径完整回退 | 通过，见[报告](REPORT-2026-09-20-ACME-HTTP01.md) |
 | CI | `shellcheck-and-smoke` + Debian 12/13、Ubuntu 24.04 三个 baseline 安装冒烟 | 全绿 |
 
 原始日志与宿主备份保留在测试机 `/root/xtun-evidence/` 与本机 `/root/xtun-vps-backups/`（私有，不入库）；过程见[新 VPS 验证报告](REPORT-2026-09-19-VPS-VERIFICATION.md)与[接管还原复核](REVIEW-2026-09-19-TAKEOVER-RESTORE.md)。
@@ -63,7 +64,7 @@
 | G0 文档基线 | ✅ | — | — |
 | G1 P0 约束 | ⏳ | 强制断电演练：持久 pending 后 / 文件替换中 / 提交决定后各一次，重启后先只读核对再显式恢复（SIGKILL 与 guest reboot 不算） | 云平台控制台 + 电源控制 + 可恢复镜像 |
 | G2 第一轮真人 | ❌ | W14.1 真人交互 + W15.1 基础节点 1/3 真实传输（任务见 [TEST-VPS-RUNBOOK](TEST-VPS-RUNBOOK.md) J01–J16） | 操作者 1 名 + 一次可用时段 |
-| G3 语义与生命周期 | ⏳ | 公共 ACME 真实签发、定时到期续期、回调失败/重试与公网实际供证。两种校验方式都已实现：`acme-dns-cf`（DNS-01，需 Cloudflare 令牌）与 `acme-http`（HTTP-01，**不需要令牌**，要求域名解析到测试机且 80 可达） | 受控公网域名（解析到测试机）；用 `acme-http` 时不需要任何 API 令牌 |
+| G3 语义与生命周期 | ⏳ | 公共 ACME 真实签发与续期回调**已在真机通过**（`acme-http`/HTTP-01，无需令牌，见[报告](REPORT-2026-09-20-ACME-HTTP01.md)）；剩自然到期续期（ARI 窗口 2026-11-18）与实机回调故障注入。`acme-dns-cf`（DNS-01）仍需 Cloudflare 令牌 | 受控公网域名（已具备 `li.miliki.us.ci`）；实机故障注入可自行安排 |
 | G4 实际使用 | ❌ | W14.2/W15 全矩阵：五节点、split、ECH、IPv6/H3、NAS、WARP；需先修完首轮问题 | Android v2rayNG、Windows v2rayN、Debian NAS 设备 |
 | G5 正式交付 | ❌ | 同组合 72 小时 + 7 天观察；发布资料与准确产物表；定版本号并打 tag；生产迁移窗口 | 自然时间 + 一次发布授权 |
 
