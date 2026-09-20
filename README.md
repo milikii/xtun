@@ -2,9 +2,17 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前代码声明版本：`1.1.0`；下一版 `1.2.0` 的候选已在 `main`，发布就绪状态见[发布就绪清单](docs/RELEASE-READINESS-1.2.0.md)、逐版本变更见 [CHANGELOG](CHANGELOG.md)。
+| 项目 | 当前值 |
+| --- | --- |
+| 代码声明版本 | `1.1.0`（`1.2.0` 候选已在 `main`） |
+| 发布就绪 | 代码与自动验证已就绪；正式发布待 G1/G2/G4/G5 的外部证据，见[发布就绪清单](docs/RELEASE-READINESS-1.2.0.md) |
+| 支持环境 | Debian 12 / Debian 13 / Ubuntu 24.04（amd64）；CI 容器安装矩阵 + 真机全新安装验收 |
+| 核心基线 | Xray `v26.9.9`；默认追踪官方最新已发布版本（含预发布） |
+| state / 参数 | schema `2` / 参数修订 `2`（从 1.1.0 升级无需迁移） |
 
-推进状态见 [当前计划](docs/PLAN.md) 与 [批次 C/D/E 报告](docs/REPORT-2026-09-15-CDE.md)。安装身份、同版本重装、节点参数迁移、URI/PNG/原生 JSON 导出、独立二维码重建、证书生命周期、卸载与接管还原已实现；state schema 为 `2`，参数修订为 `2`。提交到 `main` 是测试候选，正式发布仍需公共 ACME、强制断电、真人与三端、真实 Cloudflare/ECH/H3 及持续观察验收。
+**文档地图**：[CHANGELOG](CHANGELOG.md)（逐版本变更）、[发布就绪清单](docs/RELEASE-READINESS-1.2.0.md)（证据与闸门）、[当前计划](docs/PLAN.md)、[架构说明](docs/ARCHITECTURE.md)、[参数契约](docs/PARAMETERS.md)、[行为决策 D01–D43](docs/DECISIONS-UX-RELIABILITY.md)、[测试与三端手册](docs/TEST-VPS-RUNBOOK.md)。
+
+提交到 `main` 是**测试候选**：安装、维护、恢复、卸载与证书生命周期都在真机验证过；正式发布仍需强制断电、真人与三端（含 Windows/NAS）、真实观察期等验收，见[发布就绪清单](docs/RELEASE-READINESS-1.2.0.md)第 6 节。
 
 ## 能安装什么
 
@@ -22,7 +30,7 @@
 
 - `haproxy + nginx + xray` 的混合前置与 `443` 端口复用
 - `Cloudflare WARP` 选择性出站（Xray 原生 WireGuard，无守护进程）
-- 现有证书（含 Cloudflare Origin CA）、自签证书、`acme.sh + Cloudflare DNS` 证书模式
+- 现有证书（含 Cloudflare Origin CA）、自签证书、`acme.sh` 的 DNS-01（Cloudflare）与 **HTTP-01**（不需要令牌）证书模式
 - `Joey BBRv3 + qdisc + RPS/XPS` 网络优化
 - 安装、变更、升级、卸载过程中的备份、校验、回滚和操作日志
 
@@ -259,6 +267,8 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `/var/log/xtun/operations.log` | 全局操作日志 |
 | `/var/log/xtun/certificate.json` | 最近证书事件、结果与续期信息 |
 | `/var/www/xtun-fallback` | 本地静态伪装站 |
+
+> 安装前如果这些路径里已经有你自己的东西（例如已有的 `/etc/systemd/system/xray.service`、`/usr/local/bin/xray`，或它依赖的 `/var/log/xray`、`/var/lib/xray`），xtun 会先登记原件与当时的启用/运行状态，卸载时按登记**还原**；只有确认是 xtun 自己创建的才删除。安装前的只读检查会把将要接管的路径列在「待接管」里。`haproxy`/`nginx` 是否按共享服务保留，看的是**安装前有没有真的在跑**，与包是谁装的无关。
 
 ## 日常命令
 
@@ -702,11 +712,13 @@ bash xtun.sh install --non-interactive \
   --enable-xhttp-xpadding
 ```
 
-默认 ECH 配置：
+默认 ECH 配置（用 `--enable-xhttp-ech` 启用时）：客户端自己用 DoH 查询**真实 CDN 域名** HTTPS 记录（type 65）里的 ECHConfig，能跟随 Cloudflare 的密钥轮换：
 
 ```text
-cloudflare-ech.com+https://223.5.5.5/dns-query
+https://dns.alidns.com/dns-query
 ```
+
+也可以用 `--xhttp-ech-config-list` 指定显式 DoH 地址、`cloudflare-ech.com+https://…` 共享名组合，或完整的 Base64 ECHConfigList。旧 state 里已有的值原样保留。
 
 默认 xpadding 配置：
 
@@ -881,20 +893,29 @@ xtun diagnose
 
 ## 开发与测试
 
-本仓库是 shell 项目，基础回归测试：
+本仓库是 shell 项目（`bash` + `shellcheck`）。基础回归：
 
 ```bash
-bash tests/smoke.sh
+bash tests/smoke.sh          # 259 组；沙箱化，可在已部署机器上以 root 跑
+```
+
+其余套件按需要单独跑（多数要求 root，部分要求真实 systemd；命令与前置条件见[测试与三端手册](docs/TEST-VPS-RUNBOOK.md)）：
+
+```bash
+bash tests/install-smoke.sh container       # 容器内全新安装冒烟（CI 同款，需要 docker）
+python3 tests/install-boundary.py           # 安装入口 PTY 边界
+python3 tests/task-menu-boundary.py         # 任务菜单 PTY 边界
+python3 tests/native-transport.py           # 原生双向传输与负例
+bash tests/migration.sh                     # 历史版本组合迁移
+XTUN_TEST_ISOLATED_VPS=yes bash tests/systemd-recovery.sh
+XTUN_TEST_ISOLATED_VPS=yes bash tests/filesystem-recovery.sh
+XTUN_TEST_ISOLATED_VPS=yes bash tests/ownership-systemd.sh
+bash tests/deployment-recovery.sh upgrade   # 会替换本机安装内容，仅限可重建环境
 ```
 
 用例会把所有托管路径改写到临时沙箱（`tests/common.sh` 的 `sandbox_managed_paths`），所以即使在已部署的机器上以 root 跑测试，也不会碰到真实的 `/usr/local/etc/xray`、`/etc/haproxy` 等文件。`tests/smoke.sh` 结尾还有一层守卫，真实托管文件一旦消失就直接让测试失败。
 
-仓库入口：
-
-- `xtun.sh`
-- `lib/`
-- `tests/`
-- `static/fallback/`
+仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 259 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
 
 ## 参考
 
