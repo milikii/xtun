@@ -359,6 +359,74 @@ run_main_menu_script_update_case() {
   load_functions
 }
 
+# 菜单内升级脚本后必须用新代码重开菜单：动作前后比 bundle 内容签名，变了就 exec 新入口。
+# 否则用户在同一次菜单会话里接着安装/恢复草稿，跑的还是升级前的旧函数（实测 2026-09-20：
+# 升级到修复版后立刻 resume，仍然复现升级前的 WARP 缺陷）。
+run_menu_script_reload_case() {
+  local workdir=""
+  local output=""
+  local status=0
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  STATE_FILE="${workdir}/missing-state.env"
+  XRAY_CONFIG_FILE="${workdir}/missing-config.json"
+  mkdir -p "${workdir}/bundle/lib" "${workdir}/bundle/static"
+  printf '#!/usr/bin/env bash\nSCRIPT_VERSION="1.1.1"\n' > "${workdir}/bundle/xtun.sh"
+  printf '# fake lib\n' > "${workdir}/bundle/lib/fake.sh"
+  printf 'fake static\n' > "${workdir}/bundle/static/fake.txt"
+  cat > "${workdir}/bin-xtun" <<'EOF'
+#!/usr/bin/env bash
+printf 'RELOADED:%s\n' "$*"
+EOF
+  chmod 0755 "${workdir}/bin-xtun"
+
+  SELF_INSTALL_DIR="${workdir}/bundle"
+  SELF_COMMAND_PATH="${workdir}/bin-xtun"
+
+  show_dashboard_brief() { :; }
+  show_main_menu() { printf 'MENU\n'; }
+  show_task_menu() { :; }
+  pause_after_menu_action() { :; }
+
+  # 升级动作改了 bundle 内容：菜单要 exec 新入口，而不是留在旧代码里
+  run_cli_command() { printf '\n# updated\n' >> "${SELF_INSTALL_DIR}/xtun.sh"; }
+  output="$(printf '5\n' | main_menu 2>&1)"
+  [[ "${output}" == *RELOADED:menu* ]]
+
+  # 动作没有改动 bundle（已经是最新或用户取消）：留在菜单里
+  run_cli_command() { :; }
+  output="$(printf '5\n0\n' | main_menu 2>&1)"
+  [[ "${output}" != *RELOADED* ]]
+  [[ "${output}" == *MENU* ]]
+
+  # 未安装时升级：升级前没有 bundle，升级后出现新内容，同样要重载
+  rm -rf "${workdir}/bundle"
+  run_cli_command() {
+    mkdir -p "${SELF_INSTALL_DIR}/lib" "${SELF_INSTALL_DIR}/static"
+    printf '#!/usr/bin/env bash\n' > "${SELF_INSTALL_DIR}/xtun.sh"
+    printf '# fake lib\n' > "${SELF_INSTALL_DIR}/lib/fake.sh"
+    printf 'fake static\n' > "${SELF_INSTALL_DIR}/static/fake.txt"
+  }
+  output="$(printf '5\n' | main_menu 2>&1)"
+  [[ "${output}" == *RELOADED:menu* ]]
+
+  # 找不到新入口时不能假装成功：明确提示并返回非零
+  SELF_COMMAND_PATH="${workdir}/missing-xtun"
+  rm -rf "${workdir}/bundle"
+  set +e
+  ( menu_reload_with_updated_script ) > "${workdir}/fallback.txt" 2>&1
+  status=$?
+  set -e
+  [[ "${status}" -eq 1 ]]
+  grep -q '重新运行 xtun' "${workdir}/fallback.txt"
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_menu_pty_case() {
   local workdir=""
   local script_file=""

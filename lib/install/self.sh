@@ -214,7 +214,7 @@ reload_updated_script_if_needed() {
   SCRIPT_VERSION="${current_version}"
 
   if [[ "${IN_MAIN_MENU:-0}" == "1" ]]; then
-    log "已更新到 ${current_version}。请退出并重新打开菜单以载入新版本。"
+    log "已更新到 ${current_version}。菜单将用新版本重新打开。"
     return 0
   fi
 

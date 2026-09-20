@@ -85,7 +85,7 @@ xtun upgrade --xray-version vX.Y.Z
 
 后续维护都可以直接运行 `xtun`，不用再进入仓库目录。
 
-安装后的主菜单按六组组织：`1 获取节点`、`2 查看状态与诊断`、`3 修改节点`、`4 升级与维护`、`5 网络与可选功能`、`6 恢复与卸载`，另有 `7 升级脚本`（未安装时是同一动作的 `5`）。安装任务位于 `4 → 7`。菜单顶部只显示精简状态，不执行配置自检或 TLS 握手；完整体检使用 `2`、`xtun status` 或 `xtun diagnose`。
+安装后的主菜单按六组组织：`1 获取节点`、`2 查看状态与诊断`、`3 修改节点`、`4 升级与维护`、`5 网络与可选功能`、`6 恢复与卸载`，另有 `7 升级脚本`（未安装时是同一动作的 `5`）。安装任务位于 `4 → 7`。菜单里升级脚本成功后会自动用新版本重新打开菜单，不会拿升级前的旧代码继续执行后续动作。菜单顶部只显示精简状态，不执行配置自检或 TLS 握手；完整体检使用 `2`、`xtun status` 或 `xtun diagnose`。
 
 任务菜单输入 `0` 返回主菜单；填写字段时用 `:back` 返回编辑、`:cancel` 取消本次动作。输入错误就地重填；动作失败或 Ctrl-C 后可以继续使用菜单，EOF 结束会话。TERM 会等待当前动作清理或恢复后退出。
 
@@ -905,7 +905,7 @@ xtun diagnose
 本仓库是 shell 项目（`bash` + `shellcheck`）。基础回归：
 
 ```bash
-bash tests/smoke.sh          # 267 组；沙箱化，可在已部署机器上以 root 跑
+bash tests/smoke.sh          # 268 组；沙箱化，可在已部署机器上以 root 跑
 ```
 
 其余套件按需要单独跑（多数要求 root，部分要求真实 systemd；命令与前置条件见[测试与三端手册](docs/TEST-VPS-RUNBOOK.md)）：
@@ -924,7 +924,7 @@ bash tests/deployment-recovery.sh upgrade   # 会替换本机安装内容，仅�
 
 用例会把所有托管路径改写到临时沙箱（`tests/common.sh` 的 `sandbox_managed_paths`），所以即使在已部署的机器上以 root 跑测试，也不会碰到真实的 `/usr/local/etc/xray`、`/etc/haproxy` 等文件。`tests/smoke.sh` 结尾还有一层守卫，真实托管文件一旦消失就直接让测试失败。
 
-仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 267 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
+仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 268 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
 
 ## 参考
 

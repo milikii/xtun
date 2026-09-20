@@ -328,6 +328,7 @@ main() {
     run_input_eof_cancel_case
     run_main_menu_eof_case
     run_main_menu_script_update_case
+    run_menu_script_reload_case
     run_menu_pty_case
     run_bootstrap_readonly_no_persist_case
     run_bootstrap_temp_and_installed_entry_case

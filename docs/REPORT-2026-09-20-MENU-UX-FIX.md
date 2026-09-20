@@ -50,6 +50,7 @@
 | `lib/base/input.sh` | `prompt_yes_no` / `prompt_with_default` / `prompt_secret` 的读取目标改成带前缀的内部变量：调用方变量名恰好是 `answer` 时不再被函数内同名局部变量遮蔽（高级项 H3 回答 `n` 曾因此报「H3 只能是 yes 或 no」）。 |
 | `lib/install/input.sh` | `install_dependency_probe_specs` 在 `CERT_MODE=acme-http` 时追加 `socat`：确认前的只读检查会列出它，最小依赖阶段随缺包一起安装，不再等到深预检才失败。 |
 | `lib/install/input.sh` | `prompt_warp_settings` 选「自动注册」时改为 `return 0`，调用方 `|| return 1` 显式传播：以前无参 `return` 会把 `[[ … == yes ]]` 的假值当状态返回 1，恢复草稿/重建时已开 WARP 的安装在这句问答后静默失败。 |
+| `lib/cli/core.sh` | 菜单内「升级脚本」成功后由 `main_menu` 比较动作前后的 bundle 内容签名，变了就 `menu_reload_with_updated_script` 直接 exec 新入口重开菜单；找不到入口时提示并退出菜单。以前升级只换磁盘文件，当前菜单进程继续用旧函数执行后续动作，用户连升级两次仍复现升级前的缺陷。 |
 | `xtun.sh` | `SCRIPT_VERSION` 由 `1.1.0` 提升为 `1.1.1`；state schema 与参数修订不变。 |
 
 `advanced` 入口与其中的 IPv6 选项继续保留，作为另一条等价路径。
@@ -76,6 +77,7 @@
 | `run_prompt_write_target_case` | 调用方变量名为 `answer` 时，`prompt_yes_no` / `prompt_with_default` / `prompt_secret` 都必须真正写进该变量。 |
 | `run_install_dependency_stage_case`（扩展） | `CERT_MODE=acme-http` 时 `socat` 进探测表、进只读报告，并在最小依赖阶段随 apt 一起安装。 |
 | `run_install_warp_prompt_status_case` | 已开 WARP、无凭据时回车/选 `n`/已有凭据三条成功路径都返回 0；`:cancel` 仍然失败（130）。 |
+| `run_menu_script_reload_case` | 升级动作改了 bundle（已安装与未安装两种起点）→ 菜单 exec 新入口；动作没改 bundle → 留在菜单；找不到入口 → 返回 1 并提示重新运行 xtun。 |
 | `run_main_menu_script_update_case` | 未安装菜单第 5 项、已安装菜单第 7 项都派发 `update-script`；两种菜单文案各自带出对应编号。 |
 | `tests/install-boundary.py` | PTY 提示白名单加入双栈开关，避免把新提示误报为「unexpected prompt」。 |
 

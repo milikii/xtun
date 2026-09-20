@@ -1162,6 +1162,28 @@ pause_after_menu_action() {
   fi
 }
 
+# 菜单进程里升级脚本后，磁盘上已经是新代码，但当前进程还在跑旧函数。
+# 直接 exec 新入口重开菜单，否则用户接着点的安装/维护用的仍是升级前的缺陷代码
+# （实测 2026-09-20：同一次菜单会话里升级完立刻恢复草稿，复现的仍是升级前的错误）。
+# 成功时进程被替换（不返回）；找不到入口时返回 1，由调用方明确提示后退出菜单。
+menu_reload_with_updated_script() {
+  local entry=""
+
+  if [[ -n "${SELF_COMMAND_PATH:-}" && -x "${SELF_COMMAND_PATH}" ]]; then
+    entry="${SELF_COMMAND_PATH}"
+  elif [[ -n "${SELF_INSTALL_DIR:-}" && -x "${SELF_INSTALL_DIR}/xtun.sh" ]]; then
+    entry="${SELF_INSTALL_DIR}/xtun.sh"
+  fi
+
+  if [[ -z "${entry}" ]]; then
+    warn "脚本已更新，但没找到可执行的新入口；请退出菜单后重新运行 xtun 载入新版本。"
+    return 1
+  fi
+
+  log "脚本已更新，正在用新版本重新打开菜单。"
+  exec "${entry}" menu
+}
+
 run_cli_command() {
   local command="${1:-menu}"
   local status=0
@@ -1371,6 +1393,7 @@ main_menu() {
   local menu_exit_status=0
   local group="" old_int_trap="" old_term_trap=""
   local menu_action_pid="" menu_signal="" menu_input_fd=""
+  local bundle_check=0 bundle_before="" bundle_after=""
   local INPUT_BACK_HANDLED=yes
   old_int_trap="$(trap -p INT)"
   old_term_trap="$(trap -p TERM)"
@@ -1411,6 +1434,14 @@ main_menu() {
         7) choice=5 ;;
       esac
     fi
+    # 脚本自升级要特殊收尾：动作前后比一次 bundle 内容签名，变了说明磁盘上已是新代码，
+    # 当前进程不能再用旧函数继续跑（见 menu_reload_with_updated_script）。
+    bundle_check=0
+    bundle_before=""
+    if [[ -z "${group}" && "${choice}" == "5" ]]; then
+      bundle_check=1
+      bundle_before="$(bundle_script_signature "${SELF_INSTALL_DIR}" 2>/dev/null || true)"
+    fi
     action_status=0
     menu_signal=""
     (
@@ -1428,6 +1459,15 @@ main_menu() {
     done
     menu_action_pid=""
     [[ "${menu_signal}" != TERM ]] || break
+    if [[ "${bundle_check}" -eq 1 ]]; then
+      bundle_after="$(bundle_script_signature "${SELF_INSTALL_DIR}" 2>/dev/null || true)"
+      if [[ "${bundle_after}" != "${bundle_before}" ]]; then
+        # 成功时 exec 掉当前进程；失败（找不到入口）就明确提示并退出菜单，不留在旧代码里。
+        menu_reload_with_updated_script || true
+        menu_exit_status=0
+        break
+      fi
+    fi
     case "${action_status}" in
       0) ;;
       10) continue ;;
