@@ -71,7 +71,7 @@ usage() {
   --enable-xhttp-ech         启用 XHTTP CDN ECH（默认关闭）。
   --disable-xhttp-ech        禁用 XHTTP CDN ECH。
   --xhttp-ech-config-list VALUE      ECH 配置列表；显式开启时默认查询真实域名，使用 https://dns.alidns.com/dns-query。
-  --enable-xhttp-xpadding    启用 XHTTP xpadding（默认关闭）。
+  --enable-xhttp-xpadding    启用 XHTTP xpadding（给 XHTTP 数据加随机长度填充，弱化包长特征；默认关闭）。
   --disable-xhttp-xpadding   禁用 XHTTP xpadding。
   --xhttp-xpadding-key VALUE        xpadding 参数名，默认 x_padding。
   --xhttp-xpadding-header VALUE     xpadding Header 名，默认 Referer。
@@ -92,11 +92,13 @@ usage() {
   --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
   --enable-warp               启用选择性 WARP 出站。
   --disable-warp              禁用 WARP 出站。
-  --enable-net-opt            启用 sysctl/fq/RPS 网络优化；第三方内核由 --bbr-kernel 单独选择。
+  --enable-net-opt            启用 sysctl/fq/RPS 网络优化（在当前内核开 BBR+fq，不需要换内核）；
+                              第三方内核由 --bbr-kernel 单独选择。
   --disable-net-opt           禁用网络优化。
-  --enable-h3                 显式开启 H3；检查 nginx 模块、公共信任证书及 UDP 443 归属。
+  --enable-h3                 显式开启 H3 直连（XHTTP 下行走 QUIC/UDP 443）；
+                              检查 nginx 模块、公共信任证书及 UDP 443 归属。
   --disable-h3                显式关闭 H3（新装默认）。
-  --bbr-kernel joey|none      是否安装 Joey BBRv3 第三方内核（新装默认 none）；none 只做 sysctl/helper。
+  --bbr-kernel joey|none      是否额外安装 Joey BBRv3 第三方内核（可选，新装默认 none）；none 只做 sysctl/helper。
   --manage-nginx-main         接管 /etc/nginx/nginx.conf（worker_connections / fd 限额）。
   --no-manage-nginx-main      不接管 nginx 主配置。
   --skip-sni-check            跳过 Reality 目标域名预检。

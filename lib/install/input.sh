@@ -705,7 +705,12 @@ install_summary_text() {
   install_summary_line "基础组合: VLESS Encryption=${vless_encryption_text} ECH=$(yes_no_text "${XHTTP_ECH_ENABLED:-no}") xpadding=$(yes_no_text "${XHTTP_XPADDING_ENABLED:-no}")"
   optional_text="网络优化=$(yes_no_text "${ENABLE_NET_OPT:-no}")"
   if [[ "${ENABLE_NET_OPT:-no}" == "yes" ]]; then
-    optional_text+="（BBR 内核=${NET_BBR_KERNEL}）"
+    # 不换内核也是一次完整的网络优化：只有显式选 joey 才额外装第三方内核。
+    if [[ "${NET_BBR_KERNEL}" == "joey" ]]; then
+      optional_text+="（BBR 内核=joey）"
+    else
+      optional_text+="（当前内核）"
+    fi
   fi
   install_summary_line "可选: ${optional_text} nginx主配置=$(yes_no_text "${NGINX_MAIN_MANAGED:-no}")"
   install_summary_line "      拦截回国=$(yes_no_text "${ROUTE_BLOCK_CN:-no}") WARP=$(yes_no_text "${ENABLE_WARP:-no}")"
@@ -746,16 +751,16 @@ yes_no_text() {
 
 show_install_advanced_menu() {
   cat <<'EOF'
-高级设置:
-  1. IPv6 直连地址
-  2. XHTTP ECH
-  3. XHTTP xpadding
-  4. 网络优化 / BBR 内核
-  5. nginx 主配置接管
-  6. 拦截回国流量（geoip:cn / geosite:cn）
-  7. 选择性 WARP 出站
-  8. 节点前缀与自动凭据（UUID / 短 ID / 路径）
-  9. H3 直连（需公共信任证书与 UDP 443）
+高级设置（默认全部关闭；改完回到确认页，输入 0 返回）:
+  1. IPv6 直连：为本机 IPv6 追加节点 6/7（双栈）
+  2. XHTTP ECH：隐藏 CDN 上行真实 SNI（要求域名已有 ECH 记录）
+  3. XHTTP xpadding：给 XHTTP 数据加随机长度填充，弱化包长特征
+  4. 网络优化：当前内核即可开 BBR+fq 与 sysctl/qdisc 调优；第三方内核可选
+  5. nginx 主配置接管：统一 worker_connections/fd 上限（先备份原件）
+  6. 拦截回国流量：geoip:cn / geosite:cn 直接黑洞
+  7. 选择性 WARP 出站：只让指定域名走 Cloudflare WARP
+  8. 节点前缀与自动凭据：改链接名前缀，或自定义 UUID/短ID/路径
+  9. H3 直连：XHTTP 下行走 QUIC(UDP/443)；需公网信任证书且 UDP 443 可用
   0. 返回确认页
 EOF
 }
@@ -790,11 +795,11 @@ prompt_install_advanced_item() {
       prompt_validated_value SERVER_IP6 "REALITY 直连节点 IPv6（留空关闭双栈）" "${SERVER_IP6:-}" ensure_server_ip6_format || return $?
       ;;
     2)
-      prompt_yes_no XHTTP_ECH_ENABLED "是否启用 XHTTP CDN 的 ECH？ [y/n]" "$(yes_no_value "${XHTTP_ECH_ENABLED:-no}")" || return $?
+      prompt_yes_no XHTTP_ECH_ENABLED "是否启用 XHTTP CDN 的 ECH（隐藏真实 SNI，要求域名已有 ECH 记录）？ [y/n]" "$(yes_no_value "${XHTTP_ECH_ENABLED:-no}")" || return $?
       configure_xhttp_ech_from_toggle
       ;;
     3)
-      prompt_yes_no XHTTP_XPADDING_ENABLED "是否启用 XHTTP xpadding？ [y/n]" "$(yes_no_value "${XHTTP_XPADDING_ENABLED:-no}")" || return $?
+      prompt_yes_no XHTTP_XPADDING_ENABLED "是否启用 XHTTP xpadding（给数据加随机长度填充，弱化包长特征）？ [y/n]" "$(yes_no_value "${XHTTP_XPADDING_ENABLED:-no}")" || return $?
       XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED}")" || exit 1
       if [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]; then
         apply_xhttp_xpadding_defaults
@@ -802,10 +807,10 @@ prompt_install_advanced_item() {
       fi
       ;;
     4)
-      prompt_yes_no ENABLE_NET_OPT "是否启用网络优化（sysctl/qdisc/helper）？ [y/n]" "$(yes_no_value "${ENABLE_NET_OPT:-no}")" || return $?
+      prompt_yes_no ENABLE_NET_OPT "是否启用网络优化（在当前内核开 BBR+fq 与 sysctl/qdisc 调优，不更换内核）？ [y/n]" "$(yes_no_value "${ENABLE_NET_OPT:-no}")" || return $?
       ENABLE_NET_OPT="$(normalize_yes_no_value "ENABLE_NET_OPT" "${ENABLE_NET_OPT}")" || exit 1
       if [[ "${ENABLE_NET_OPT}" == "yes" ]]; then
-        prompt_yes_no NET_BBR_KERNEL "是否安装 Joey BBRv3 第三方内核？ [y/n]" "$(if [[ "${NET_BBR_KERNEL}" == "joey" ]]; then printf 'y'; else printf 'n'; fi)" || return $?
+        prompt_yes_no NET_BBR_KERNEL "是否额外安装 Joey BBRv3 第三方内核？（可选：不装也保留当前内核的 BBR+fq 优化） [y/n]" "$(if [[ "${NET_BBR_KERNEL}" == "joey" ]]; then printf 'y'; else printf 'n'; fi)" || return $?
         NET_BBR_KERNEL="$(normalize_net_bbr_kernel_value "${NET_BBR_KERNEL}")" || exit 1
       fi
       ;;
@@ -838,7 +843,7 @@ prompt_install_advanced_item() {
       ;;
     9)
       answer=""
-      prompt_yes_no answer "开启 H3 直连？ [y/n]" "$(if [[ "${H3_INTENT:-off}" == on || "${H3_INTENT:-off}" == legacy-on ]]; then printf y; else printf n; fi)" || return $?
+      prompt_yes_no answer "开启 H3 直连（XHTTP 下行走 QUIC/UDP 443，需要公网信任证书且 UDP 443 可用）？ [y/n]" "$(if [[ "${H3_INTENT:-off}" == on || "${H3_INTENT:-off}" == legacy-on ]]; then printf y; else printf n; fi)" || return $?
       answer="$(normalize_yes_no_value H3 "${answer}")" || return 1
       if [[ "${answer}" == yes ]]; then H3_INTENT=on; else H3_INTENT=off; fi
       ;;
@@ -866,7 +871,7 @@ prompt_install_final_confirmation() {
       return 0
     fi
 
-    read_line_or_cancel answer "确认开始？[y/N]（advanced=高级项，back=改地址/域名/证书）: " || return $?
+    read_line_or_cancel answer "确认开始？[y/N]（输入 advanced 进入高级选项；输入 back 改地址/域名/证书）: " || return $?
     case "${answer}" in
       y|Y|yes|YES)
         INSTALL_CONFIRMED=1
@@ -887,7 +892,7 @@ prompt_install_final_confirmation() {
         die "已取消本次安装，未做任何修改。"
         ;;
       *)
-        warn "请输入 y、n、advanced 或 back。"
+        warn "请输入 y 开始安装、n 取消，或输入 advanced 进入高级选项、back 改地址/域名/证书。"
         ;;
     esac
   done

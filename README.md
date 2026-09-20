@@ -307,7 +307,7 @@ xtun status --raw
 
 ### XHTTP H3 直连下行
 
-新装默认关闭。安装时通过 `--enable-h3` 或高级设置显式开启；已安装环境使用：
+H3 直连指 XHTTP 的**下行**从 TCP/TLS 换成 QUIC（HTTP/3，UDP 443）直达 VPS，减少下行队头阻塞；上行仍按 XHTTP/CDN 或 REALITY 走 TCP。它需要公共信任证书和可用的 UDP 443，所以新装默认关闭。安装时通过 `--enable-h3` 或高级设置显式开启；已安装环境使用：
 
 ```bash
 xtun change-h3 --enable-h3
@@ -701,6 +701,8 @@ xtun renew-cert
 
 ## XHTTP 高级选项
 
+xpadding 是按配置给 XHTTP 请求/响应加一段随机长度的填充，让包长特征不那么规整；它不改变传输内容，只是可选的抗流量分析手段。ECH 则是在 CDN TLS 层隐藏真实 SNI。
+
 默认策略：
 
 - `XHTTP` 默认不启用 ECH
@@ -741,7 +743,7 @@ bash xtun.sh install --non-interactive \
 
 ## 网络优化
 
-新装默认关闭网络优化，内核策略为 `none`。明确启用网络优化后会应用 sysctl/qdisc/helper；只有另外选择 `joey`，才会按架构使用第三方项目 `byJoey/Actions-bbr-v3` 的 Joey BBRv3 内核包：
+新装默认关闭网络优化，内核策略为 `none`。启用后先在**当前内核**上应用 BBR + fq、sysctl/qdisc 与 systemd helper——不换内核也已经生效；只有另外选择 `joey`，才会额外按架构安装第三方项目 `byJoey/Actions-bbr-v3` 的 Joey BBRv3 内核包：
 
 - `x86_64 / amd64` 使用上游 `x86_64-*` release
 - `aarch64 / arm64` 使用上游 `arm64-*` release
@@ -901,7 +903,7 @@ xtun diagnose
 本仓库是 shell 项目（`bash` + `shellcheck`）。基础回归：
 
 ```bash
-bash tests/smoke.sh          # 263 组；沙箱化，可在已部署机器上以 root 跑
+bash tests/smoke.sh          # 264 组；沙箱化，可在已部署机器上以 root 跑
 ```
 
 其余套件按需要单独跑（多数要求 root，部分要求真实 systemd；命令与前置条件见[测试与三端手册](docs/TEST-VPS-RUNBOOK.md)）：
@@ -920,7 +922,7 @@ bash tests/deployment-recovery.sh upgrade   # 会替换本机安装内容，仅�
 
 用例会把所有托管路径改写到临时沙箱（`tests/common.sh` 的 `sandbox_managed_paths`），所以即使在已部署的机器上以 root 跑测试，也不会碰到真实的 `/usr/local/etc/xray`、`/etc/haproxy` 等文件。`tests/smoke.sh` 结尾还有一层守卫，真实托管文件一旦消失就直接让测试失败。
 
-仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 263 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
+仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 264 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
 
 ## 参考
 

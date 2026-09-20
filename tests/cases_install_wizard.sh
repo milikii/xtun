@@ -366,7 +366,9 @@ run_install_wizard_input_budget_case() {
   # 摘要真的出现，确认页给出高级项入口
   grep -q '安装摘要' "${workdir}/summary.txt"
   # stdin 不是终端时不打印提示，所以提示文本从记录的调用参数上看。
-  grep -q 'advanced=高级项' "${workdir}/questions.txt"
+  # 确认页必须明确告诉用户：输入 advanced 才能进高级选项，输入 back 才能改地址/域名/证书。
+  grep -q '输入 advanced 进入高级选项' "${workdir}/questions.txt"
+  grep -q '输入 back 改地址/域名/证书' "${workdir}/questions.txt"
   [[ "${CERT_SOURCE_FILE}" == "${TLS_CERT_FILE}" ]]
   [[ "${KEY_SOURCE_FILE}" == "${TLS_KEY_FILE}" ]]
 
@@ -448,6 +450,59 @@ run_install_dual_stack_prompt_case() {
   [[ "${SERVER_IP6}" == "2408:8120::7" ]]
 
   rm -rf "${workdir}"
+  load_functions
+}
+
+# 高级项菜单与逐项问答必须说清「是什么、有什么用」（2026-09-20 实测反馈：
+# 到了确认页不知道 xpadding / H3 直连是什么，也不知道网络优化要不要换内核）。
+run_install_advanced_menu_wording_case() {
+  local output=""
+  local prompts=""
+
+  load_functions
+  stub_side_effects
+
+  # 菜单：每一项带一句说明；网络优化写明当前内核即可，换内核是可选项
+  output="$(show_install_advanced_menu)"
+  grep -q '高级设置（默认全部关闭' <<< "${output}"
+  grep -q 'XHTTP xpadding：给 XHTTP 数据加随机长度填充，弱化包长特征' <<< "${output}"
+  grep -q 'H3 直连：XHTTP 下行走 QUIC(UDP/443)' <<< "${output}"
+  grep -q '网络优化：当前内核即可开 BBR+fq 与 sysctl/qdisc 调优；第三方内核可选' <<< "${output}"
+  grep -q '0. 返回确认页' <<< "${output}"
+
+  # 确认页入口：明确「输入 advanced 进入高级选项」「输入 back 改地址/域名/证书」
+  prompts="$(capture_function_definition prompt_install_final_confirmation)"
+  grep -q '输入 advanced 进入高级选项' <<< "${prompts}"
+  grep -q '输入 back 改地址/域名/证书' <<< "${prompts}"
+
+  # 逐项问答同样带解释：xpadding 的作用、H3 的条件、不换内核也能优化
+  prompts="$(capture_function_definition prompt_install_advanced_item)"
+  grep -q 'XHTTP xpadding（给数据加随机长度填充' <<< "${prompts}"
+  grep -q '在当前内核开 BBR+fq 与 sysctl/qdisc 调优，不更换内核' <<< "${prompts}"
+  grep -q '不装也保留当前内核的 BBR+fq 优化' <<< "${prompts}"
+  grep -q 'XHTTP 下行走 QUIC/UDP 443' <<< "${prompts}"
+
+  # 摘要也要能看出「不换内核」：选了网络优化但没选第三方内核时标注（当前内核）
+  SERVER_IP="203.0.113.10"
+  SERVER_IP6=""
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="reality.example.com:443"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/edge"
+  CERT_MODE="self-signed"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+  XHTTP_ECH_ENABLED="no"
+  XHTTP_XPADDING_ENABLED="no"
+  NGINX_MAIN_MANAGED="no"
+  ROUTE_BLOCK_CN="no"
+  ENABLE_WARP="no"
+  H3_INTENT="off"
+  ENABLE_NET_OPT="yes"
+  NET_BBR_KERNEL="none"
+  grep -q '网络优化=开（当前内核）' <<< "$(install_summary_text)"
+  NET_BBR_KERNEL="joey"
+  grep -q '网络优化=开（BBR 内核=joey）' <<< "$(install_summary_text)"
+
   load_functions
 }
 

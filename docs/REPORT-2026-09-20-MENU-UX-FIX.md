@@ -44,6 +44,7 @@
 | `lib/cli/core.sh` | 菜单入口 `fresh:3` / `status:3` 改走 `menu_check_sni`：`check-sni` 的退出码 2（预检不通过）是检查结论，不再被渲染成「菜单操作失败……请运行 xtun recover」；die=1 与取消=130 照常透传。CLI 的退出码语义不变。 |
 | `lib/install/input.sh` | 新增 `install_prompt_dual_stack`：基础问答里直接问「是否启用 IPv6 直连双栈（生成节点 6/7）？」。默认关闭（回车不会多出节点 6/7）；选 `y` 才追问地址，地址留空或非法会当场重问（`ensure_server_ip6_required`），不会静默退回关闭；已有地址作为默认值沿用。`--server-ip6` / `--no-ipv6` / state / 草稿的显式选择仍然优先。 |
 | `lib/install/input.sh` | `normalize_yes_no_value` 补齐 `on/off/1/0/true/false`：这些拼写本来就是 `prompt_yes_no` 接受的输入，之前走到规范化反而会被判非法并终止安装。 |
+| `lib/install/input.sh` | 高级项菜单与逐项问答补上「是什么、有什么用」：xpadding、ECH、H3 直连各一句；网络优化写明当前内核即可开 BBR+fq 与 sysctl/qdisc、第三方内核是可选项；确认页提示改为「输入 advanced 进入高级选项；输入 back 改地址/域名/证书」，非法输入的回告同步改写。 |
 | `lib/cli/core.sh` | 主菜单新增一级「升级脚本」：已安装菜单 `7`、未安装菜单 `5`，都落到 `run_menu_choice fresh:5` → 现有 `xtun update-script`（下载 GitHub `main` 最新 bundle、校验、确认后安装，失败走同代恢复）。已安装的「升级与维护 → 更新脚本」保留。 |
 | `xtun.sh` | `SCRIPT_VERSION` 由 `1.1.0` 提升为 `1.1.1`；state schema 与参数修订不变。 |
 
@@ -65,7 +66,8 @@
 | `run_sni_check_prompt_domain_case` | 无 state：空回车后追问、输入域名后按 `域名:443` 探测、头部同时给出「伪装 SNI」「回落目标」与判定说明、stderr 出现「域名不能为空」；`NON_INTERACTIVE=1` 仍退出 1。 |
 | `run_menu_check_sni_status_case` | 菜单入口把 `check-sni` 的退出码 2 归一为 0，1/130 原样透传。 |
 | `run_install_dual_stack_prompt_case` | 选 `y` 追问并写入地址；回车默认关且不追问地址；选 `n` 关掉已有地址；选 `y` 但地址留空后重问；已有地址时回车沿用。 |
-| `run_install_wizard_input_budget_case` | 基础路径问答次数 8 → 9，新增双栈提示的顺序断言。 |
+| `run_install_wizard_input_budget_case` | 基础路径问答次数 8 → 9，新增双栈提示的顺序断言；确认页提示必须含「输入 advanced 进入高级选项」与「输入 back 改地址/域名/证书」。 |
+| `run_install_advanced_menu_wording_case` | 高级项菜单每项带说明，xpadding/H3 写清作用与条件，网络优化写明当前内核即可、第三方内核可选；逐项问答文案同步。 |
 | `run_main_menu_script_update_case` | 未安装菜单第 5 项、已安装菜单第 7 项都派发 `update-script`；两种菜单文案各自带出对应编号。 |
 | `tests/install-boundary.py` | PTY 提示白名单加入双栈开关，避免把新提示误报为「unexpected prompt」。 |
 
