@@ -127,6 +127,26 @@ prompt_acme_dns_cf_inputs() {
   prompt_optional_cloudflare_scope
 }
 
+# ACME 家族的共同点：公网 CA 签发、必须过公共信任链、证书落在 ACME_HOME、换证/卸载要清理。
+# 区别只在"怎么证明域名所有权"：acme-dns-cf 走 Cloudflare API 写 TXT，acme-http 走 80 端口。
+# 只判"是不是 ACME"，避免每加一种校验方式就到十来个地方补 `||`。
+cert_mode_is_acme() {
+  case "${1:-${CERT_MODE:-}}" in
+    acme-dns-cf|acme-http) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# HTTP-01：不需要 DNS 令牌，但要域名解析到本机、80 端口可达（见 preflight 与签发时的复核）。
+prompt_acme_http_inputs() {
+  prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}" || return $?
+  prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}" || return $?
+  # 从 DNS 模式切过来时把令牌清掉，避免继续留在 state 里。
+  CF_DNS_TOKEN=""
+  CF_DNS_ACCOUNT_ID=""
+  CF_DNS_ZONE_ID=""
+}
+
 prepare_existing_cert_inputs() {
   local input_mode=""
   local first_input=""
@@ -232,6 +252,10 @@ prompt_cert_mode_inputs() {
       clear_existing_cert_inputs
       prompt_acme_dns_cf_inputs
       ;;
+    acme-http)
+      clear_existing_cert_inputs
+      prompt_acme_http_inputs
+      ;;
     *)
       die "不支持的证书模式：${CERT_MODE}"
       ;;
@@ -260,7 +284,7 @@ install_acme_sh() {
     return
   fi
 
-  [[ -n "${ACME_EMAIL}" ]] || die "acme-dns-cf 模式必须提供 ACME_EMAIL。"
+  [[ -n "${ACME_EMAIL}" ]] || die "ACME 模式必须提供 ACME_EMAIL。"
   tmp_file="$(mktemp)" || return 1
   if ! curl -fsSL --connect-timeout 10 --max-time 60 https://get.acme.sh -o "${tmp_file}" \
     || ! sh "${tmp_file}" email="${ACME_EMAIL}" >/dev/null; then
@@ -285,7 +309,7 @@ acme_deferred_receipt_valid() {
 }
 
 # 环境只传给独立 ACME/回调进程；故意不污染父操作。
-# shellcheck disable=SC2030
+# shellcheck disable=SC2030,SC2031
 issue_acme_cf_cert() {
   local cert_file="${1}" key_file="${2}" nonce="" status=0
   [[ -n "${ACME_EMAIL}" ]] || { warn "acme-dns-cf 模式必须提供 ACME_EMAIL。"; return 1; }
@@ -322,6 +346,53 @@ issue_acme_cf_cert() {
   copy_acme_stage_pair "${cert_file}" "${key_file}" || return 1
 }
 
+# HTTP-01：不需要 DNS 令牌，但要求域名解析到本机且 80 端口可达。
+# acme.sh 的 standalone 在签发与续期时都要占用 80；xtun 自己的 nginx（以及发行版默认站点）
+# 也听 80，所以用 pre/post hook 让 nginx 在挑战窗口内让位。acme.sh 的成功与失败路径都会执行
+# post-hook（_on_issue_success / _on_issue_err 都处理它），不会把 nginx 停在关闭状态。
+# shellcheck disable=SC2030,SC2031
+issue_acme_http_cert() {
+  local cert_file="${1}" key_file="${2}" nonce="" status=0 resolved_ip=""
+
+  [[ -n "${ACME_EMAIL}" ]] || { warn "acme-http 模式必须提供 ACME_EMAIL。"; return 1; }
+  [[ "${GENERATION_ACTIVE:-no}" == yes && "${SCRIPT_LOCK_HELD:-0}" -eq 1 ]] || return 1
+  command -v socat >/dev/null 2>&1 \
+    || { warn "acme-http 模式需要 socat（acme.sh standalone）；请重新执行 install 补齐依赖。"; return 1; }
+  resolved_ip="$(getent ahostsv4 "${XHTTP_DOMAIN}" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
+  if [[ -z "${resolved_ip}" ]]; then
+    warn "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机，当前无法解析。"; return 1
+  fi
+  if [[ -n "${SERVER_IP:-}" && "${resolved_ip}" != "${SERVER_IP}" ]]; then
+    warn "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机 ${SERVER_IP}，当前解析为 ${resolved_ip}。"; return 1
+  fi
+  install_acme_sh || return 1
+  write_acme_reload_helper || return 1
+  install -d -m 0700 "${SSL_DIR}/.acme-stage" || return 1
+  nonce="$(cat /proc/sys/kernel/random/uuid)" || return 1
+  rm -f "${BACKUP_DIR}/acme-deferred.json" || return 1
+  (
+    export XTUN_ACME_DEFER_OPERATION="${BACKUP_DIR}" XTUN_ACME_DEFER_NONCE="${nonce}"
+    export XTUN_LOCK_FILE="${SCRIPT_LOCK_FILE}"
+    "${ACME_SH_BIN}" --register-account -m "${ACME_EMAIL}" --server "${ACME_CA}" || exit 1
+    "${ACME_SH_BIN}" --issue --standalone -d "${XHTTP_DOMAIN}" --server "${ACME_CA}" --keylength ec-256 \
+      --pre-hook "systemctl stop nginx >/dev/null 2>&1 || true" \
+      --post-hook "systemctl start nginx >/dev/null 2>&1 || true" \
+      --key-file "$(acme_stage_key_file)" --fullchain-file "$(acme_stage_cert_file)" \
+      --reloadcmd "${ACME_RELOAD_HELPER}" || status=$?
+    # acme.sh 3.1.1: RENEW_SKIP=2 means the existing certificate is not due.
+    [[ "${status}" -eq 0 || "${status}" -eq 2 ]] || exit "${status}"
+    if [[ "${status}" -eq 2 ]]; then log "ACME 尚未到轮换日期，将重新校验和部署现有证书。"; fi
+    rm -f "${BACKUP_DIR}/acme-deferred.json" || exit 1
+    "${ACME_SH_BIN}" --install-cert -d "${XHTTP_DOMAIN}" --ecc \
+      --key-file "$(acme_stage_key_file)" --fullchain-file "$(acme_stage_cert_file)" \
+      --reloadcmd "${ACME_RELOAD_HELPER}" || exit 1
+  ) || return 1
+  acme_deferred_receipt_valid "${nonce}" || {
+    warn "ACME 回调未确认本次证书，未把外层返回成功当作部署成功。"; return 1;
+  }
+  copy_acme_stage_pair "${cert_file}" "${key_file}" || return 1
+}
+
 validate_tls_assets_with_paths() {
   local report="" capability=""
   report="$(certificate_capability_report "${1}" "${2}" "${XHTTP_DOMAIN}")" || return 1
@@ -329,7 +400,7 @@ validate_tls_assets_with_paths() {
   case "${capability}" in
     ready) ;;
     origin-ca|self-signed)
-      if [[ "${CERT_MODE}" == acme-dns-cf ]]; then
+      if cert_mode_is_acme; then
         warn "ACME 候选必须通过公共信任链校验：${report#*|}"; return 1
       fi ;;
     *) warn "候选证书校验失败：${report#*|}"; return 1 ;;
@@ -434,6 +505,9 @@ stage_and_promote_tls_assets() {
     acme-dns-cf)
       issue_acme_cf_cert "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
+    acme-http)
+      issue_acme_http_cert "${stage_cert_file}" "${stage_key_file}" || return 1
+      ;;
     self-signed)
       write_self_signed_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
@@ -483,8 +557,8 @@ cleanup_previous_acme_cert() {
   local old_cert_mode="${1:-}"
   local old_xhttp_domain="${2:-}"
 
-  if [[ "${old_cert_mode}" == "acme-dns-cf" && -x "${ACME_SH_BIN}" && -n "${old_xhttp_domain}" ]]; then
-    if [[ "${CERT_MODE}" != "acme-dns-cf" || "${XHTTP_DOMAIN}" != "${old_xhttp_domain}" ]]; then
+  if cert_mode_is_acme "${old_cert_mode}" && [[ -x "${ACME_SH_BIN}" ]] && [[ -n "${old_xhttp_domain}" ]]; then
+    if ! cert_mode_is_acme || [[ "${XHTTP_DOMAIN}" != "${old_xhttp_domain}" ]]; then
       "${ACME_SH_BIN}" --remove -d "${old_xhttp_domain}" --ecc >/dev/null 2>&1 || true
     fi
   fi
@@ -539,7 +613,7 @@ write_certificate_receipt() {
 
 certificate_next_renewal() {
   local conf="${ACME_HOME}/${XHTTP_DOMAIN}_ecc/${XHTTP_DOMAIN}.conf"
-  [[ "${CERT_MODE:-}" == acme-dns-cf && -f "${conf}" ]] || return 0
+  cert_mode_is_acme && [[ -f "${conf}" ]] || return 0
   # acme.sh 的配置是 Shell；这里只读数字，不 source 邮箱、令牌或其它程序。
   awk -F= '$1 == "Le_NextRenewTime" {v=$2; gsub(/[\047\042]/,"",v); if (v ~ /^[0-9]+$/) print v}' "${conf}" | tail -n 1
 }
@@ -608,7 +682,7 @@ apply_certificate_only_update() {
     paths+=("${STATE_FILE}" "${OUTPUT_FILE}" "${QR_OUTPUT_DIR}/manifest.json")
     if [[ -f "${QR_OUTPUT_DIR}/manifest.json" ]]; then load_export_node_objects >/dev/null || return 1; fi
   fi
-  if [[ "${CERT_MODE}" == acme-dns-cf ]]; then paths+=("${ACME_HOME}/${XHTTP_DOMAIN}_ecc"); fi
+  if cert_mode_is_acme; then paths+=("${ACME_HOME}/${XHTTP_DOMAIN}_ecc"); fi
   begin_generation_paths "证书更新 (${trigger})" nginx.service -- "${paths[@]}" || return 1
   certificate_record_event "${trigger}" started
   if [[ "${source}" == acme ]]; then
@@ -674,6 +748,7 @@ acme_deploy_cmd() {
     flock -n 9 || return 1
     pending_operation_validate || return 1
     [[ "$(awk -F'\t' '$1 == "op_id" {print $2}' "${PENDING_OP_FILE}")" == "${XTUN_ACME_DEFER_OPERATION}" ]] || return 1
+    # 回调进程还没读 state；任何 ACME 模式都要求公共信任链，这里只需 cert_mode_is_acme 为真。
     local CERT_MODE=acme-dns-cf XHTTP_DOMAIN="${domain}"
     validate_tls_assets_with_paths "$(acme_stage_cert_file)" "$(acme_stage_key_file)" || return 1
     cert_digest="$(identity_file_sha256 "$(acme_stage_cert_file)")" || return 1
@@ -688,7 +763,7 @@ acme_deploy_cmd() {
   fi
   begin_mutation || return 1
   load_current_install_context || return 1
-  if [[ "${CERT_MODE}" != acme-dns-cf || "${XHTTP_DOMAIN}" != "${domain}" ]]; then
+  if ! cert_mode_is_acme || [[ "${XHTTP_DOMAIN}" != "${domain}" ]]; then
     certificate_record_event acme-callback rejected '域名或证书来源已改变，保留当前证书'
     warn "此回调不属于当前 ACME 域名，未部署。"; return 1
   fi

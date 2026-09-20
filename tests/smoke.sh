@@ -413,6 +413,7 @@ main() {
     run_acme_automatic_callback_case
     run_acme_callback_lock_case
     run_served_certificate_socket_case
+    run_acme_http_issue_case
     run_node_object_matrix_case
     run_vless_users_migration_case
     run_client_tuning_preservation_case

@@ -709,6 +709,7 @@ install_summary_cert_detail() {
       fi
       ;;
     acme-dns-cf) printf '（ACME DNS Cloudflare，域名 %s）' "${XHTTP_DOMAIN:-}" ;;
+    acme-http) printf '（ACME HTTP-01，域名 %s）' "${XHTTP_DOMAIN:-}" ;;
     *) printf '' ;;
   esac
 }
@@ -947,7 +948,7 @@ validate_cert_mode_value() {
 
   value="$(normalize_cert_mode "${1}")"
   case "${value}" in
-    self-signed|existing|acme-dns-cf)
+    self-signed|existing|acme-dns-cf|acme-http)
       printf '%s' "${value}"
       ;;
     *)
@@ -962,6 +963,7 @@ show_cert_mode_menu() {
   1. 自签名
   2. 现有证书（含 Cloudflare Origin CA）
   3. ACME DNS (Cloudflare)
+  4. ACME HTTP (Let's Encrypt 等，不需要 DNS 令牌)
 EOF
 }
 
@@ -981,11 +983,11 @@ prompt_cert_mode_selection() {
     prompt_with_default CERT_MODE "${prompt_text}" "${default_choice}" || return $?
     candidate="${CERT_MODE}"
     if [[ "${NON_INTERACTIVE}" != 1 ]]; then
-      case "${candidate}" in 1) candidate=self-signed ;; 2) candidate=existing ;; 3) candidate=acme-dns-cf ;; esac
+      case "${candidate}" in 1) candidate=self-signed ;; 2) candidate=existing ;; 3) candidate=acme-dns-cf ;; 4) candidate=acme-http ;; esac
     fi
     candidate="$(validate_cert_mode_value "${candidate}")" || {
       [[ "${NON_INTERACTIVE}" != 1 ]] || return 1
-      warn "请选择 1=self-signed、2=existing、3=acme-dns-cf。"
+      warn "请选择 1=self-signed、2=existing、3=acme-dns-cf、4=acme-http。"
       CERT_MODE="${previous}"
       continue
     }
@@ -1316,7 +1318,26 @@ run_install_preflight_checks() {
     acme-dns-cf)
       verify_cloudflare_token "${CF_DNS_TOKEN}" "Cloudflare DNS Token"
       ;;
+    acme-http)
+      preflight_check_acme_http_domain
+      ;;
   esac
+}
+
+# HTTP-01 要求 CA 能从公网访问 http://<域名>/.well-known/acme-challenge/；
+# 域名没指到本机就一定签不下来。挡在确认前，别等到 acme.sh 里才报一句看不懂的错。
+preflight_check_acme_http_domain() {
+  local resolved_ip=""
+
+  [[ "${CERT_MODE:-}" == "acme-http" ]] || return 0
+  [[ -n "${XHTTP_DOMAIN:-}" ]] || die "acme-http 模式必须提供 XHTTP 域名。"
+  resolved_ip="$(getent ahostsv4 "${XHTTP_DOMAIN}" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
+  [[ -n "${resolved_ip}" ]] || die "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机，当前无法解析。"
+  if [[ -n "${SERVER_IP:-}" && "${resolved_ip}" != "${SERVER_IP}" ]]; then
+    die "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机 ${SERVER_IP}，当前解析为 ${resolved_ip}。"
+  fi
+  command -v socat >/dev/null 2>&1 || die "acme-http 模式需要 socat（acme.sh standalone）。"
+  log_success "acme-http 域名 ${XHTTP_DOMAIN} 已解析到本机：${resolved_ip}"
 }
 
 is_valid_hostname() {

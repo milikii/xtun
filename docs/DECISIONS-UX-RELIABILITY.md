@@ -491,3 +491,12 @@ CI 的官方容器检查验证实际导出的 JSON、固定镜像和 SOCKS 启�
 `check-sni`（安装与改 SNI 预检）增加「后量子就绪度」观察项：用本机 openssl 的默认分组做一次带 SNI 的握手，记录协商到的密钥组与证书链总长度。只有协商到后量子混合组（如 `X25519MLKEM768`）**且**证书链严格大于 3500 字节才 PASS；其它已测得情况（未协商到混合组、链长不足、字段缺失、命令不可用）一律 WARN。
 
 WARN 只增加告警计数，不产生 FAIL、不改变退出码，也不阻断安装；`--skip-sni-check` 仍跳过整组预检。该阈值是给将来的后量子/签名配置准备度用的观察指标，不是现有 Reality 节点的可用性门槛，也不代表已启用后量子签名或 ML-DSA。探测不新增 CLI 开关、状态键或后台巡检，并与既有 TLS/证书/HTTP 探针连同一个 target；本机 openssl 不支持 ML-KEM 时只如实记录协商结果，不据此断言目标站不支持。依据 W17 与[归档计划 §3.2](archive/PLAN-2026-09-12.md)。
+
+<a id="d43"></a>
+### D43：ACME 增加 HTTP-01，不再强制要求 DNS 令牌
+
+除 DNS-01（`acme-dns-cf`，需要 Cloudflare API）外，证书模式增加 `acme-http`：用 `acme.sh --standalone` 走 HTTP-01。证书家族的判断收敛到 `cert_mode_is_acme`，签发、回调、实际供证、续期与卸载清理都与 DNS 模式共用同一条路径，不因校验方式不同而放宽任何一步（仍要求公共信任链、暂存摘要、成对提升、核对 nginx 实际供证）。
+
+- **门槛**：域名必须解析到本机（安装前硬预检，签发时再复核一次）；需要 `socat`（安装依赖里按模式补齐）。不新增 API 令牌，也不改变 state 语义。
+- **端口**：acme.sh standalone 在签发与续期时占用 80，而 nginx 也听 80；用 `--pre-hook`/`--post-hook` 让 nginx 让位并恢复。已核对 acme.sh 3.1.1 的成功与失败路径都会执行 post-hook，不会把 nginx 停在关闭状态。
+- **范围**：`acme-http` 只用于域名直连本机（不走橙云）的场景；需要 Cloudflare 代理或 DNS-01 时仍用 `acme-dns-cf`。依据 W17/G3。

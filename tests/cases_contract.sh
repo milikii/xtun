@@ -217,7 +217,7 @@ run_cert_mode_roundtrip_case() {
   local choice=""
   local output=""
 
-  for mode in self-signed existing acme-dns-cf; do
+  for mode in self-signed existing acme-dns-cf acme-http; do
     choice="$(cert_mode_choice_value "${mode}")"
     output="$(
       CERT_MODE=""
@@ -229,14 +229,16 @@ run_cert_mode_roundtrip_case() {
     [[ "$(validate_cert_mode_value "${mode}")" == "${mode}" ]]
   done
 
-  # 历史 CLI 数字：2/3 → existing，4 → acme-dns-cf，含义不变
+  # 历史 CLI 数字：2/3 → existing，4 → acme-dns-cf，5 → acme-http，含义不变
   [[ "$(normalize_cert_mode 2)" == "existing" ]]
   [[ "$(normalize_cert_mode 3)" == "existing" ]]
   [[ "$(normalize_cert_mode 4)" == "acme-dns-cf" ]]
+  [[ "$(normalize_cert_mode 5)" == "acme-http" ]]
   [[ "$(cert_mode_choice_value "existing")" == "2" ]]
   [[ "$(cert_mode_choice_value "acme-dns-cf")" == "3" ]]
+  [[ "$(cert_mode_choice_value "acme-http")" == "4" ]]
   output="$(show_cert_mode_menu)"
-  [[ "${output}" == *'3. ACME DNS (Cloudflare)'* && "${output}" != *'4.'* ]]
+  [[ "${output}" == *'3. ACME DNS (Cloudflare)'* && "${output}" == *'4. ACME HTTP'* ]]
 
   # 交互路径：显示的名称回车后还是同一个规范值
   output="$(bash <<ISOLATED 2>&1

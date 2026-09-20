@@ -140,6 +140,9 @@ pretty_cert_mode() {
     acme-dns-cf)
       printf 'ACME DNS CF'
       ;;
+    acme-http)
+      printf 'ACME HTTP'
+      ;;
     *)
       printf '%s' "${CERT_MODE:-未知}"
       ;;
@@ -879,6 +882,7 @@ certificate_usage_text() {
   case "${CERT_MODE:-}" in
     self-signed) printf 'self-signed（自签；Reality 回落伪装用，客户端按公钥校验）' ;;
     acme-dns-cf) printf 'acme-dns-cf（公网 CA 签发；本地与外部客户端都应受系统信任）' ;;
+    acme-http) printf 'acme-http（公网 CA 经 HTTP-01 签发；本地与外部客户端都应受系统信任）' ;;
     existing) printf 'existing（用户提供 PEM：公网 CA / Origin CA / 自签都可能）' ;;
     *) printf '未知（%s）' "${CERT_MODE:-未记录}" ;;
   esac

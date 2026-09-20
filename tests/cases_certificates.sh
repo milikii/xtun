@@ -292,3 +292,70 @@ run_served_certificate_socket_case() {
   wait "${pid}" 2>/dev/null || true
   rm -rf "${workdir}"
 }
+
+# HTTP-01 证书模式（acme-http）：不需要 DNS 令牌；要求域名解析到本机；
+# 签发走 acme.sh standalone，并用 pre/post hook 让 nginx 在挑战窗口内让位。
+run_acme_http_issue_case() {
+  local workdir=""
+  local args_log=""
+  local status=0
+
+  load_functions
+  workdir="$(mktemp -d)"
+  certificates_fixture "${workdir}"
+  args_log="${workdir}/acme-args.log"
+
+  # 模式识别与规范化：acme-http 属于 ACME 家族，别名与菜单编号都能落到同一个值
+  CERT_MODE=acme-http; cert_mode_is_acme
+  CERT_MODE=acme-dns-cf; cert_mode_is_acme
+  CERT_MODE=self-signed
+  if cert_mode_is_acme; then
+    printf '[fail] self-signed 不属于 ACME 家族\n' >&2; return 1
+  fi
+  [[ "$(normalize_cert_mode 5)" == 'acme-http' ]]
+  [[ "$(normalize_cert_mode acme-http01)" == 'acme-http' ]]
+  [[ "$(validate_cert_mode_value acme-http)" == 'acme-http' ]]
+  [[ "$(cert_mode_choice_value acme-http)" == '4' ]]
+
+  # 预检：域名没解析到本机时必须挡住（HTTP-01 签不下来）
+  CERT_MODE=acme-http
+  XHTTP_DOMAIN='cdn.example.com'
+  SERVER_IP='203.0.113.10'
+  getent() { printf '198.51.100.7 STREAM x\n'; }
+  if ( preflight_check_acme_http_domain ) >/dev/null 2>&1; then
+    printf '[fail] acme-http 域名解析到别处时必须拒绝\n' >&2; return 1
+  fi
+  getent() { printf '203.0.113.10 STREAM x\n'; }
+  socat() { :; }
+  ( preflight_check_acme_http_domain ) >/dev/null 2>&1
+
+  # 签发参数：standalone + pre/post hook，且不带 dns_cf、不带 CF_Token
+  ACME_EMAIL='ops@example.test'
+  ACME_CA="${DEFAULT_ACME_CA:-letsencrypt}"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'printf "%%s\\n" "$*" >> %q\n' "${args_log}"
+    printf 'printf "CF_Token=%%s\\n" "${CF_Token:-}" >> %q\n' "${args_log}"
+    printf 'case "$*" in *--register-account*) exit 0 ;; esac\n'
+    printf 'exit 1\n'
+  } > "${ACME_SH_BIN}"
+  chmod 0755 "${ACME_SH_BIN}"
+  backup_path() { :; }
+  BACKUP_DIR="${workdir}/backups"
+  mkdir -p "${BACKUP_DIR}"
+  GENERATION_ACTIVE=yes
+  SCRIPT_LOCK_HELD=1
+
+  issue_acme_http_cert "${workdir}/stage-cert.pem" "${workdir}/stage-key.pem" || status=$?
+  [[ "${status}" -ne 0 ]]
+  grep -q -- '--issue --standalone' "${args_log}"
+  grep -q -- '--pre-hook' "${args_log}"
+  grep -q -- '--post-hook' "${args_log}"
+  grep -q '^CF_Token=$' "${args_log}"
+  if grep -q 'dns_cf' "${args_log}"; then
+    printf '[fail] acme-http 不应使用 DNS-01\n' >&2; return 1
+  fi
+
+  rm -rf "${workdir}"
+  load_functions
+}

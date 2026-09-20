@@ -12,7 +12,7 @@ install_packages() {
 
   log_step "安装依赖包。"
   apt-get update || return 1
-  for package_name in ca-certificates curl gnupg haproxy nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin qrencode; do
+  for package_name in ca-certificates curl gnupg haproxy nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin qrencode socat; do
     # 已有服务可能来自自编译或第三方源；安装发行版同名包会替换其二进制，
     # 即使配置快照恢复成功，旧配置也可能再也启动不了。
     case "${package_name}" in
@@ -21,6 +21,10 @@ install_packages() {
           log "保留已有 ${package_name} 可执行文件，本次不安装或更新同名系统包。"
           continue
         fi
+        ;;
+      socat)
+        # 只有 HTTP-01（acme.sh standalone）用得上；其它证书模式不装。
+        [[ "${CERT_MODE:-}" == "acme-http" ]] || continue
         ;;
     esac
     packages+=("${package_name}")
@@ -173,7 +177,8 @@ managed_package_names() {
     "nginx-common" \
     "jq" \
     "uuid-runtime" \
-    "qrencode"
+    "qrencode" \
+    "socat"
 }
 
 normalize_xray_sha256_value() {

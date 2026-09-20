@@ -336,7 +336,7 @@ diagnose_cmd() {
     ok) ;;
     untrusted)
       # 自签 / Origin CA 不受系统信任是预期；公网 CA 模式下不受信任才是故障。
-      if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
+      if cert_mode_is_acme; then
         tls_failures+=("本地 TLS 握手成功但证书不受系统信任（ACME 证书应受系统信任）")
       fi
       ;;
@@ -782,7 +782,7 @@ uninstall_cmd() {
 
   # acme.sh 是共享安装：只摘掉为这个域名申请的那份证书，
   # 本体和别人的证书都留着，不然一次 uninstall 会把别的站点续期也一起弄断。
-  if [[ "${CERT_MODE:-}" == "acme-dns-cf" && -x "${ACME_SH_BIN}" && -n "${XHTTP_DOMAIN:-}" ]]; then
+  if cert_mode_is_acme && [[ -x "${ACME_SH_BIN}" ]] && [[ -n "${XHTTP_DOMAIN:-}" ]]; then
     "${ACME_SH_BIN}" --remove -d "${XHTTP_DOMAIN}" --ecc >/dev/null 2>&1 || true
     acme_cert_dir="${ACME_HOME}/${XHTTP_DOMAIN}_ecc"
     if [[ -d "${acme_cert_dir}" ]]; then

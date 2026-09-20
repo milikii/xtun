@@ -77,8 +77,10 @@ usage() {
   --xhttp-xpadding-header VALUE     xpadding Header 名，默认 Referer。
   --xhttp-xpadding-placement VALUE  xpadding placement，默认 queryInHeader。
   --xhttp-xpadding-method VALUE     xpadding method，默认 tokenish。
-  --cert-mode VALUE           证书模式：self-signed、existing、acme-dns-cf。
-                              existing 同时接受现有证书文件和 Cloudflare Origin CA 证书。
+  --cert-mode VALUE           证书模式：self-signed、existing、acme-dns-cf、acme-http。
+                              existing 同时接受现有证书文件和 Cloudflare Origin CA 证书；
+                              acme-dns-cf 用 Cloudflare API 做 DNS-01，需令牌；
+                              acme-http 用 80 端口做 HTTP-01，不需要令牌，要求域名解析到本机。
   --cert-file VALUE           existing 模式使用的证书文件。
   --key-file VALUE            existing 模式使用的私钥文件。
   --cert-pem VALUE            existing 模式下仅支持 @文件路径；交互模式可直接粘贴 PEM。
@@ -159,7 +161,7 @@ check-sni 参数:
 
 变更证书模式参数:
   --non-interactive           非交互运行。
-  --cert-mode VALUE           新证书模式：self-signed、existing、acme-dns-cf。
+  --cert-mode VALUE           新证书模式：self-signed、existing、acme-dns-cf、acme-http。
   --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
   --cert-file VALUE           existing 模式使用的证书文件。
   --key-file VALUE            existing 模式使用的私钥文件。
@@ -284,7 +286,7 @@ input_validate_edited_field() {
     XHTTP_DOMAIN) ensure_xhttp_domain_format ;;
     XHTTP_PATH) ensure_xhttp_path_format ;;
     CERT_MODE)
-      case "${CERT_MODE}" in 1) CERT_MODE=self-signed ;; 2) CERT_MODE=existing ;; 3) CERT_MODE=acme-dns-cf ;; esac
+      case "${CERT_MODE}" in 1) CERT_MODE=self-signed ;; 2) CERT_MODE=existing ;; 3) CERT_MODE=acme-dns-cf ;; 4) CERT_MODE=acme-http ;; esac
       CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")" || return 1
       ;;
     ENABLE_WARP|ENABLE_NET_OPT|NGINX_MAIN_MANAGED|ROUTE_BLOCK_CN|XHTTP_ECH_ENABLED|XHTTP_XPADDING_ENABLED)

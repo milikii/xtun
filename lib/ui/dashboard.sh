@@ -121,7 +121,7 @@ show_dashboard() {
   panel_row "VLESS Encryption" "$(bool_badge "${XHTTP_VLESS_ENCRYPTION_ENABLED:-${DEFAULT_XHTTP_VLESS_ENCRYPTION_ENABLED}}")"
   panel_row "XHTTP ECH" "$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}" ]]; then bool_badge "yes"; else bool_badge "no"; fi)  doh=${XHTTP_ECH_CONFIG_LIST:-未设置}"
   panel_row "XHTTP xpadding" "$(bool_badge "${XHTTP_XPADDING_ENABLED:-${DEFAULT_XHTTP_XPADDING_ENABLED}}")  header=${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}"
-  if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
+  if cert_mode_is_acme; then
     panel_row "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
   fi
 

@@ -245,6 +245,12 @@ normalize_cert_mode() {
     acme-dns-cf|acme|acme-dns|acme-cf|acme证书)
       printf 'acme-dns-cf'
       ;;
+    5)
+      printf 'acme-http'
+      ;;
+    acme-http|acme-http01|acme-http-01|acme-http1|http-01|http01|acmehttp)
+      printf 'acme-http'
+      ;;
     *)
       printf '%s' "${input}"
       ;;
@@ -263,6 +269,9 @@ cert_mode_choice_value() {
       ;;
     acme-dns-cf)
       printf '3'
+      ;;
+    acme-http)
+      printf '4'
       ;;
   esac
 }

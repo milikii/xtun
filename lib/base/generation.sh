@@ -265,7 +265,7 @@ begin_generation() {
   paths+=("$@")
   if [[ "${include_tls}" == "yes" ]]; then
     paths+=("${SSL_DIR}" "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" "${ACME_RELOAD_HELPER}")
-    if [[ "${CERT_MODE:-}" == "acme-dns-cf" && -n "${XHTTP_DOMAIN:-}" ]]; then
+    if cert_mode_is_acme && [[ -n "${XHTTP_DOMAIN:-}" ]]; then
       paths+=("${ACME_HOME}/${XHTTP_DOMAIN}_ecc")
     fi
   fi
