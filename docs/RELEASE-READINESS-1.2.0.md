@@ -63,9 +63,9 @@
 | --- | --- | --- | --- |
 | G0 文档基线 | ✅ | — | — |
 | G1 P0 约束 | ⏳ | 强制断电演练：持久 pending 后 / 文件替换中 / 提交决定后各一次，重启后先只读核对再显式恢复（SIGKILL 与 guest reboot 不算） | 云平台控制台 + 电源控制 + 可恢复镜像 |
-| G2 第一轮真人 | ❌ | W14.1 真人交互 + W15.1 基础节点 1/3 真实传输（任务见 [TEST-VPS-RUNBOOK](TEST-VPS-RUNBOOK.md) J01–J16） | 操作者 1 名 + 一次可用时段 |
+| G2 第一轮真人 | ⏳ | 首轮已开始：操作者在手机上实测节点 1（REALITY）、2（XHTTP+REALITY）与 3（XHTTP-CDN）**可用**（见[记录](REPORT-2026-09-20-DEVICE-FIRST-ROUND.md)）。补齐客户端/系统版本、双向内容与"编辑后字段保留"后可关闭首轮 | 操作者补充上述细节即可，无需新资源 |
 | G3 语义与生命周期 | ⏳ | 公共 ACME 真实签发与续期回调**已在真机通过**（`acme-http`/HTTP-01，无需令牌，见[报告](REPORT-2026-09-20-ACME-HTTP01.md)）；剩自然到期续期（ARI 窗口 2026-11-18）与实机回调故障注入。`acme-dns-cf`（DNS-01）仍需 Cloudflare 令牌 | 受控公网域名（已具备 `li.miliki.us.ci`）；实机故障注入可自行安排 |
-| G4 实际使用 | ❌ | W14.2/W15 全矩阵：五节点、split、ECH、IPv6/H3、NAS、WARP；需先修完首轮问题 | Android v2rayNG、Windows v2rayN、Debian NAS 设备 |
+| G4 实际使用 | ⏳ | Android 端节点 1/2/3 初步可用；节点 4/5、ECH 变体、IPv6/H3/WARP、Windows v2rayN 与 Debian NAS Docker 未测 | Windows 与 NAS 设备、一次可用时段 |
 | G5 正式交付 | ❌ | 同组合 72 小时 + 7 天观察；发布资料与准确产物表；定版本号并打 tag；生产迁移窗口 | 自然时间 + 一次发布授权 |
 
 ## 7. 发布步骤（闸门通过后执行）
