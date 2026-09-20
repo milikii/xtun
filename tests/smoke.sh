@@ -218,6 +218,7 @@ main() {
     run_install_wizard_input_budget_case
     run_install_advanced_menu_wording_case
     run_install_advanced_item_answer_case
+    run_install_warp_prompt_status_case
     run_install_dual_stack_prompt_case
     run_install_identity_stability_case
     run_install_generated_identity_reentry_case

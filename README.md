@@ -905,7 +905,7 @@ xtun diagnose
 本仓库是 shell 项目（`bash` + `shellcheck`）。基础回归：
 
 ```bash
-bash tests/smoke.sh          # 266 组；沙箱化，可在已部署机器上以 root 跑
+bash tests/smoke.sh          # 267 组；沙箱化，可在已部署机器上以 root 跑
 ```
 
 其余套件按需要单独跑（多数要求 root，部分要求真实 systemd；命令与前置条件见[测试与三端手册](docs/TEST-VPS-RUNBOOK.md)）：
@@ -924,7 +924,7 @@ bash tests/deployment-recovery.sh upgrade   # 会替换本机安装内容，仅�
 
 用例会把所有托管路径改写到临时沙箱（`tests/common.sh` 的 `sandbox_managed_paths`），所以即使在已部署的机器上以 root 跑测试，也不会碰到真实的 `/usr/local/etc/xray`、`/etc/haproxy` 等文件。`tests/smoke.sh` 结尾还有一层守卫，真实托管文件一旦消失就直接让测试失败。
 
-仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 266 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
+仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 267 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
 
 ## 参考
 

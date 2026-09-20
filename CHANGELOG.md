@@ -15,6 +15,7 @@
 - 启用 XHTTP xpadding 后不再追问 key/Header/placement/method 四个参数：脚本直接套用默认值并打印生效参数，要自定义仍走 `--xhttp-xpadding-*`。
 - 修复 `prompt_yes_no` / `prompt_with_default` / `prompt_secret` 在调用方变量名为 `answer` 时的写入遮蔽：高级项 H3 回答 `n` 曾被误判成「H3 只能是 yes 或 no」。
 - `acme-http` 的 `socat` 依赖进入确认前的只读检查与最小依赖准备，不再等到深预检才失败（此前会先装完其它包再停在预检，留下草稿）。
+- 修复已开 WARP 时的「是否导入 wgcf profile」问答：选自动注册（默认）现在明确返回成功，不再让恢复草稿/重建的安装在这句话之后静默失败；取消与 EOF 仍然失败。
 - 主菜单新增一级「升级脚本」（未安装菜单第 5 项、已安装菜单第 7 项），复用 `update-script`：下载 GitHub `main` 的最新 bundle、校验并在确认后安装；已安装菜单的「升级与维护 → 更新脚本」保留。
 
 ### 脚本版本
@@ -23,7 +24,7 @@
 
 ### 验证与 CI
 
-- canonical smoke **266 组**全绿，新增高级项行为、prompt 写入目标、依赖阶段与 SNI/双栈/菜单用例。
+- canonical smoke **267 组**全绿，新增高级项行为、WARP 问答状态、prompt 写入目标、依赖阶段与 SNI/双栈/菜单用例。
 
 ## [未发布] 1.2.0 候选
 

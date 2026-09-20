@@ -554,6 +554,55 @@ run_install_advanced_item_answer_case() {
   load_functions
 }
 
+# 2026-09-20 实测回归：恢复草稿/重建时已开 WARP、又没有现成凭据，必须能走完
+# 「自动注册」问答。以前 `[[ "${use_profile}" == "yes" ]] || return` 会把条件
+# 的假值当状态返回 1，安装在这句问答之后静默失败（菜单只报「菜单操作失败」）。
+run_install_warp_prompt_status_case() {
+  local workdir=""
+  local status=0
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  NON_INTERACTIVE=0
+  WARP_PRIVATE_KEY=""
+  WARP_ADDRESS_V4=""
+  WARP_PROFILE_SOURCE=""
+
+  # 回车 = 自动注册：正常路径，整体必须成功
+  printf '\n' > "${workdir}/auto.txt"
+  ENABLE_WARP="yes"
+  install_apply_base_combo_defaults < "${workdir}/auto.txt" > /dev/null 2>&1
+  [[ "${ENABLE_WARP}" == "yes" ]]
+
+  # 明确选 n 同样是成功路径
+  printf 'n\n' > "${workdir}/no.txt"
+  ENABLE_WARP="yes"
+  install_apply_base_combo_defaults < "${workdir}/no.txt" > /dev/null 2>&1
+  [[ "${ENABLE_WARP}" == "yes" ]]
+
+  # 已有凭据时不再提问，直接成功
+  ENABLE_WARP="yes"
+  WARP_PRIVATE_KEY="${TEST_WARP_PRIVATE_KEY}"
+  WARP_ADDRESS_V4="172.16.0.2"
+  install_apply_base_combo_defaults < /dev/null > /dev/null 2>&1
+  [[ "${ENABLE_WARP}" == "yes" ]]
+
+  # 取消仍然要失败（130），不能被「自动注册」的修复吃掉
+  WARP_PRIVATE_KEY=""
+  WARP_ADDRESS_V4=""
+  printf ':cancel\n' > "${workdir}/cancel.txt"
+  set +e
+  ( install_apply_base_combo_defaults < "${workdir}/cancel.txt" ) > /dev/null 2>&1
+  status=$?
+  set -e
+  [[ "${status}" -eq 130 ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_install_identity_stability_case() {
   local workdir=""
   local state_file=""

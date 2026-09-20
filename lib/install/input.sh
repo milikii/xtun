@@ -403,7 +403,8 @@ install_apply_base_combo_defaults() {
   ENABLE_WARP="${ENABLE_WARP:-no}"
   ENABLE_WARP="$(normalize_yes_no_value "ENABLE_WARP" "${ENABLE_WARP}")" || exit 1
   if [[ "${ENABLE_WARP}" == "yes" ]]; then
-    prompt_warp_settings
+    # 显式传播：取消/EOF 要失败，选「自动注册」是成功。
+    prompt_warp_settings || return 1
   fi
 }
 
@@ -1041,7 +1042,10 @@ prompt_warp_settings() {
   log "WARP 出站由 Xray 内置 wireguard 承载，默认自动注册一台免费 WARP 设备。"
   prompt_yes_no use_profile "是否改为导入已有的 wgcf profile.conf？ [y/n]" "n" || return $?
   use_profile="$(normalize_yes_no_value "use_profile" "${use_profile}")" || exit 1
-  [[ "${use_profile}" == "yes" ]] || return
+  # 选「自动注册」是正常路径，必须返回 0：以前这里是无参 `return`，
+  # 会把上面 `[[ … == yes ]]` 的假值当作状态返回 1，导致 resume/重建时
+  # 已开 WARP 的安装在问答走完后静默失败（实测 2026-09-20）。
+  [[ "${use_profile}" == "yes" ]] || return 0
 
   prompt_multiline_value WARP_PROFILE_SOURCE "粘贴 wgcf profile.conf 内容" || return $?
   [[ -n "${WARP_PROFILE_SOURCE}" ]] || die "未提供 WARP profile 内容。"
