@@ -137,6 +137,38 @@ run_batch_b_menu_reentry_case() {
   [[ "${output}" == *当前动作已取消* && "${output}" == *STATUS-OK* && "${output}" != *'cancel fell through'* ]]
 }
 
+# 2026-09-20 实测回归：调用方把变量命名为 answer 时，prompt_* 里的同名局部变量
+# 会把写入吃掉，`prompt_yes_no answer …` 之后调用方拿到空值（H3 高级项因此报
+# 「H3 只能是 yes 或 no」）。写入目标必须永远是调用方给的变量。
+run_prompt_write_target_case() {
+  local workdir=""
+  local answer=""
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+
+  printf 'n\n' > "${workdir}/no.txt"
+  answer=""
+  prompt_yes_no answer "测试开关 [y/n]" "y" < "${workdir}/no.txt"
+  [[ "${answer}" == "n" ]]
+
+  printf '\n' > "${workdir}/empty.txt"
+  answer=""
+  prompt_with_default answer "测试默认值" "fallback" < "${workdir}/empty.txt"
+  [[ "${answer}" == "fallback" ]]
+
+  NON_INTERACTIVE=0
+  printf 'token-value\n' > "${workdir}/secret.txt"
+  answer=""
+  prompt_secret answer "测试密钥" < "${workdir}/secret.txt" > /dev/null
+  [[ "${answer}" == "token-value" ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_batch_b_preview_noop_case() {
   local workdir="" output="" status=0
   load_functions

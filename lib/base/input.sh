@@ -390,7 +390,11 @@ prompt_with_default() {
   local default_value="${3}"
   local current_value=""
   local effective_default=""
-  local answer=""
+  # 读取目标必须用带前缀的内部名字：调用方传进来的变量名可能就叫 answer，
+  # 而本函数里的 `local answer` 在动态作用域下比调用方的变量更近，
+  # `printf -v "${var_name}"` 会写进这个局部变量，调用方永远拿不到值
+  # （和 read_line_or_cancel 是同一个坑，见本文件开头）。
+  local xtun_prompt_default_value=""
   local INPUT_BACK_HANDLED=yes
 
   current_value="${!var_name:-}"
@@ -409,16 +413,16 @@ prompt_with_default() {
   while true; do
     effective_default="${!var_name:-${default_value}}"
     if [[ -n "${effective_default}" ]]; then
-      read_line_or_cancel answer "${prompt_text} [${effective_default}]: " || return $?
-      answer="${answer:-${effective_default}}"
+      read_line_or_cancel xtun_prompt_default_value "${prompt_text} [${effective_default}]: " || return $?
+      xtun_prompt_default_value="${xtun_prompt_default_value:-${effective_default}}"
     else
-      read_line_or_cancel answer "${prompt_text}: " || return $?
+      read_line_or_cancel xtun_prompt_default_value "${prompt_text}: " || return $?
     fi
-    [[ "${answer}" == :back ]] || break
+    [[ "${xtun_prompt_default_value}" == :back ]] || break
     input_edit_previous_fields "${var_name}" || return 1
   done
 
-  printf -v "${var_name}" '%s' "${answer}"
+  printf -v "${var_name}" '%s' "${xtun_prompt_default_value}"
   input_remember_field "${var_name}" "${prompt_text}" no || return $?
 }
 
@@ -509,7 +513,8 @@ prompt_secret() {
   local var_name="${1}"
   local prompt_text="${2}"
   local current_value=""
-  local answer=""
+  # 同 prompt_with_default：读取用内部名字，避免遮蔽调用方同名变量。
+  local xtun_prompt_secret_value=""
 
   resolve_value_source "${var_name}"
   current_value="${!var_name:-}"
@@ -523,17 +528,17 @@ prompt_secret() {
 
   while true; do
     if [[ -n "${current_value}" ]]; then
-      read_secret_or_cancel answer "${prompt_text} [已填写，直接回车沿用]: " || return $?
-      answer="${answer:-${current_value}}"
+      read_secret_or_cancel xtun_prompt_secret_value "${prompt_text} [已填写，直接回车沿用]: " || return $?
+      xtun_prompt_secret_value="${xtun_prompt_secret_value:-${current_value}}"
     else
-      read_secret_or_cancel answer "${prompt_text}: " || return $?
+      read_secret_or_cancel xtun_prompt_secret_value "${prompt_text}: " || return $?
     fi
-    [[ "${answer}" == :back ]] || break
+    [[ "${xtun_prompt_secret_value}" == :back ]] || break
     printf '\n'
     input_edit_previous_fields "${var_name}" || return 1
   done
   printf '\n'
-  printf -v "${var_name}" '%s' "${answer}"
+  printf -v "${var_name}" '%s' "${xtun_prompt_secret_value}"
   # 手工粘贴的令牌很容易带上一个尾随空格，和 @文件路径 那条路是同一个坑。
   sanitize_indirect_value "${var_name}"
   input_remember_field "${var_name}" "${prompt_text}" yes || return $?
@@ -601,7 +606,8 @@ prompt_yes_no() {
   local default_value="${3}"
   local current_value=""
   local effective_default=""
-  local answer=""
+  # 同 prompt_with_default：读取用内部名字，调用方的变量名（可能叫 answer）不会被遮蔽。
+  local xtun_prompt_yes_no_value=""
 
   current_value="${!var_name:-}"
 
@@ -615,13 +621,13 @@ prompt_yes_no() {
 
   effective_default="${current_value:-${default_value}}"
   while true; do
-    read_line_or_cancel answer "${prompt_text} [${effective_default}]: " || return $?
-    answer="${answer:-${effective_default}}"
-    case "${answer,,}" in
+    read_line_or_cancel xtun_prompt_yes_no_value "${prompt_text} [${effective_default}]: " || return $?
+    xtun_prompt_yes_no_value="${xtun_prompt_yes_no_value:-${effective_default}}"
+    case "${xtun_prompt_yes_no_value,,}" in
       y|yes|n|no|on|off|1|0|true|false) break ;;
       *) warn '请输入 y 或 n。' ;;
     esac
   done
-  printf -v "${var_name}" '%s' "${answer}"
+  printf -v "${var_name}" '%s' "${xtun_prompt_yes_no_value}"
   input_remember_field "${var_name}" "${prompt_text}" no || return $?
 }

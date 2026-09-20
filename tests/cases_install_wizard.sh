@@ -506,6 +506,54 @@ run_install_advanced_menu_wording_case() {
   load_functions
 }
 
+# 2026-09-20 实测反馈两件事：
+#   1. 高级项 9 回答 n 被误判成非法值——根因是调用方变量名 answer 被 prompt 函数
+#      内部的同名局部变量遮蔽（prompt_yes_no 已改为内部前缀变量）。
+#   2. 高级项 3 选 y 之后不该再追问四个 xpadding 参数，脚本应直接用默认值。
+run_install_advanced_item_answer_case() {
+  local workdir=""
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+
+  # H3：n 是正常关闭，y 才打开；两种情况都不能报「H3 只能是 yes 或 no」
+  H3_INTENT=off
+  printf 'n\n' > "${workdir}/h3-no.txt"
+  prompt_install_advanced_item 9 < "${workdir}/h3-no.txt" 2> "${workdir}/h3-no.err"
+  [[ "${H3_INTENT}" == "off" ]]
+  [[ ! -s "${workdir}/h3-no.err" ]]
+
+  H3_INTENT=off
+  printf 'y\n' > "${workdir}/h3-yes.txt"
+  prompt_install_advanced_item 9 < "${workdir}/h3-yes.txt" 2> "${workdir}/h3-yes.err"
+  [[ "${H3_INTENT}" == "on" ]]
+
+  # xpadding：选 y 之后只读这一次输入，参数全部取默认值并打印出来
+  : > "${workdir}/reads.txt"
+  read_line_or_cancel() {
+    printf 'read\n' >> "${workdir}/reads.txt"
+    printf -v "${1}" '%s' "y"
+  }
+  XHTTP_XPADDING_ENABLED="no"
+  XHTTP_XPADDING_KEY=""
+  XHTTP_XPADDING_HEADER=""
+  XHTTP_XPADDING_PLACEMENT=""
+  XHTTP_XPADDING_METHOD=""
+  prompt_install_advanced_item 3 > "${workdir}/xpadding.out" 2>&1
+  [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]
+  [[ "${XHTTP_XPADDING_KEY}" == "${DEFAULT_XHTTP_XPADDING_KEY}" ]]
+  [[ "${XHTTP_XPADDING_HEADER}" == "${DEFAULT_XHTTP_XPADDING_HEADER}" ]]
+  [[ "${XHTTP_XPADDING_PLACEMENT}" == "${DEFAULT_XHTTP_XPADDING_PLACEMENT}" ]]
+  [[ "${XHTTP_XPADDING_METHOD}" == "${DEFAULT_XHTTP_XPADDING_METHOD}" ]]
+  [[ "$(wc -l < "${workdir}/reads.txt")" -eq 1 ]]
+  grep -q "${DEFAULT_XHTTP_XPADDING_HEADER}" "${workdir}/xpadding.out"
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_install_identity_stability_case() {
   local workdir=""
   local state_file=""
@@ -727,7 +775,7 @@ run_install_dependency_stage_case() {
     case "${1:-}" in
       -v)
         case "${2:-}" in
-          qrencode) [[ "${dependencies_ready}" -eq 1 ]]; return ;;
+          qrencode|socat) [[ "${dependencies_ready}" -eq 1 ]]; return ;;
           openssl|ip|ss|jq|curl|uuidgen|unzip|modprobe) return 0 ;;
         esac
         ;;
@@ -756,6 +804,22 @@ run_install_dependency_stage_case() {
   # 已就绪的工具不重复安装
   assert_absent 'apt-get install -y .*\(openssl\|jq\|curl\)' "${apt_log}"
   [[ "$(cat "${workdir}/order.txt")" == "preflight" ]]
+
+  # acme-http（HTTP-01 standalone）要 socat：只有这个证书模式才把它列进探测表，
+  # 并在最小依赖阶段装上，不能等到深预检才发现缺（实测 2026-09-20）。
+  CERT_MODE="acme-http"
+  dependencies_ready=0
+  expected_missing="$(install_missing_dependency_packages)"
+  printf '%s\n' "${expected_missing}" | grep -qx 'socat'
+  output="$(install_dependency_readonly_report)"
+  printf '%s' "${output}" | grep -q 'socat（socat）'
+  : > "${apt_log}"
+  : > "${workdir}/order.txt"
+  install_prepare_and_preflight
+  grep -q 'apt-get install -y .*socat' "${apt_log}"
+  [[ "$(cat "${workdir}/order.txt")" == "preflight" ]]
+  CERT_MODE=""
+  dependencies_ready=1
 
   # 依赖准备失败：要说清软件包保留、托管状态未动，并且不再往下走深预检
   : > "${apt_log}"

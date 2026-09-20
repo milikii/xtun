@@ -46,6 +46,9 @@
 | `lib/install/input.sh` | `normalize_yes_no_value` 补齐 `on/off/1/0/true/false`：这些拼写本来就是 `prompt_yes_no` 接受的输入，之前走到规范化反而会被判非法并终止安装。 |
 | `lib/install/input.sh` | 高级项菜单与逐项问答补上「是什么、有什么用」：xpadding、ECH、H3 直连各一句；网络优化写明当前内核即可开 BBR+fq 与 sysctl/qdisc、第三方内核是可选项；确认页提示改为「输入 advanced 进入高级选项；输入 back 改地址/域名/证书」，非法输入的回告同步改写。 |
 | `lib/cli/core.sh` | 主菜单新增一级「升级脚本」：已安装菜单 `7`、未安装菜单 `5`，都落到 `run_menu_choice fresh:5` → 现有 `xtun update-script`（下载 GitHub `main` 最新 bundle、校验、确认后安装，失败走同代恢复）。已安装的「升级与维护 → 更新脚本」保留。 |
+| `lib/install/input.sh` | 高级项 3：启用 xpadding 后不再追问 key/Header/placement/method，直接套用默认值并打印生效参数（要自定义走 `--xhttp-xpadding-*`）；`prompt_xhttp_xpadding_settings` 随之删除。 |
+| `lib/base/input.sh` | `prompt_yes_no` / `prompt_with_default` / `prompt_secret` 的读取目标改成带前缀的内部变量：调用方变量名恰好是 `answer` 时不再被函数内同名局部变量遮蔽（高级项 H3 回答 `n` 曾因此报「H3 只能是 yes 或 no」）。 |
+| `lib/install/input.sh` | `install_dependency_probe_specs` 在 `CERT_MODE=acme-http` 时追加 `socat`：确认前的只读检查会列出它，最小依赖阶段随缺包一起安装，不再等到深预检才失败。 |
 | `xtun.sh` | `SCRIPT_VERSION` 由 `1.1.0` 提升为 `1.1.1`；state schema 与参数修订不变。 |
 
 `advanced` 入口与其中的 IPv6 选项继续保留，作为另一条等价路径。
@@ -68,6 +71,9 @@
 | `run_install_dual_stack_prompt_case` | 选 `y` 追问并写入地址；回车默认关且不追问地址；选 `n` 关掉已有地址；选 `y` 但地址留空后重问；已有地址时回车沿用。 |
 | `run_install_wizard_input_budget_case` | 基础路径问答次数 8 → 9，新增双栈提示的顺序断言；确认页提示必须含「输入 advanced 进入高级选项」与「输入 back 改地址/域名/证书」。 |
 | `run_install_advanced_menu_wording_case` | 高级项菜单每项带说明，xpadding/H3 写清作用与条件，网络优化写明当前内核即可、第三方内核可选；逐项问答文案同步。 |
+| `run_install_advanced_item_answer_case` | 高级项 9 回答 `n` 是正常关闭、`y` 才打开且不报「H3 只能是 yes 或 no」；高级项 3 选 `y` 只读一次输入，四个 xpadding 参数取默认值。 |
+| `run_prompt_write_target_case` | 调用方变量名为 `answer` 时，`prompt_yes_no` / `prompt_with_default` / `prompt_secret` 都必须真正写进该变量。 |
+| `run_install_dependency_stage_case`（扩展） | `CERT_MODE=acme-http` 时 `socat` 进探测表、进只读报告，并在最小依赖阶段随 apt 一起安装。 |
 | `run_main_menu_script_update_case` | 未安装菜单第 5 项、已安装菜单第 7 项都派发 `update-script`；两种菜单文案各自带出对应编号。 |
 | `tests/install-boundary.py` | PTY 提示白名单加入双栈开关，避免把新提示误报为「unexpected prompt」。 |
 

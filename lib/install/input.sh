@@ -463,6 +463,12 @@ uuid-runtime|uuidgen
 unzip|unzip
 kmod|modprobe
 EOF
+  # HTTP-01（acme.sh standalone）会用到 socat，而深预检在它缺失时直接失败；
+  # 只有 acme-http 模式才需要准备它（实测 2026-09-20：确认后才发现缺 socat，
+  # 安装停在依赖准备后的深预检，其它包已经装了一半）。
+  if [[ "${CERT_MODE:-}" == "acme-http" ]]; then
+    printf 'socat|socat\n'
+  fi
 }
 
 install_missing_dependency_packages() {
@@ -802,8 +808,10 @@ prompt_install_advanced_item() {
       prompt_yes_no XHTTP_XPADDING_ENABLED "是否启用 XHTTP xpadding（给数据加随机长度填充，弱化包长特征）？ [y/n]" "$(yes_no_value "${XHTTP_XPADDING_ENABLED:-no}")" || return $?
       XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED}")" || exit 1
       if [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]; then
+        # 默认参数是脚本的既定值，不再占四次问答（2026-09-20 实测反馈）；
+        # 已有自定义值原样保留，需要改时走 --xhttp-xpadding-* 参数。
         apply_xhttp_xpadding_defaults
-        prompt_xhttp_xpadding_settings
+        log "xpadding 已按以下参数开启：placement=${XHTTP_XPADDING_PLACEMENT} header=${XHTTP_XPADDING_HEADER} key=${XHTTP_XPADDING_KEY} method=${XHTTP_XPADDING_METHOD}；需要自定义请用 --xhttp-xpadding-* 参数。"
       fi
       ;;
     4)
@@ -908,13 +916,6 @@ configure_xhttp_ech_from_toggle() {
 
   XHTTP_ECH_CONFIG_LIST=""
   XHTTP_ECH_FORCE_QUERY=""
-}
-
-prompt_xhttp_xpadding_settings() {
-  prompt_with_default XHTTP_XPADDING_KEY "XHTTP xpadding 参数名" "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" || return $?
-  prompt_with_default XHTTP_XPADDING_HEADER "XHTTP xpadding Header 名" "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" || return $?
-  prompt_with_default XHTTP_XPADDING_PLACEMENT "XHTTP xpadding placement" "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" || return $?
-  prompt_with_default XHTTP_XPADDING_METHOD "XHTTP xpadding method" "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" || return $?
 }
 
 default_reality_target_for_sni() {
