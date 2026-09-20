@@ -473,6 +473,47 @@ EOF
   load_functions
 }
 
+# 菜单「检查 REALITY SNI」在新机器上没有 state：必须现场问域名，不能 die 进
+# 「选 3 → 报错 → 回车继续 → 再选 3」的循环（实测 2026-09-20）。
+run_sni_check_prompt_domain_case() {
+  local workdir=""
+  local output=""
+  local status=0
+
+  workdir="$(mktemp -d)"
+  XRAY_CONFIG_FILE="${workdir}/missing-config.json"
+  STATE_FILE="${workdir}/missing-state.env"
+  NON_INTERACTIVE=0
+
+  sni_probe_dns() { printf '203.0.113.5\n'; }
+  sni_probe_tls() { printf 'Protocol  : TLSv1.3\nPeer Temp Key: X25519, 253 bits\nALPN protocol: h2\nVerify return code: 0 (ok)\n'; }
+  sni_probe_cert() {
+    printf 'SAN=DNS:%s\nNOTAFTER=%s\nISSUER=C=US, O=Some CA\n' \
+      "${2}" "$(date -d '+76 days' '+%b %e %H:%M:%S %Y GMT')"
+  }
+  sni_probe_http() { printf '200 2  0.02 nginx\n'; }
+  sni_probe_pq() { printf 'STATUS=ok\nPQ=true\nGROUP=X25519MLKEM768\nCHAIN_BYTES=4000\n'; }
+
+  # 空回车 → 追问；第二次给域名 → 用该域名自己的默认目标跑检查
+  printf '\nkit.edu\n' > "${workdir}/answers.txt"
+  output="$(sni_check_cmd < "${workdir}/answers.txt" 2> "${workdir}/error.txt")"
+  printf '%s\n' "${output}" | grep -q 'Reality 目标域名预检: kit.edu'
+  printf '%s\n' "${output}" | grep -q '(target kit.edu:443)'
+  grep -q '域名不能为空' "${workdir}/error.txt"
+
+  # 非交互入口不把「没有域名」变成挂起等待输入，直接失败
+  NON_INTERACTIVE=1
+  set +e
+  ( sni_check_cmd < /dev/null ) >/dev/null 2>&1
+  status=$?
+  set -e
+  [[ "${status}" -eq 1 ]]
+
+  NON_INTERACTIVE=0
+  rm -rf "${workdir}"
+  load_functions
+}
+
 # 有界探测：五个探针各跑一次、连同一个实际 target、输出阶段进度与总预算上界。
 run_sni_bounded_probe_case() {
   local workdir=""

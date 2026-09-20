@@ -4,7 +4,7 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 代码声明版本 | `1.1.0`（`1.2.0` 候选已在 `main`） |
+| 代码声明版本 | `1.1.1`（`1.2.0` 候选已在 `main`） |
 | 发布就绪 | 代码与自动验证已就绪；正式发布待 G1/G2/G4/G5 的外部证据，见[发布就绪清单](docs/RELEASE-READINESS-1.2.0.md) |
 | 支持环境 | Debian 12 / Debian 13 / Ubuntu 24.04（amd64）；CI 容器安装矩阵 + 真机全新安装验收 |
 | 核心基线 | Xray `v26.9.9`；默认追踪官方最新已发布版本（含预发布） |
@@ -85,7 +85,7 @@ xtun upgrade --xray-version vX.Y.Z
 
 后续维护都可以直接运行 `xtun`，不用再进入仓库目录。
 
-安装后的主菜单按六组组织：`1 获取节点`、`2 查看状态与诊断`、`3 修改节点`、`4 升级与维护`、`5 网络与可选功能`、`6 恢复与卸载`。安装任务位于 `4 → 7`。菜单顶部只显示精简状态，不执行配置自检或 TLS 握手；完整体检使用 `2`、`xtun status` 或 `xtun diagnose`。
+安装后的主菜单按六组组织：`1 获取节点`、`2 查看状态与诊断`、`3 修改节点`、`4 升级与维护`、`5 网络与可选功能`、`6 恢复与卸载`，另有 `7 升级脚本到最新版`（未安装时是同一动作的 `5`）。安装任务位于 `4 → 7`。菜单顶部只显示精简状态，不执行配置自检或 TLS 握手；完整体检使用 `2`、`xtun status` 或 `xtun diagnose`。
 
 任务菜单输入 `0` 返回主菜单；填写字段时用 `:back` 返回编辑、`:cancel` 取消本次动作。输入错误就地重填；动作失败或 Ctrl-C 后可以继续使用菜单，EOF 结束会话。TERM 会等待当前动作清理或恢复后退出。
 
@@ -120,8 +120,9 @@ xtun upgrade --xray-version vX.Y.Z
 轮换凭据 `--task rotate`（等价 `--rotate-credentials`）。有未完成的安装草稿时，
 非交互入口必须显式选任务，不会静默加载上次输入；想丢掉草稿重新开始用
 `--discard-draft`。全新安装的可选高影响项（IPv6、WARP、网络优化、第三方内核、
-接管 nginx 主配置、回国拦截、H3、ECH、xpadding）默认全部关闭，需要时在确认页的
-`advanced` 入口或命令行显式打开；VLESS Encryption 默认开启。
+接管 nginx 主配置、回国拦截、H3、ECH、xpadding）默认全部关闭；IPv6 双栈在基础
+问答里直接询问，其余需要在确认页的 `advanced` 入口或命令行显式打开；
+VLESS Encryption 默认开启。
 
 使用已有证书并启用 WARP（默认自动注册免费 WARP，无需任何密钥）：
 
@@ -226,7 +227,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `update-script [--reinstall]` | 更新脚本 bundle；可显式重装相同版本 |
 | `upgrade [--xray-version vX.Y.Z] [--reinstall]` | 升级核心及配套 geo；可显式重装身份未知或漂移的相同版本 |
 | `recover [--yes]` | 按持久清单恢复未完成操作；已提交的操作只完成清理 |
-| `check-sni [域名] [--target host:port] [--timeout N]` | Reality 目标域名预检；默认探测已保存的 `REALITY_TARGET`（显式域名时用该域名:443），有公布出来的等待上界；含不阻断的「后量子就绪度」观察项 |
+| `check-sni [域名] [--target host:port] [--timeout N]` | Reality 目标域名预检；默认探测已保存的 `REALITY_TARGET`（显式域名时用该域名:443），没有已保存域名时交互询问（菜单「检查 REALITY SNI」同一条路径）；有公布出来的等待上界；含不阻断的「后量子就绪度」观察项 |
 | `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
 | `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
 | `change-h3 [--enable-h3\|--disable-h3]` | 显式选择 H3；启用前校验证书、模块和 UDP 归属 |
@@ -294,7 +295,7 @@ xtun status --raw
 
 ### IPv6 双栈
 
-新装默认关闭 IPv6：基础问答不再探测本机地址、也不占一次问答，需要双栈时在确认页输入 `advanced`，或在命令行给 `--server-ip6`（检测只认全局单播 `2000::/3`）。已保存的选择（state、草稿、`--server-ip6`）照旧保留，重建不会因为改了默认值自动关掉已开的双栈。
+新装默认关闭 IPv6。基础问答里会直接问一次「是否启用 IPv6 直连双栈？」：回车即关闭，选 `y` 才追问地址（默认填自动探测到的本机全局单播地址，只认 `2000::/3`），不会再因为看不见 `advanced` 关键词而找不到开启入口。也可以在确认页 `advanced` 的选项 1 或命令行 `--server-ip6` 指定。已保存的选择（state、草稿、`--server-ip6`）照旧保留，重建不会因为改了默认值自动关掉已开的双栈。
 
 有 IPv6 时：
 
@@ -426,6 +427,10 @@ xtun apply-config
 `apply-config` 保留既有 UUID、REALITY 密钥、配对 Encryption、路径和已识别的客户端调优，同时重新生成托管配置、state、文档、PNG 与清单。目标核心支持时写出 `users` 和参数修订 `2`；旧核心保留兼容 `clients`。旧安装缺配对凭据或有效用户时停止，不靠重新生成身份补齐。导出到其它位置或已导入客户端的副本不会自动更新；参数或凭据变化后需要重新导出/导入。
 
 默认公开引导将 ref 解析为固定 commit，校验同一 commit 的完整归档和入口。自定义远程包须提供 SHA256；本地包记录本地来源。安装回执用于核对产物，不等同于上游签名。
+
+### 从 1.1.0 升级到 1.1.1 的注意点
+
+**不需要迁移**：state schema 与参数修订都保持在 `2`，节点编号、链接与导出产物不变。这一版是交互修复：主菜单 `3 检查 REALITY SNI` 在没有已保存域名时会直接问域名，不再空转报错；全新安装的基础问答会直接问是否启用 IPv6 双栈（默认关）；主菜单新增 `7 升级脚本到最新版`（未安装时是 `5`），等同于 `xtun update-script`，确认后从 GitHub `main` 拉取并安装最新 bundle。
 
 ### 从 1.1.0 升级到 1.2.0 的注意点
 
@@ -896,7 +901,7 @@ xtun diagnose
 本仓库是 shell 项目（`bash` + `shellcheck`）。基础回归：
 
 ```bash
-bash tests/smoke.sh          # 259 组；沙箱化，可在已部署机器上以 root 跑
+bash tests/smoke.sh          # 263 组；沙箱化，可在已部署机器上以 root 跑
 ```
 
 其余套件按需要单独跑（多数要求 root，部分要求真实 systemd；命令与前置条件见[测试与三端手册](docs/TEST-VPS-RUNBOOK.md)）：
@@ -915,7 +920,7 @@ bash tests/deployment-recovery.sh upgrade   # 会替换本机安装内容，仅�
 
 用例会把所有托管路径改写到临时沙箱（`tests/common.sh` 的 `sandbox_managed_paths`），所以即使在已部署的机器上以 root 跑测试，也不会碰到真实的 `/usr/local/etc/xray`、`/etc/haproxy` 等文件。`tests/smoke.sh` 结尾还有一层守卫，真实托管文件一旦消失就直接让测试失败。
 
-仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 259 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
+仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 263 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
 
 ## 参考
 

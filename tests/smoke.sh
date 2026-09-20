@@ -216,6 +216,7 @@ main() {
     run_install_task_selection_case
     run_install_new_defaults_case
     run_install_wizard_input_budget_case
+    run_install_dual_stack_prompt_case
     run_install_identity_stability_case
     run_install_generated_identity_reentry_case
     run_install_draft_schema_case
@@ -318,10 +319,12 @@ main() {
     run_diagnose_command_case
     run_missing_option_value_case
     run_dispatch_case
+    run_menu_check_sni_status_case
     run_readonly_and_error_boundary_case
     run_dispatch_help_matrix_case
     run_input_eof_cancel_case
     run_main_menu_eof_case
+    run_main_menu_script_update_case
     run_menu_pty_case
     run_bootstrap_readonly_no_persist_case
     run_bootstrap_temp_and_installed_entry_case
@@ -338,6 +341,7 @@ main() {
     run_sni_check_cmd_case
     run_sni_timeout_validation_case
     run_sni_check_target_resolution_case
+    run_sni_check_prompt_domain_case
     run_sni_bounded_probe_case
     run_sni_judge_pq_case
     run_install_preflight_sni_case

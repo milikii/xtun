@@ -329,28 +329,34 @@ run_install_wizard_input_budget_case() {
   }
 
   # 干净环境 + 已有证书路径，一路接受默认值：
-  # 地址确认 → SNI → target → CDN 域名 → 证书模式 → 证书路径 → 私钥路径 → 最终确认
-  input_lines=$'\nreality.example.com\n\ncdn.example.com\n2\n\n\ny\n'
+  # 地址确认 → 双栈（默认关） → SNI → target → CDN 域名 → 证书模式 → 证书路径
+  # → 私钥路径 → 最终确认
+  input_lines=$'\n\nreality.example.com\n\ncdn.example.com\n2\n\n\ny\n'
   # 重定向文件而不是管道：管道每一段都在子 shell 里，向导写入的变量传不回来。
   printf '%s' "${input_lines}" > "${workdir}/answers.txt"
   prepare_install_inputs < "${workdir}/answers.txt" \
     > "${workdir}/summary.txt" 2> "${workdir}/error.txt"
 
-  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -le 8 ]]
-  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -eq 8 ]]
+  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -le 9 ]]
+  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -eq 9 ]]
   grep -q '^ask:SERVER_IP$' "${workdir}/questions.txt"
   grep -q '^ask:REALITY_SNI$' "${workdir}/questions.txt"
   grep -q '^ask:REALITY_TARGET$' "${workdir}/questions.txt"
   grep -q '^ask:XHTTP_DOMAIN$' "${workdir}/questions.txt"
   grep -q '^ask:CERT_MODE$' "${workdir}/questions.txt"
+  # 双栈是基础问答里的直接选项，不再藏在 advanced 关键词后面
+  grep -q '^read:是否启用 IPv6 直连双栈' "${workdir}/questions.txt"
+  assert_absent '^ask:SERVER_IP6$' "${workdir}/questions.txt"
   # 自动值不占问答
   assert_absent '^ask:REALITY_UUID$' "${workdir}/questions.txt"
   assert_absent '^ask:REALITY_SHORT_ID$' "${workdir}/questions.txt"
   assert_absent '^ask:XHTTP_UUID$' "${workdir}/questions.txt"
   assert_absent '^ask:XHTTP_PATH$' "${workdir}/questions.txt"
   assert_absent '^ask:NODE_LABEL_PREFIX$' "${workdir}/questions.txt"
-  # 顺序：地址 → SNI/target/域名 → 证书 → 最终确认
+  # 顺序：地址 → 双栈 → SNI/target/域名 → 证书 → 最终确认
   [[ "$(grep -n '^ask:SERVER_IP$' "${workdir}/questions.txt" | cut -d: -f1)" \
+    -lt "$(grep -n '^read:是否启用 IPv6 直连双栈' "${workdir}/questions.txt" | cut -d: -f1)" ]]
+  [[ "$(grep -n '^read:是否启用 IPv6 直连双栈' "${workdir}/questions.txt" | cut -d: -f1)" \
     -lt "$(grep -n '^ask:REALITY_SNI$' "${workdir}/questions.txt" | cut -d: -f1)" ]]
   [[ "$(grep -n '^ask:REALITY_TARGET$' "${workdir}/questions.txt" | cut -d: -f1)" \
     -lt "$(grep -n '^ask:XHTTP_DOMAIN$' "${workdir}/questions.txt" | cut -d: -f1)" ]]
@@ -372,6 +378,74 @@ run_install_wizard_input_budget_case() {
     printf '[fail] 默认确认必须是取消\n' >&2
     return 1
   fi
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# 双栈必须是基础问答里的直接选项（2026-09-20 实测反馈）：
+# 选 y 追问答地址并生效；回车/选 n 保持关闭且不再追问；选 y 但地址留空时重问。
+run_install_dual_stack_prompt_case() {
+  local workdir=""
+  local idx=0
+  local -a answers=()
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  : > "${workdir}/prompts.txt"
+
+  # 直接驱动 prompt 层的输入，不经过真实终端：答案序列由用例控制。
+  read_line_or_cancel() {
+    printf '%s\n' "${2}" >> "${workdir}/prompts.txt"
+    printf -v "${1}" '%s' "${answers[idx]}"
+    idx=$((idx + 1))
+  }
+  guess_server_ip6() { printf ''; }
+
+  # 明确选 y：追问地址并写入
+  idx=0
+  answers=("y" "2408:8120::1234")
+  SERVER_IP6=""
+  install_prompt_dual_stack
+  [[ "${SERVER_IP6}" == "2408:8120::1234" ]]
+  grep -q 'IPv6 直连双栈' "${workdir}/prompts.txt"
+  grep -q '直连节点 IPv6' "${workdir}/prompts.txt"
+
+  # 回车 = 默认 n：没有已保存地址时保持关闭，而且不追问地址
+  idx=0
+  answers=("")
+  : > "${workdir}/prompts.txt"
+  SERVER_IP6=""
+  install_prompt_dual_stack
+  [[ -z "${SERVER_IP6}" ]]
+  [[ "$(wc -l < "${workdir}/prompts.txt")" -eq 1 ]]
+
+  # 明确选 n：已有地址也被关掉，同样不追问地址
+  idx=0
+  answers=("n")
+  : > "${workdir}/prompts.txt"
+  SERVER_IP6="2408:8120::1234"
+  install_prompt_dual_stack
+  [[ -z "${SERVER_IP6}" ]]
+  [[ "$(wc -l < "${workdir}/prompts.txt")" -eq 1 ]]
+
+  # 选 y 但地址留空：不能静默变成关闭；重问到合法全局单播地址为止
+  idx=0
+  answers=("y" "" "2408:8120::5")
+  SERVER_IP6=""
+  : > "${workdir}/prompts.txt"
+  install_prompt_dual_stack
+  [[ "${SERVER_IP6}" == "2408:8120::5" ]]
+  [[ "${idx}" -eq 3 ]]
+
+  # 已有地址时默认 yes，回车沿用旧值（重建不会意外关掉已开的双栈）
+  idx=0
+  answers=("" "")
+  SERVER_IP6="2408:8120::7"
+  install_prompt_dual_stack
+  [[ "${SERVER_IP6}" == "2408:8120::7" ]]
 
   rm -rf "${workdir}"
   load_functions

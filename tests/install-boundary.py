@@ -64,7 +64,8 @@ def run_case(evidence, task, entry, outcome):
     prompt_count = 0
     confirmation_count = 0
     prompts = [
-        "请选择任务", "REALITY 直连节点地址或 IP", "REALITY 可见 SNI",
+        "请选择任务", "REALITY 直连节点地址或 IP", "是否启用 IPv6 直连双栈",
+        "REALITY 直连节点 IPv6", "REALITY 可见 SNI",
         "REALITY 目标地址 host:port", "XHTTP CDN 域名", "TLS 证书模式序号", "确认开始？", "执行中断测试",
     ]
     try:

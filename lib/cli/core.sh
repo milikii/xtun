@@ -1058,6 +1058,7 @@ show_main_menu() {
   4. 升级与维护
   5. 网络与可选功能
   6. 恢复与卸载
+  7. 升级脚本到最新版
   0. 退出
 EOF
   else
@@ -1066,6 +1067,7 @@ EOF
   2. 检查环境与端口
   3. 检查 REALITY SNI
   4. 帮助
+  5. 升级脚本到最新版
   0. 退出
 EOF
   fi
@@ -1106,6 +1108,18 @@ show_operation_details() {
   fi
   printf '最近备份: %s\n操作日志: %s\n' "$(latest_backup_label)" "${OP_LOG_FILE}"
   if [[ -r "${OP_LOG_FILE}" ]]; then tail -n 12 "${OP_LOG_FILE}"; fi
+}
+
+# check-sni 的退出码 2 是「预检不通过」这个检查结论，不是菜单动作坏了。
+# 直接透传会让菜单渲染成「菜单操作失败……请运行 xtun recover」，误导用户去恢复
+# 一个并不存在的未完成操作；这里只把它归一为「看完结论后正常返回」（实测 2026-09-20）。
+# 真正的失败（die=1、取消=130）照常透传。
+menu_check_sni() {
+  local status=0
+
+  run_cli_command check-sni "$@" || status=$?
+  [[ "${status}" -ne 2 ]] || return 0
+  return "${status}"
 }
 
 menu_uuid_change() {
@@ -1305,8 +1319,10 @@ run_menu_choice() {
   case "${group}:${choice}" in
     fresh:1) menu_install_task ;;
     fresh:2) install_readonly_prechecks ;;
-    fresh:3|status:3) run_cli_command check-sni ;;
+    fresh:3|status:3) menu_check_sni ;;
     fresh:4) run_cli_command help ;;
+    # 未安装菜单第 5 项 / 已安装菜单第 7 项：从 GitHub 拉取最新 bundle 升级脚本。
+    fresh:5) run_cli_command update-script ;;
     nodes:s) run_cli_command show-links --summary ;;
     nodes:all) run_cli_command show-links ;;
     nodes:[1-9]) run_cli_command show-links --node "${choice}" ;;
@@ -1391,6 +1407,8 @@ main_menu() {
         4) group=maintenance; continue ;;
         5) group=network; continue ;;
         6) group=recovery; continue ;;
+        # 已安装菜单的第 7 项与未安装菜单的第 5 项复用同一个动作：直接升级脚本。
+        7) choice=5 ;;
       esac
     fi
     action_status=0

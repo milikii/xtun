@@ -635,7 +635,23 @@ sni_check_cmd() {
   if [[ "${sni_given}" -eq 0 ]]; then
     sni="${REALITY_SNI:-}"
   fi
-  [[ -n "${sni}" ]] || die "请指定要检查的域名。"
+
+  # 没有已保存的 SNI 时必须能现场输入：菜单「检查 REALITY SNI」在新机器上没有
+  # state，直接 die 会把用户困在「选 3 → 报错 → 回车 → 再选 3」的循环里，而且
+  # 回车继续的提示并不接收域名（实测 2026-09-20）。非交互入口仍然直接失败，
+  # 不把「没有域名」变成挂起等待输入。
+  while [[ -z "${sni}" ]]; do
+    if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+      die "请指定要检查的域名。"
+    fi
+    read_line_or_cancel sni "要检查的域名（如 www.stanford.edu；:cancel 取消）: " || return $?
+    if [[ -z "${sni}" ]]; then
+      warn "域名不能为空。"
+      continue
+    fi
+    # 现场输入的域名是显式域名：目标按它自己的 :443 解析，不带入旧节点的 target（D09）。
+    sni_given=1
+  done
 
   # target 解析（D09/H08）：显式 --target 优先；显式域名用该域名自己的默认目标，
   # 不带入旧节点的 target；菜单入口（无参数）才用保存的 REALITY_TARGET，

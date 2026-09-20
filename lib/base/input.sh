@@ -104,6 +104,8 @@ usage() {
   --no-block-cn               不拦截回国流量（默认）。
   新装默认全部关闭：IPv6、WARP、网络优化、第三方内核、nginx 主配置接管、
   H3、ECH、xpadding、Block CN；XHTTP VLESS Encryption 保持开启。
+  IPv6 双栈在基础问答里直接询问（默认关，回车不会多出节点 6/7）；
+  其余可选能力走确认页的 advanced 入口。
   旧托管 H3 保留选择并标待验证；existing / ACME 是来源，不代表公共信任。
   显式开启条件不足会失败，不接管外来 UDP 服务；本地通过不等于公网通过。
   自动凭据（UUID/短ID/路径）在基础问答里不再逐个发问，只在确认页的

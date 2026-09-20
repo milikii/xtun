@@ -176,6 +176,35 @@ run_dispatch_case() {
   [[ "${version_output}" == "xtun.sh v${SCRIPT_VERSION}" ]]
 }
 
+# 菜单「检查 REALITY SNI」：预检不通过（2）是检查结论，不该被渲染成「菜单操作
+# 失败，请运行 xtun recover」；真正的失败/取消照常透传（实测 2026-09-20）。
+run_menu_check_sni_status_case() {
+  local status=0
+
+  load_functions
+  stub_side_effects
+
+  run_cli_command() { return "${MENU_CHECK_SNI_STATUS}"; }
+
+  MENU_CHECK_SNI_STATUS=0
+  status=0; menu_check_sni || status=$?
+  [[ "${status}" -eq 0 ]]
+
+  MENU_CHECK_SNI_STATUS=2
+  status=0; menu_check_sni || status=$?
+  [[ "${status}" -eq 0 ]]
+
+  MENU_CHECK_SNI_STATUS=1
+  status=0; menu_check_sni || status=$?
+  [[ "${status}" -eq 1 ]]
+
+  MENU_CHECK_SNI_STATUS=130
+  status=0; menu_check_sni || status=$?
+  [[ "${status}" -eq 130 ]]
+
+  load_functions
+}
+
 run_readonly_and_error_boundary_case() {
   local workdir=""
   local output=""
@@ -286,6 +315,48 @@ run_main_menu_eof_case() {
   [[ "${output}" == *'菜单操作失败，返回可用菜单'* ]]
   menu_count="$(grep -c '^MENU$' <<< "${output}")"
   [[ "${menu_count}" == '2' ]]
+}
+
+# 主菜单一级入口「升级脚本到最新版」：未安装菜单第 5 项、已安装菜单第 7 项，
+# 都走公开的 update-script（2026-09-20 需求：交互式升级脚本到最新版）。
+run_main_menu_script_update_case() {
+  local workdir=""
+  local calls=""
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  calls="${workdir}/calls.txt"
+  : > "${calls}"
+
+  # 菜单文案：两种状态都要给出可直接选择的编号。
+  # 存在性判断用 here-string，避免 `show_main_menu | grep -q` 命中即退出、
+  # 生产端吃 SIGPIPE 被 pipefail 抬成 141。
+  menu_install_present() { return 1; }
+  grep -q '5\. 升级脚本到最新版' <<< "$(show_main_menu)"
+  menu_install_present() { return 0; }
+  grep -q '7\. 升级脚本到最新版' <<< "$(show_main_menu)"
+
+  show_dashboard_brief() { :; }
+  show_main_menu() { printf 'MENU\n'; }
+  show_task_menu() { :; }
+  pause_after_menu_action() { :; }
+  run_cli_command() { printf '%s\n' "$*" >> "${calls}"; }
+
+  # 未安装：第 5 项直接升级脚本
+  menu_install_present() { return 1; }
+  printf '5\n0\n' | main_menu >/dev/null 2>&1
+  grep -qx 'update-script' "${calls}"
+
+  # 已安装：第 7 项复用同一动作
+  : > "${calls}"
+  menu_install_present() { return 0; }
+  printf '7\n0\n' | main_menu >/dev/null 2>&1
+  grep -qx 'update-script' "${calls}"
+
+  rm -rf "${workdir}"
+  load_functions
 }
 
 run_menu_pty_case() {

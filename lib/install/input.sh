@@ -231,8 +231,28 @@ install_default_managed_cert_inputs() {
   fi
 }
 
-# 基础向导。顺序按 D06：连接地址 → SNI/target/domain → 证书 → 基础组合/高级项
-# → 影响确认。自动凭据不占基础问答，只在内存里生成一次。
+# 双栈直接开关（2026-09-20 实测反馈）：新装默认关闭，回车不会多出节点 6/7；
+# 需要时在基础问答里直接选，不再要求用户先知道确认页的 advanced 关键词。
+# 明确选 y 才要求地址；地址留空等于「说要开却没地址」，用必填校验当场重问，
+# 不能静默退回关闭。已有地址（state / 草稿 / --server-ip6）作为默认值沿用。
+install_prompt_dual_stack() {
+  local enable=""
+  local default_answer="n"
+
+  [[ -z "${SERVER_IP6:-}" ]] || default_answer="y"
+  prompt_yes_no enable "是否启用 IPv6 直连双栈（生成节点 6/7）？ [y/n]" "${default_answer}" || return $?
+  enable="$(normalize_yes_no_value "SERVER_IP6_ENABLED" "${enable}")" || exit 1
+
+  if [[ "${enable}" == "yes" ]]; then
+    prompt_validated_value SERVER_IP6 "REALITY 直连节点 IPv6" \
+      "${SERVER_IP6:-$(guess_server_ip6)}" ensure_server_ip6_required || return $?
+  else
+    SERVER_IP6=""
+  fi
+}
+
+# 基础向导。顺序按 D06：连接地址 → 双栈 → SNI/target/domain → 证书 →
+# 基础组合/高级项 → 影响确认。自动凭据不占基础问答，只在内存里生成一次。
 prepare_install_inputs() {
   # 1) 连接地址：显式 CLI 输入（--server-ip）优先，不再探测也不再询问。
   # 校验放在输入位置：这个值以前完全不查，写入摘要、走到确认页，直到安装中途的
@@ -242,8 +262,10 @@ prepare_install_inputs() {
     prompt_validated_value SERVER_IP "REALITY 直连节点地址或 IP" "$(guess_server_ip)" ensure_server_ip_format || return $?
   fi
 
-  # IPv6 新装默认关闭（D05）：基础问答不再探测、不再询问；state、草稿和
-  # --server-ip6 里的显式选择照旧保留，需要打开时走确认页的 advanced 入口。
+  # IPv6 新装默认关闭（D05）：回车不会自动多出节点 6/7；但需要双栈时不再要求
+  # 用户先知道确认页的 advanced 关键词——基础问答里直接问一次（实测 2026-09-20：
+  # 日志只提示「输入 advanced」，用户找不到直接开启的入口）。state、草稿和
+  # --server-ip6 里的显式选择照旧优先，advanced 入口继续保留。
   case "${SERVER_IP6_PRESENCE:-absent}" in
     disabled)
       SERVER_IP6=""
@@ -251,8 +273,8 @@ prepare_install_inputs() {
     provided)
       ;;
     *)
-      if [[ "${INSTALL_TASK}" == "fresh" && -z "${SERVER_IP6}" && "${NON_INTERACTIVE}" -ne 1 ]]; then
-        log "IPv6 直连：新装默认关闭；需要双栈时在确认页输入 advanced（选项 1）。"
+      if [[ "${NON_INTERACTIVE}" -ne 1 ]]; then
+        install_prompt_dual_stack || return $?
       fi
       ;;
   esac
@@ -913,11 +935,13 @@ normalize_yes_no_value() {
   local value=""
 
   value="$(printf '%s' "${raw_value}" | tr '[:upper:]' '[:lower:]')"
+  # prompt_yes_no 接受 y/yes/n/no/on/off/1/0/true/false，规范化必须同样收下这些
+  # 拼写：以前只有 y/yes/n/no，用户在 y/n 提示里答「1」会被判成非法值直接终止。
   case "${value}" in
-    y|yes|enable|enabled)
+    y|yes|enable|enabled|on|1|true)
       printf 'yes'
       ;;
-    n|no|disable|disabled)
+    n|no|disable|disabled|off|0|false)
       printf 'no'
       ;;
     *)
@@ -1426,6 +1450,13 @@ ensure_server_ip6_format() {
   [[ -n "${address}" ]] || return 0
   is_ipv6_address "${address}" || die "IPv6 直连地址不是合法 IPv6：${address}"
   is_global_ipv6 "${address}" || die "IPv6 直连地址不是全局单播地址（2000::/3）：${address}"
+}
+
+# 基础问答里明确选了启用双栈时的地址校验：留空等于「说要开却没地址」，
+# 当场重问，不能按 ensure_server_ip6_format 的「留空即关闭」静默滑过去。
+ensure_server_ip6_required() {
+  [[ -n "${SERVER_IP6:-}" ]] || die "已选择启用 IPv6 双栈，请填写本机全局单播 IPv6 地址（2000::/3）。"
+  ensure_server_ip6_format
 }
 
 ensure_reality_sni_format() {
