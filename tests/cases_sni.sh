@@ -98,7 +98,7 @@ ISSUER=C=US, O=Some University, CN=Some University CA" "${now}")"
   printf '%s\n' "${out}" | grep -q '^PASS|证书 SAN|'
   printf '%s\n' "${out}" | grep -q '^PASS|证书到期|'
   printf '%s\n' "${out}" | grep -q '^NA|CDN 前置|'
-  printf '%s\n' "${out}" | grep -q '不能证明'
+  printf '%s\n' "${out}" | grep -q '不能据此判断站点是否在 CDN 后'
 
   # SAN 通配符匹配
   out="$(sni_judge_cert 'cdn.example.com' "SAN=DNS:*.example.com
@@ -225,7 +225,7 @@ run_sni_check_cmd_case() {
   }
   # run_sni_checks 此时仍会退 2（TLS 探测桩还是 1.2），只断言表头与目标参数
   output="$(sni_check_cmd www.stanford.edu --target 1.2.3.4:443 2>/dev/null)" || true
-  printf '%s\n' "${output}" | grep -q '(target 1.2.3.4:443)'
+  printf '%s\n' "${output}" | grep -q '回落目标（实际探测与转发地址）: 1.2.3.4:443'
 
   # 菜单 10 无参数：从已保存状态回填 SNI / target / 本机 IP
   STATE_FILE="${workdir}/state.env"
@@ -497,8 +497,11 @@ run_sni_check_prompt_domain_case() {
   # 空回车 → 追问；第二次给域名 → 用该域名自己的默认目标跑检查
   printf '\nkit.edu\n' > "${workdir}/answers.txt"
   output="$(sni_check_cmd < "${workdir}/answers.txt" 2> "${workdir}/error.txt")"
-  printf '%s\n' "${output}" | grep -q 'Reality 目标域名预检: kit.edu'
-  printf '%s\n' "${output}" | grep -q '(target kit.edu:443)'
+  # 头部要同时点明「伪装 SNI」和「回落目标」两个值，并给出 PASS/WARN/未验证/FAIL 的意思
+  printf '%s\n' "${output}" | grep -q 'REALITY 伪装域名预检: kit.edu'
+  printf '%s\n' "${output}" | grep -q '伪装 SNI（客户端握手时使用的名字）: kit.edu'
+  printf '%s\n' "${output}" | grep -q '回落目标（实际探测与转发地址）: kit.edu:443'
+  printf '%s\n' "${output}" | grep -q '判定说明:'
   grep -q '域名不能为空' "${workdir}/error.txt"
 
   # 非交互入口不把「没有域名」变成挂起等待输入，直接失败

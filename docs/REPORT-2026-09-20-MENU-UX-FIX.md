@@ -40,6 +40,7 @@
 | 位置 | 改动 |
 | --- | --- |
 | `lib/cli/sni.sh` | 没有已保存域名时交互询问「要检查的域名」，空输入继续追问；现场输入的域名按显式域名使用自己的 `域名:443` 目标（D09）。`NON_INTERACTIVE=1` 仍然直接失败，不把「缺域名」变成挂起等待输入。 |
+| `lib/cli/sni.sh` | 报告文案更直白：头部点明「伪装 SNI」与「回落目标」并给出一行 PASS/WARN/未验证/FAIL 判定说明；跨主机跳转的 FAIL 说清为什么要主机名一致、应改成哪个域名；后量子项标注「观察项，不阻断安装」；结论给出可执行的下一步命令。 |
 | `lib/cli/core.sh` | 菜单入口 `fresh:3` / `status:3` 改走 `menu_check_sni`：`check-sni` 的退出码 2（预检不通过）是检查结论，不再被渲染成「菜单操作失败……请运行 xtun recover」；die=1 与取消=130 照常透传。CLI 的退出码语义不变。 |
 | `lib/install/input.sh` | 新增 `install_prompt_dual_stack`：基础问答里直接问「是否启用 IPv6 直连双栈（生成节点 6/7）？」。默认关闭（回车不会多出节点 6/7）；选 `y` 才追问地址，地址留空或非法会当场重问（`ensure_server_ip6_required`），不会静默退回关闭；已有地址作为默认值沿用。`--server-ip6` / `--no-ipv6` / state / 草稿的显式选择仍然优先。 |
 | `lib/install/input.sh` | `normalize_yes_no_value` 补齐 `on/off/1/0/true/false`：这些拼写本来就是 `prompt_yes_no` 接受的输入，之前走到规范化反而会被判非法并终止安装。 |
@@ -61,7 +62,7 @@
 
 | 用例 | 覆盖 |
 | --- | --- |
-| `run_sni_check_prompt_domain_case` | 无 state：空回车后追问、输入域名后按 `域名:443` 探测、stderr 出现「域名不能为空」；`NON_INTERACTIVE=1` 仍退出 1。 |
+| `run_sni_check_prompt_domain_case` | 无 state：空回车后追问、输入域名后按 `域名:443` 探测、头部同时给出「伪装 SNI」「回落目标」与判定说明、stderr 出现「域名不能为空」；`NON_INTERACTIVE=1` 仍退出 1。 |
 | `run_menu_check_sni_status_case` | 菜单入口把 `check-sni` 的退出码 2 归一为 0，1/130 原样透传。 |
 | `run_install_dual_stack_prompt_case` | 选 `y` 追问并写入地址；回车默认关且不追问地址；选 `n` 关掉已有地址；选 `y` 但地址留空后重问；已有地址时回车沿用。 |
 | `run_install_wizard_input_budget_case` | 基础路径问答次数 8 → 9，新增双栈提示的顺序断言。 |

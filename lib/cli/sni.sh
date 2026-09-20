@@ -310,11 +310,11 @@ sni_judge_pq() {
 
   # 缺字段、非数字长度、命令缺失都只 WARN：不伪称目标不支持，也不阻断普通安装。
   if [[ "${status}" != "ok" ]]; then
-    sni_judge_line WARN "后量子就绪度" "未取得握手信息（${reason:-未知原因}）"
+    sni_judge_line WARN "后量子就绪度" "未取得握手信息（${reason:-未知原因}）；观察项，不阻断安装"
     return 0
   fi
   if [[ ! "${chain_bytes}" =~ ^[0-9]+$ ]]; then
-    sni_judge_line WARN "后量子就绪度" "证书链长度缺失或非数字（${reason:-未知}）"
+    sni_judge_line WARN "后量子就绪度" "证书链长度缺失或非数字（${reason:-未知}）；观察项，不阻断安装"
     return 0
   fi
 
@@ -335,7 +335,7 @@ sni_judge_pq() {
   else
     chain_text="证书链 ${chain_bytes} 字节（未超过 3500）"
   fi
-  sni_judge_line WARN "后量子就绪度" "${key_text}；${chain_text}"
+  sni_judge_line WARN "后量子就绪度" "${key_text}；${chain_text}；观察项，不阻断安装"
 }
 
 sni_judge_cert() {
@@ -384,9 +384,9 @@ sni_judge_cert() {
   # 服务直接回源的站点，公共 CA 也大量签在被 CDN 代理的域名上。这里只陈述事实并把
   # 结论标成未验证，不再用 CA 品牌冒充 CDN 证据（D09/H18）。
   if [[ -n "${issuer_line}" ]]; then
-    sni_judge_line NA "CDN 前置" "未验证：签发者「${issuer_line}」只说明证书链来源，不能证明站点在 CDN 后"
+    sni_judge_line NA "CDN 前置" "未验证：签发者「${issuer_line}」只说明证书链来源，不能据此判断站点是否在 CDN 后"
   else
-    sni_judge_line NA "CDN 前置" "未验证：未读到签发者；CA 品牌不能证明站点在 CDN 后"
+    sni_judge_line NA "CDN 前置" "未验证：未读到签发者；CA 品牌不能据此判断站点是否在 CDN 后"
   fi
 }
 
@@ -435,7 +435,7 @@ sni_judge_http() {
       if [[ -z "${redirect_host}" || "${redirect_host,,}" == "${sni,,}" ]]; then
         sni_judge_line WARN "HTTP 跳转" "${code} -> ${redirect_url}（同主机跳转）"
       else
-        sni_judge_line FAIL "HTTP 跳转" "${code} -> ${redirect_url}（跨主机跳转，请直接使用 ${redirect_host}）"
+        sni_judge_line FAIL "HTTP 跳转" "${code} -> ${redirect_url}：跨主机跳到 ${redirect_host}，宣告的 SNI 与站点主机名不一致会让回落表现异常；请把域名改成 ${redirect_host}，或换一个不跨主机跳转的站"
       fi
     fi
   elif [[ "${code}" =~ ^2[0-9][0-9]$ ]]; then
@@ -458,9 +458,9 @@ sni_judge_http() {
   # 第 12 项：握手耗时
   now_epoch="${time_appconnect}"
   if [[ "${now_epoch}" =~ ^[0-9]+\.?[0-9]*$ ]] && awk -v t="${now_epoch}" 'BEGIN { exit !(t > 1.0) }'; then
-    sni_judge_line FAIL "握手耗时" "${now_epoch}s（每条新连接都要先把这个 RTT 付给远端）"
+    sni_judge_line FAIL "握手耗时" "${now_epoch}s：每条新连接都要先付这个 RTT，太慢；请换离服务器更近的伪装站（建议 <1s，理想 <0.3s）"
   elif [[ "${now_epoch}" =~ ^[0-9]+\.?[0-9]*$ ]] && awk -v t="${now_epoch}" 'BEGIN { exit !(t > 0.3) }'; then
-    sni_judge_line WARN "握手耗时" "${now_epoch}s"
+    sni_judge_line WARN "握手耗时" "${now_epoch}s：可用，但每条新连接要付这个 RTT"
   elif [[ "${now_epoch}" =~ ^[0-9]+\.?[0-9]*$ ]]; then
     sni_judge_line PASS "握手耗时" "${now_epoch}s"
   else
@@ -504,8 +504,11 @@ run_sni_checks() {
   local budget=$((stage_count * timeout))
 
   round_start="$(sni_now_epoch)"
-  printf '%s\n' "Reality 目标域名预检: ${sni}  (target ${target})"
-  printf '%s\n' "等待上界: ${stage_count} 个探针 × ${timeout}s = ${budget}s，每个探针只跑一次并同时供展示与判定使用"
+  printf '%s\n' "REALITY 伪装域名预检: ${sni}"
+  printf '%s\n' "  伪装 SNI（客户端握手时使用的名字）: ${sni}"
+  printf '%s\n' "  回落目标（实际探测与转发地址）: ${target}"
+  printf '%s\n' "  判定说明: PASS 满足 · WARN 留意 · 未验证 信息不足 · FAIL 不满足（安装预检会拦下）"
+  printf '%s\n' "等待上界: ${stage_count} 个探针 × ${timeout}s = ${budget}s（每个探针只跑一次，结果同时用于展示和判定）"
 
   # 一次采集：四个探针各跑一次，结果既用于判定也用于展示，不再重复慢探测（D07/H21）。
   stage_start="$(sni_now_epoch)"
@@ -565,12 +568,15 @@ $(sni_judge_http "${sni}" "${http_output}")
 EOF
 
   if [[ "${fails}" -gt 0 ]]; then
-    printf '%s\n' "结论: 不通过（${fails} FAIL, ${warns} WARN, ${unverified} 未验证）；本轮等待上界 ${budget}s，实际 $(( $(sni_now_epoch) - round_start ))s"
-    printf '%s\n' "安装时可用 --skip-sni-check 强行跳过（跳过不等于通过）。"
+    printf '%s\n' "结论: 不通过（${fails} FAIL, ${warns} WARN, ${unverified} 未验证）"
+    printf '%s\n' "  本轮等待上界 ${budget}s，实际 $(( $(sni_now_epoch) - round_start ))s"
+    printf '%s\n' "  下一步: 按上面 FAIL 项的提示修正后重新检查（xtun check-sni ${sni}）；确认无误可加 --skip-sni-check 跳过安装预检，但跳过只记为未通过，不是通过。"
     return 2
   fi
 
-  printf '%s\n' "结论: 通过（0 FAIL, ${warns} WARN, ${unverified} 未验证）；本轮等待上界 ${budget}s，实际 $(( $(sni_now_epoch) - round_start ))s"
+  printf '%s\n' "结论: 通过（0 FAIL, ${warns} WARN, ${unverified} 未验证）"
+  printf '%s\n' "  本轮等待上界 ${budget}s，实际 $(( $(sni_now_epoch) - round_start ))s"
+  printf '%s\n' "  下一步: 安装或修改 SNI 时把域名设为 ${sni}；WARN 与「未验证」不是已通过。"
   return 0
 }
 
@@ -644,7 +650,7 @@ sni_check_cmd() {
     if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
       die "请指定要检查的域名。"
     fi
-    read_line_or_cancel sni "要检查的域名（如 www.stanford.edu；:cancel 取消）: " || return $?
+    read_line_or_cancel sni "要检查的 REALITY 伪装域名（如 www.kit.edu；:cancel 取消）: " || return $?
     if [[ -z "${sni}" ]]; then
       warn "域名不能为空。"
       continue
