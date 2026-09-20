@@ -1324,8 +1324,9 @@ run_install_preflight_checks() {
   esac
 }
 
-# HTTP-01 要求 CA 能从公网访问 http://<域名>/.well-known/acme-challenge/；
-# 域名没指到本机就一定签不下来。挡在确认前，别等到 acme.sh 里才报一句看不懂的错。
+# HTTP-01 要求 CA 能从公网访问 http://<域名>/.well-known/acme-challenge/。
+# 域名解析不到 = 一定签不下来，直接挡在确认前；解析到别的地址可能是 Cloudflare 等
+# 代理（挑战仍可能被转发到源站），所以只告警继续——真失败会由签发与回退如实报告。
 preflight_check_acme_http_domain() {
   local resolved_ip=""
 
@@ -1334,7 +1335,7 @@ preflight_check_acme_http_domain() {
   resolved_ip="$(getent ahostsv4 "${XHTTP_DOMAIN}" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
   [[ -n "${resolved_ip}" ]] || die "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机，当前无法解析。"
   if [[ -n "${SERVER_IP:-}" && "${resolved_ip}" != "${SERVER_IP}" ]]; then
-    die "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机 ${SERVER_IP}，当前解析为 ${resolved_ip}。"
+    warn "预检提示：${XHTTP_DOMAIN} 解析为 ${resolved_ip}，不是本机 ${SERVER_IP}；如果它经过 Cloudflare 等代理，挑战需要转发到本机 80 端口，否则签发会失败。"
   fi
   command -v socat >/dev/null 2>&1 || die "acme-http 模式需要 socat（acme.sh standalone）。"
   log_success "acme-http 域名 ${XHTTP_DOMAIN} 已解析到本机：${resolved_ip}"

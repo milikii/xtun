@@ -612,7 +612,7 @@ xtun diagnose --warp-probe
 | `acme-dns-cf` | 用 `acme.sh + Cloudflare DNS API`（DNS-01）自动申请公有证书 | `Full (strict)` |
 | `acme-http` | 用 `acme.sh` 的 HTTP-01 自动申请公有证书，**不需要 DNS 令牌** | `Full (strict)` |
 
-`acme-http` 用 80 端口证明域名所有权，因此要求 **域名解析到本机**、80 端口可被公网访问；签发与续期时 `acme.sh` 的 standalone 会短暂占用 80，xtun 用 pre/post hook 让 nginx 在挑战窗口内让位（失败路径也会恢复 nginx）。它不需要任何 API 令牌，适合域名直接解析到服务器（不走 Cloudflare 橙云）的场景。安装时会预检解析与 `socat` 依赖。
+`acme-http` 用 80 端口证明域名所有权，因此要求 **域名能解析、且挑战请求能到达本机**；可以是 DNS 直接解析到本机，也可以是 Cloudflare 等代理把 `/.well-known/acme-challenge/` 转发到源站 80。签发与续期时 `acme.sh` 的 standalone 会短暂占用 80，xtun 用 pre/post hook 让 nginx 在挑战窗口内让位（失败路径也会恢复 nginx）。它不需要任何 API 令牌。安装时会预检解析与 `socat` 依赖；解析到别处（可能是代理）只告警，真失败会回退并如实报告。
 
 已有证书（Cloudflare Origin CA 证书同样走这一模式，可以给文件路径，也可以交互粘贴 PEM）：
 

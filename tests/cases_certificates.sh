@@ -317,16 +317,18 @@ run_acme_http_issue_case() {
   [[ "$(validate_cert_mode_value acme-http)" == 'acme-http' ]]
   [[ "$(cert_mode_choice_value acme-http)" == '4' ]]
 
-  # 预检：域名没解析到本机时必须挡住（HTTP-01 签不下来）
+  # 预检：解析不到必须挡住；解析到别处按代理场景告警放行
   CERT_MODE=acme-http
   XHTTP_DOMAIN='cdn.example.com'
   SERVER_IP='203.0.113.10'
-  getent() { printf '198.51.100.7 STREAM x\n'; }
+  getent() { return 1; }
   if ( preflight_check_acme_http_domain ) >/dev/null 2>&1; then
-    printf '[fail] acme-http 域名解析到别处时必须拒绝\n' >&2; return 1
+    printf '[fail] acme-http 域名无法解析时必须拒绝\n' >&2; return 1
   fi
-  getent() { printf '203.0.113.10 STREAM x\n'; }
+  getent() { printf '198.51.100.7 STREAM x\n'; }
   socat() { :; }
+  ( preflight_check_acme_http_domain ) >/dev/null 2>&1
+  getent() { printf '203.0.113.10 STREAM x\n'; }
   ( preflight_check_acme_http_domain ) >/dev/null 2>&1
 
   # 签发参数：standalone + pre/post hook，且不带 dns_cf、不带 CF_Token

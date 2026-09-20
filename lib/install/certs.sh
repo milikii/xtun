@@ -363,7 +363,9 @@ issue_acme_http_cert() {
     warn "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机，当前无法解析。"; return 1
   fi
   if [[ -n "${SERVER_IP:-}" && "${resolved_ip}" != "${SERVER_IP}" ]]; then
-    warn "acme-http 模式要求 ${XHTTP_DOMAIN} 解析到本机 ${SERVER_IP}，当前解析为 ${resolved_ip}。"; return 1
+    # 解析到别的地址可能是 Cloudflare 等代理；挑战能否转发到本机只有真签一次才知道，
+    # 这里只告警，失败由外层如实回退。
+    warn "acme-http：${XHTTP_DOMAIN} 解析为 ${resolved_ip}（不是本机 ${SERVER_IP}），按代理场景继续尝试。"
   fi
   install_acme_sh || return 1
   write_acme_reload_helper || return 1
