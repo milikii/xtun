@@ -121,7 +121,7 @@ prompt_optional_cloudflare_scope() {
 }
 
 prompt_acme_dns_cf_inputs() {
-  prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}" || return $?
+  prompt_validated_value ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}" ensure_acme_email_format || return $?
   prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}" || return $?
   prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌" || return $?
   prompt_optional_cloudflare_scope
@@ -139,7 +139,7 @@ cert_mode_is_acme() {
 
 # HTTP-01：不需要 DNS 令牌，但要域名解析到本机、80 端口可达（见 preflight 与签发时的复核）。
 prompt_acme_http_inputs() {
-  prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}" || return $?
+  prompt_validated_value ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}" ensure_acme_email_format || return $?
   prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}" || return $?
   # 从 DNS 模式切过来时把令牌清掉，避免继续留在 state 里。
   CF_DNS_TOKEN=""

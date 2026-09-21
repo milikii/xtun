@@ -507,7 +507,14 @@ restore_service_enable_state() {
 
   current="$(service_unit_file_state "${unit}")" || return 1
   [[ "${current}" != "${wanted}" ]] || return 0
-  [[ "${wanted}" != "not-installed" && "${current}" != "not-installed" ]] || return 1
+  # 操作前不存在、之后由本次安装的软件包带来的 unit：软件包不在回滚范围内
+  # （失败报告已单独说明「软件包已保留」），unit 文件不可能随回滚消失。
+  # 已经停用就算到位，否则 pending 操作永远清不掉。
+  if [[ "${wanted}" == "not-installed" ]]; then
+    service_absent_state_reached "${unit}" && return 0
+    return 1
+  fi
+  [[ "${current}" != "not-installed" ]] || return 1
   if [[ "${current}" == masked* ]]; then
     systemctl unmask "${unit}" >/dev/null 2>&1 || return 1
     systemctl unmask --runtime "${unit}" >/dev/null 2>&1 || return 1
@@ -535,6 +542,26 @@ restore_service_enable_state() {
   [[ "$(service_unit_file_state "${unit}")" == "${wanted}" ]]
 }
 
+# 「操作前不存在」的 unit 只能说没有运行、没有开机自启；不能要求 unit 文件消失。
+service_absent_state_reached() {
+  local unit="${1}"
+  local snapshot=""
+  local active=""
+  local enabled=""
+
+  snapshot="$(generation_service_snapshot "${unit}")" || return 1
+  active="${snapshot%%$'\t'*}"
+  enabled="${snapshot#*$'\t'}"
+  case "${active}" in
+    inactive|not-installed|failed) ;;
+    *) return 1 ;;
+  esac
+  case "${enabled}" in
+    disabled|not-installed|masked|masked-runtime) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 restore_service_runtime_state() {
   local unit="${1}"
   local wanted="${2}"
@@ -544,7 +571,8 @@ restore_service_runtime_state() {
     restart_service_verified "${unit}" || return 1
   fi
   snapshot="$(generation_service_snapshot "${unit}")" || return 1
-  [[ "${snapshot%%$'\t'*}" == "${wanted}" ]]
+  [[ "${snapshot%%$'\t'*}" == "${wanted}" ]] && return 0
+  [[ "${wanted}" == "not-installed" ]] && service_absent_state_reached "${unit}"
 }
 
 generation_stop_before_restore() {
@@ -599,6 +627,7 @@ recover_generation() {
   local mode=""
   local uid=""
   local gid=""
+  local unit_state_before=""
 
   GENERATION_UNRESTORED=()
   GENERATION_RECOVERY_RESULT="recovery-failed"
@@ -637,8 +666,14 @@ recover_generation() {
       fi
       for entry in "${GENERATION_SERVICE_STATES[@]}"; do
         IFS=$'\t' read -r unit active enabled <<< "${entry}"
+        unit_state_before="$(generation_service_snapshot "${unit}" 2>/dev/null || true)"
         restore_service_enable_state "${unit}" "${enabled}" || GENERATION_UNRESTORED+=("${unit}:enable:${enabled}")
         restore_service_runtime_state "${unit}" "${active}" || GENERATION_UNRESTORED+=("${unit}:runtime:${active}")
+        # 操作前不存在、但 unit 文件由本次安装的软件包带来：说明「已停止 + 已禁用」
+        # 就是回滚能达到的终态，软件包保留由失败报告单独说明。
+        if [[ "${enabled}" == "not-installed" && -n "${unit_state_before}" && "${unit_state_before}" != $'not-installed\tnot-installed' ]]; then
+          log "${unit} 由本次安装的软件包引入并保留（软件包不随回滚卸载）；已停止并禁用该服务。"
+        fi
       done
       verify_recovered_tls_generation || GENERATION_UNRESTORED+=("nginx.service:served-certificate")
       generation_sync_paths || GENERATION_UNRESTORED+=("restored-files-sync")

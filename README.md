@@ -627,7 +627,7 @@ xtun diagnose --warp-probe
 | `acme-dns-cf` | 用 `acme.sh + Cloudflare DNS API`（DNS-01）自动申请公有证书 | `Full (strict)` |
 | `acme-http` | 用 `acme.sh` 的 HTTP-01 自动申请公有证书，**不需要 DNS 令牌** | `Full (strict)` |
 
-`acme-http` 用 80 端口证明域名所有权，因此要求 **域名能解析、且挑战请求能到达本机**；可以是 DNS 直接解析到本机，也可以是 Cloudflare 等代理把 `/.well-known/acme-challenge/` 转发到源站 80。签发与续期时 `acme.sh` 的 standalone 会短暂占用 80，xtun 用 pre/post hook 让 nginx 在挑战窗口内让位（失败路径也会恢复 nginx）。它不需要任何 API 令牌。安装时会在确认前的只读检查里列出 `socat`（HTTP-01 standalone 需要），并在最小依赖准备阶段随其它缺包一起装上；解析到别处（可能是代理）只告警，真失败会回退并如实报告。
+`acme-http` 用 80 端口证明域名所有权，因此要求 **域名能解析、且挑战请求能到达本机**；可以是 DNS 直接解析到本机，也可以是 Cloudflare 等代理把 `/.well-known/acme-challenge/` 转发到源站 80。签发与续期时 `acme.sh` 的 standalone 会短暂占用 80，xtun 用 pre/post hook 让 nginx 在挑战窗口内让位（失败路径也会恢复 nginx）。它不需要任何 API 令牌，但 `--acme-email` 是必填：交互问答里留空会当场重问，非交互或草稿缺邮箱会在拿锁前失败，不会等到签发阶段才报错。安装时会在确认前的只读检查里列出 `socat`（HTTP-01 standalone 需要），并在最小依赖准备阶段随其它缺包一起装上；解析到别处（可能是代理）只告警，真失败会回退并如实报告。
 
 已有证书（Cloudflare Origin CA 证书同样走这一模式，可以给文件路径，也可以交互粘贴 PEM）：
 
@@ -905,7 +905,7 @@ xtun diagnose
 本仓库是 shell 项目（`bash` + `shellcheck`）。基础回归：
 
 ```bash
-bash tests/smoke.sh          # 268 组；沙箱化，可在已部署机器上以 root 跑
+bash tests/smoke.sh          # 270 组；沙箱化，可在已部署机器上以 root 跑
 ```
 
 其余套件按需要单独跑（多数要求 root，部分要求真实 systemd；命令与前置条件见[测试与三端手册](docs/TEST-VPS-RUNBOOK.md)）：
@@ -924,7 +924,7 @@ bash tests/deployment-recovery.sh upgrade   # 会替换本机安装内容，仅�
 
 用例会把所有托管路径改写到临时沙箱（`tests/common.sh` 的 `sandbox_managed_paths`），所以即使在已部署的机器上以 root 跑测试，也不会碰到真实的 `/usr/local/etc/xray`、`/etc/haproxy` 等文件。`tests/smoke.sh` 结尾还有一层守卫，真实托管文件一旦消失就直接让测试失败。
 
-仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 268 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
+仓库入口：`xtun.sh`、`lib/`、`tests/`、`static/fallback/`；CI 配置见 [.github/workflows/ci.yml](.github/workflows/ci.yml)——ShellCheck + 270 组 smoke、Debian 12/13 与 Ubuntu 24.04 的 systemd 容器安装矩阵、官方客户端容器、latest 发现与语义/传输任务。
 
 ## 参考
 

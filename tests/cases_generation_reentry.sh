@@ -259,7 +259,64 @@ run_generation_stop_failure_retry_case() {
   [[ "$(cat "${XRAY_CONFIG_FILE}")" == old ]]
   [[ "${GENERATION_TEST_ACTIVE[xray.service]}" == inactive ]]
   [[ "${GENERATION_TEST_ENABLED[xray.service]}" == disabled ]]
+  load_functions
+}
+
+# 2026-09-21 实测：失败回退时「操作前不存在、由本次安装的软件包带来」的服务
+# （haproxy / nginx）不可能靠回滚删掉 unit 文件。只要已经停止 + 禁用，就必须算
+# 恢复到位并清掉 pending；否则 recover 永远报未恢复，install 被 pending 操作挡死。
+run_generation_package_service_recovery_case() {
+  local workdir=""
+  local status=0
+
+  load_functions
+  workdir="$(mktemp -d)"
+  generation_case_setup "${workdir}"
+
+  # 一：操作前不存在，操作后装上并启用；回退应当停止 + 禁用，并确认恢复、清掉 pending
+  GENERATION_TEST_INSTALLED[haproxy.service]="no"
+  GENERATION_TEST_ACTIVE[haproxy.service]="inactive"
+  GENERATION_TEST_ENABLED[haproxy.service]="disabled"
+  printf 'old\n' > "${XRAY_CONFIG_FILE}"
+  start_backup_session
+  begin_generation "包服务回退" no haproxy.service -- "${XRAY_CONFIG_FILE}"
+  printf 'new\n' > "${XRAY_CONFIG_FILE}"
+  GENERATION_TEST_INSTALLED[haproxy.service]="yes"
+  GENERATION_TEST_ACTIVE[haproxy.service]="active"
+  GENERATION_TEST_ENABLED[haproxy.service]="enabled"
+  generation_failed injected || status=$?
+  [[ "${status}" -ne 0 ]]
+  [[ "${GENERATION_RECOVERY_RESULT}" == restored-verified ]]
+  [[ "$(cat "${XRAY_CONFIG_FILE}")" == old ]]
+  [[ "${GENERATION_TEST_ACTIVE[haproxy.service]}" == inactive ]]
+  [[ "${GENERATION_TEST_ENABLED[haproxy.service]}" == disabled ]]
   [[ ! -e "${PENDING_OP_FILE}" ]]
+  [[ "${LOGGED}" == *'软件包不随回滚卸载'* ]]
+
+  # 二：停用失败不能洗白：仍然报未恢复、保留 pending
+  status=0
+  GENERATION_TEST_INSTALLED[haproxy.service]="no"
+  GENERATION_TEST_ACTIVE[haproxy.service]="inactive"
+  GENERATION_TEST_ENABLED[haproxy.service]="disabled"
+  printf 'old2\n' > "${XRAY_CONFIG_FILE}"
+  start_backup_session
+  begin_generation "包服务回退失败" no haproxy.service -- "${XRAY_CONFIG_FILE}"
+  printf 'new2\n' > "${XRAY_CONFIG_FILE}"
+  GENERATION_TEST_INSTALLED[haproxy.service]="yes"
+  GENERATION_TEST_ACTIVE[haproxy.service]="active"
+  GENERATION_TEST_ENABLED[haproxy.service]="enabled"
+  systemctl() {
+    [[ "${1}" != disable ]] || return 1
+    generation_mock_systemctl "$@"
+  }
+  generation_failed injected || status=$?
+  [[ "${status}" -ne 0 ]]
+  [[ "${GENERATION_RECOVERY_RESULT}" != restored-verified ]]
+  [[ -f "${PENDING_OP_FILE}" ]]
+  [[ "${GENERATION_UNRESTORED[*]}" == *'haproxy.service'* ]]
+  systemctl() { generation_mock_systemctl "$@"; }
+
+  rm -rf "${workdir}"
   load_functions
 }
 

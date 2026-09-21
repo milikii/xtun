@@ -51,6 +51,8 @@
 | `lib/install/input.sh` | `install_dependency_probe_specs` 在 `CERT_MODE=acme-http` 时追加 `socat`：确认前的只读检查会列出它，最小依赖阶段随缺包一起安装，不再等到深预检才失败。 |
 | `lib/install/input.sh` | `prompt_warp_settings` 选「自动注册」时改为 `return 0`，调用方 `|| return 1` 显式传播：以前无参 `return` 会把 `[[ … == yes ]]` 的假值当状态返回 1，恢复草稿/重建时已开 WARP 的安装在这句问答后静默失败。 |
 | `lib/cli/core.sh` | 菜单内「升级脚本」成功后由 `main_menu` 比较动作前后的 bundle 内容签名，变了就 `menu_reload_with_updated_script` 直接 exec 新入口重开菜单；找不到入口时提示并退出菜单。以前升级只换磁盘文件，当前菜单进程继续用旧函数执行后续动作，用户连升级两次仍复现升级前的缺陷。 |
+| `lib/install/certs.sh`、`lib/install/input.sh` | ACME 账户邮箱改为必填：两个 ACME 问答都用 `prompt_validated_value` + `ensure_acme_email_format`，`validate_install_inputs` 在拿锁前再挡一次。以前允许留空，安装走到写入托管配置才报错，依赖已装完、只能整体回退（实测 2026-09-21）。 |
+| `lib/base/generation.sh` | 失败回退时，「操作前不存在、由本次软件包带来的服务」（`haproxy`/`nginx`）只要已停止 + 禁用就算恢复到位（`service_absent_state_reached`），并记录「软件包不随回滚卸载」；以前严格比对 `not-installed` 会让 pending 操作永远清不掉，`recover` 一直报未恢复、`install` 被 pending 挡死。 |
 | `xtun.sh` | `SCRIPT_VERSION` 由 `1.1.0` 提升为 `1.1.1`；state schema 与参数修订不变。 |
 
 `advanced` 入口与其中的 IPv6 选项继续保留，作为另一条等价路径。
@@ -78,6 +80,8 @@
 | `run_install_dependency_stage_case`（扩展） | `CERT_MODE=acme-http` 时 `socat` 进探测表、进只读报告，并在最小依赖阶段随 apt 一起安装。 |
 | `run_install_warp_prompt_status_case` | 已开 WARP、无凭据时回车/选 `n`/已有凭据三条成功路径都返回 0；`:cancel` 仍然失败（130）。 |
 | `run_menu_script_reload_case` | 升级动作改了 bundle（已安装与未安装两种起点）→ 菜单 exec 新入口；动作没改 bundle → 留在菜单；找不到入口 → 返回 1 并提示重新运行 xtun。 |
+| `run_acme_email_required_case` | ACME 交互问答空邮箱重问、合法邮箱通过；非交互缺邮箱直接失败；`validate_install_inputs` 对空值/无 `@`/带空白都拒绝，合法值放行。 |
+| `run_generation_package_service_recovery_case` | 操作前不存在的服务在回退后已停止 + 禁用 → 确认恢复并清掉 pending；`disable` 失败 → 仍然报未恢复、保留 pending。 |
 | `run_main_menu_script_update_case` | 未安装菜单第 5 项、已安装菜单第 7 项都派发 `update-script`；两种菜单文案各自带出对应编号。 |
 | `tests/install-boundary.py` | PTY 提示白名单加入双栈开关，避免把新提示误报为「unexpected prompt」。 |
 

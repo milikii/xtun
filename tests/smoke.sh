@@ -279,6 +279,7 @@ main() {
     run_generation_extension_rename_failure_case
     run_generation_metadata_corruption_case
     run_generation_stop_failure_retry_case
+    run_generation_package_service_recovery_case
     run_generation_commit_cleanup_reentry_case
     run_generation_pending_blocks_new_mutation_case
     run_generation_permission_scope_case
@@ -423,6 +424,7 @@ main() {
     run_acme_callback_lock_case
     run_served_certificate_socket_case
     run_acme_http_issue_case
+    run_acme_email_required_case
     run_node_object_matrix_case
     run_vless_users_migration_case
     run_client_tuning_preservation_case

@@ -361,3 +361,65 @@ run_acme_http_issue_case() {
   rm -rf "${workdir}"
   load_functions
 }
+
+# 2026-09-21 实测：acme-http 的账户邮箱允许留空，安装一路走到写入托管配置才报
+# 「acme-http 模式必须提供 ACME_EMAIL」，依赖已经装完、只能整体回退。
+# 邮箱必须在输入位置就必填，确认后的 validate_install_inputs 再挡一次。
+run_acme_email_required_case() {
+  local workdir=""
+  local status=0
+  local bad=""
+
+  load_functions
+  workdir="$(mktemp -d)"
+
+  # 交互问答：空值重问，合法值通过（acme-http 与 acme-dns-cf 两条路径）
+  NON_INTERACTIVE=0
+  ACME_EMAIL=""
+  ACME_CA=""
+  printf '\nops@example.test\n\n' > "${workdir}/http.txt"
+  prompt_acme_http_inputs < "${workdir}/http.txt" 2> "${workdir}/http.err"
+  [[ "${ACME_EMAIL}" == "ops@example.test" ]]
+  grep -q '输入不合法' "${workdir}/http.err"
+
+  ACME_EMAIL=""
+  ACME_CA=""
+  CF_DNS_TOKEN=""
+  printf '\nops@example.test\n\ntoken\n\n\n' > "${workdir}/dns.txt"
+  prompt_acme_dns_cf_inputs < "${workdir}/dns.txt" 2> "${workdir}/dns.err"
+  [[ "${ACME_EMAIL}" == "ops@example.test" ]]
+  [[ "${CF_DNS_TOKEN}" == "token" ]]
+
+  # 非交互：缺邮箱直接失败，不再等到签发阶段
+  NON_INTERACTIVE=1
+  ACME_EMAIL=""
+  set +e
+  ( prompt_acme_http_inputs </dev/null ) >/dev/null 2> "${workdir}/noninteractive.err"
+  status=$?
+  set -e
+  [[ "${status}" -ne 0 ]]
+  grep -q 'ACME_EMAIL' "${workdir}/noninteractive.err"
+
+  # 确认后、拿锁前的校验：ACME 模式必须有合法邮箱
+  CERT_MODE="acme-http"
+  SERVER_IP="203.0.113.10"
+  SERVER_IP6=""
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="reality.example.com:443"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  for bad in "" "not-an-email" "a b@example.test"; do
+    ACME_EMAIL="${bad}"
+    set +e
+    ( validate_install_inputs ) >/dev/null 2>&1
+    status=$?
+    set -e
+    [[ "${status}" -ne 0 ]]
+  done
+  ACME_EMAIL="ops@example.test"
+  validate_install_inputs
+
+  rm -rf "${workdir}"
+  load_functions
+}

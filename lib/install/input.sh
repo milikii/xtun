@@ -1469,6 +1469,19 @@ ensure_server_ip6_required() {
   ensure_server_ip6_format
 }
 
+# ACME 账户邮箱：acme.sh 注册与 CA 到期通知都要用。以前交互问答允许留空，
+# 一路走到写入托管配置才在签发阶段报「acme-http 模式必须提供 ACME_EMAIL」，
+# 依赖已经装完、只能整体回退（实测 2026-09-21）。这里在输入位置就要求非空。
+# 只做最小形状校验，不假装能判定邮箱是否真实存在。
+ensure_acme_email_format() {
+  local email="${ACME_EMAIL:-}"
+
+  [[ -n "${email}" ]] || die "ACME 模式必须提供 acme.sh 账户邮箱（--acme-email）。"
+  [[ "${email}" != *[[:space:]]* ]] || die "ACME 账户邮箱不能包含空白字符：${email}"
+  [[ "${email}" == *@* && "${email}" != @* && "${email}" != *@ ]] \
+    || die "ACME 账户邮箱格式不正确（需要 local@domain）：${email}"
+}
+
 ensure_reality_sni_format() {
   validate_hostname_value "REALITY SNI" "${REALITY_SNI}"
 }
@@ -1624,6 +1637,12 @@ validate_install_inputs() {
   ensure_xhttp_ech_format
   ensure_xhttp_xpadding_format
   cert_input_files_readonly_check
+
+  # ACME 家族必须有账户邮箱：签发阶段的检查太晚（依赖已装、只能整体回退），
+  # 在进入锁与写入前再挡一次，兼容非交互与草稿恢复路径。
+  if cert_mode_is_acme; then
+    ensure_acme_email_format
+  fi
 
   if [[ "${ENABLE_WARP:-no}" == "yes" && -n "${WARP_PRIVATE_KEY}" ]]; then
     ensure_warp_outbound_format
