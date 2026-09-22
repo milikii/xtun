@@ -1320,6 +1320,79 @@ run_install_preflight_port_case() {
   load_functions
 }
 
+# 确认页之前的 443 闸门（2026-09-21 测试 VPS 实测：只读检查已写出「外来，不会停止
+# 或接管」，用户仍能进高级项填完再按 y，最后在深预检失败）。
+run_install_port_443_gate_case() {
+  local workdir=""
+  local stderr=""
+  local -a answers=()
+  local idx=0
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  HAPROXY_CONFIG="${workdir}/haproxy.cfg"
+  NGINX_CONFIG_FILE="${workdir}/xtun.conf"
+  XRAY_CONFIG_FILE="${workdir}/config.json"
+
+  # 空闲：直接放行，不问任何问题
+  ss() { :; }
+  read_line_or_cancel() { printf '[fail] 443 空闲时不应询问\n' >&2; return 1; }
+  NON_INTERACTIVE=0
+  assert_command_succeeds install_gate_port_443
+
+  # 托管配置还在（重装）：放行
+  : > "${XRAY_CONFIG_FILE}"
+  ss() { printf 'LISTEN 0 4096 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=7,fd=5))\n'; }
+  assert_command_succeeds install_gate_port_443
+  rm -f "${XRAY_CONFIG_FILE}"
+
+  # 非交互：外来 nginx 占用直接失败，且带出占用者与 stop 命令
+  NON_INTERACTIVE=1
+  if stderr="$(install_gate_port_443 2>&1 >/dev/null)"; then
+    printf '[fail] 非交互模式下外来 443 占用应当失败\n' >&2
+    rm -rf "${workdir}"
+    return 1
+  fi
+  [[ "${stderr}" == *"确认前检查失败"* ]]
+  [[ "${stderr}" == *nginx* ]]
+  [[ "${stderr}" == *"systemctl stop nginx"* ]]
+
+  # 交互：先提示、等用户释放端口；回车复检时端口已空闲就放行。
+  # ss 在 $(...) 子 shell 里跑，计数走文件。
+  NON_INTERACTIVE=0
+  : > "${workdir}/prompts.txt"
+  : > "${workdir}/ss-calls"
+  ss() {
+    printf 'x' >> "${workdir}/ss-calls"
+    if [[ "$(wc -c < "${workdir}/ss-calls")" -le 2 ]]; then
+      printf 'LISTEN 0 4096 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=7,fd=5))\n'
+    fi
+  }
+  read_line_or_cancel() {
+    printf '%s\n' "${2}" >> "${workdir}/prompts.txt"
+    printf -v "${1}" '%s' "${answers[idx]}"
+    idx=$((idx + 1))
+  }
+  idx=0
+  answers=("")
+  # 不用 $(...) 捕获：子 shell 里的 idx 传不回来，断言会看到 0。
+  install_gate_port_443 2> "${workdir}/gate.err" >/dev/null
+  [[ "${idx}" -eq 1 ]]
+  grep -q '确认前检查未通过' "${workdir}/gate.err"
+  grep -q 'systemctl stop nginx' "${workdir}/gate.err"
+  grep -q '释放 443 端口后按回车复检' "${workdir}/prompts.txt"
+
+  # 闸门必须接在只读检查之后、确认页之前
+  stderr="$(capture_function_definition prepare_install_inputs)"
+  [[ "${stderr}" == *"install_readonly_prechecks"*"install_gate_port_443"*"prompt_install_final_confirmation"* ]]
+
+  unset -f ss read_line_or_cancel
+  rm -rf "${workdir}"
+  load_functions
+}
+
 run_install_summary_width_case() {
   local output=""
   local line=""

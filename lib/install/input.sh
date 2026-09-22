@@ -285,6 +285,8 @@ prepare_install_inputs() {
   install_apply_base_combo_defaults || return 1
 
   install_readonly_prechecks || return 1
+  # 外来进程占着 443 时，摘要与高级项都是白填：闸门放在确认页之前。
+  install_gate_port_443 || return $?
   prompt_install_final_confirmation
 }
 
@@ -1199,27 +1201,21 @@ preflight_check_cert_pair() {
 }
 
 # 443 被占用的三种情形分开处理：空闲放行；托管配置还在就按重装放行；
-# 其余情况必须停在这里，但只说「端口已被占用」等于没给下一步。
+# 其余情况必须停下，但只说「端口已被占用」等于没给下一步。
 # 实测（2026-09-14 测试 VPS）走到的正是第三条：uninstall 摘掉 haproxy.cfg 之后
 # haproxy.service 仍以旧的内存配置监听 443，用户手里没有任何可执行线索。
 # 所以这里把占用者名字带出来，能在托管服务名下就顺带给一条 systemctl 命令。
-preflight_check_port_443() {
+# 输出：需要停下的原因；空串表示放行（空闲 / 托管可复用 / 没有 ss 无法探测）。
+port_443_foreign_occupancy_reason() {
   local listeners=""
   local owners=""
   local stop_hint=""
 
-  if ! command -v ss >/dev/null 2>&1; then
-    warn "系统中未找到 ss，已跳过 443 端口占用预检。"
-    return 0
-  fi
+  command -v ss >/dev/null 2>&1 || return 0
 
   listeners="$(ss -ltnH '( sport = :443 )' 2>/dev/null || true)"
-  [[ -z "${listeners}" ]] && return 0
-
-  if [[ -f "${XRAY_CONFIG_FILE}" || -f "${HAPROXY_CONFIG}" ]]; then
-    warn "检测到 443 端口已被当前机器上的现有服务占用，继续执行重装流程。"
-    return 0
-  fi
+  [[ -n "${listeners}" ]] || return 0
+  [[ -f "${XRAY_CONFIG_FILE}" || -f "${HAPROXY_CONFIG}" ]] && return 0
 
   owners="$(ss -ltnpH '( sport = :443 )' 2>/dev/null \
     | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | sort -u | tr '\n' '/')"
@@ -1231,12 +1227,52 @@ preflight_check_port_443() {
   esac
 
   if [[ -z "${owners}" ]]; then
-    die "预检失败：TCP 443 已被占用（当前用户看不到占用进程，请用 root 复核），且没有本脚本托管的 443 配置。请先释放该端口，或改用其它端口后重试。"
+    printf 'TCP 443 已被占用（当前用户看不到占用进程，请用 root 复核），且没有本脚本托管的 443 配置。请先释放该端口，或改用其它端口后重试。'
+    return 0
   fi
   if [[ -n "${stop_hint}" ]]; then
-    die "预检失败：TCP 443 被 ${owners} 占用，且没有本脚本托管的 443 配置。请先释放该端口（如 ${stop_hint}；若该服务在托管别的站点，请改用其它端口）后重试。"
+    printf 'TCP 443 被 %s 占用，且没有本脚本托管的 443 配置。请先释放该端口（如 %s；若该服务在托管别的站点，请改用其它端口）后重试。' "${owners}" "${stop_hint}"
+    return 0
   fi
-  die "预检失败：TCP 443 被 ${owners} 占用，且没有本脚本托管的 443 配置。请先停止占用 443 的进程，或改用其它端口后重试。"
+  printf 'TCP 443 被 %s 占用，且没有本脚本托管的 443 配置。请先停止占用 443 的进程，或改用其它端口后重试。' "${owners}"
+}
+
+# 确认页之前的 443 闸门。只读检查早就算出「外来，不会停止或接管」，但以前只是
+# 打印一行，用户接着填完高级项、按下 y，才在深预检 die 掉（实测 2026-09-21 测试
+# VPS：nginx 监听 0.0.0.0:443，高级项全填完才失败，留下草稿）。现在把同一条结论
+# 放在确认页之前：交互模式提示释放端口后回车复检，非交互直接失败。
+install_gate_port_443() {
+  local reason=""
+  local answer=""
+  local INPUT_BACK_HANDLED=yes
+
+  while true; do
+    reason="$(port_443_foreign_occupancy_reason)"
+    [[ -n "${reason}" ]] || return 0
+    if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+      die "确认前检查失败：${reason}"
+    fi
+    warn "确认前检查未通过：${reason}"
+    read_line_or_cancel answer "释放 443 端口后按回车复检（输入 :cancel 取消本次安装）: " || return $?
+  done
+}
+
+preflight_check_port_443() {
+  local reason=""
+
+  if ! command -v ss >/dev/null 2>&1; then
+    warn "系统中未找到 ss，已跳过 443 端口占用预检。"
+    return 0
+  fi
+
+  reason="$(port_443_foreign_occupancy_reason)"
+  if [[ -z "${reason}" ]]; then
+    if [[ -n "$(ss -ltnH '( sport = :443 )' 2>/dev/null || true)" ]]; then
+      warn "检测到 443 端口已被当前机器上的现有服务占用，继续执行重装流程。"
+    fi
+    return 0
+  fi
+  die "预检失败：${reason}"
 }
 
 preflight_check_domain_resolution() {

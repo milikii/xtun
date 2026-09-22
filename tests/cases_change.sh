@@ -446,9 +446,11 @@ run_upgrade_command_case() {
   # 这里按「动作」断言而不是按 systemctl 被调用的次数。
   [[ "${systemctl_calls}" != *"restart"* ]]
   [[ -n "${BACKUP_DIR}" && -f "${BACKUP_DIR}/manifest.tsv" ]]
-  printf '%s' "${logged}" | grep -q 'STEP:升级 Xray 核心。'
-  printf '%s' "${logged}" | grep -q 'WARN:升级后的配置校验失败'
-  printf '%s' "${logged}" | grep -q '已回退到操作前的文件'
+  # 不用 printf | grep -q：grep 命中就退出，printf 还在写就吃 SIGPIPE，pipefail 下
+  # 整条用例以 141 挂掉（2026-09-22 真机 smoke 复现一次）。
+  grep -q 'STEP:升级 Xray 核心。' <<< "${logged}"
+  grep -q 'WARN:升级后的配置校验失败' <<< "${logged}"
+  grep -q '已回退到操作前的文件' <<< "${logged}"
   # 失败的动作不允许消耗备份保留名额：成功标记不该落下。
   [[ ! -e "${BACKUP_DIR}/completed" ]]
 

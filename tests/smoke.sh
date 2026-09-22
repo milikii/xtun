@@ -229,6 +229,7 @@ main() {
     run_uninstall_confirmation_boundary_case
     run_install_resource_ownership_case
     run_install_preflight_port_case
+    run_install_port_443_gate_case
     run_install_invalid_value_refill_case
     run_install_cert_path_refill_case
     run_install_rebuild_cert_source_case
