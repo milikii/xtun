@@ -63,6 +63,24 @@ EOF
   [[ "${output}" == *"节点 8: H3"* ]]
   [[ "${output}" != *"vless://"* ]]
   [[ "${output}" != *"xtun-final-install.sh show-links"* ]]
+  # 输出文件没有缓存绕过一节时不编造表达式
+  [[ "${output}" != *"Cache Rule"* ]]
+
+  # 装完的摘要要直接给出 Cloudflare 缓存绕过表达式（2026-09-22 实测反馈）
+  cat >> "${OUTPUT_FILE}" <<'EOF'
+
+## XHTTP 缓存绕过（重要）
+
+建议表达式：
+
+(http.host eq "cdn.example.com") and (http.request.uri.path contains "/edge")
+EOF
+  output="$(show_links --summary)"
+  [[ "${output}" == *"Bypass cache"* ]]
+  [[ "${output}" == *'(http.host eq "cdn.example.com") and (http.request.uri.path contains "/edge")'* ]]
+  # 只看单个节点时不重复提示
+  output="$(show_links --summary --node 1)"
+  [[ "${output}" != *"Bypass cache"* ]]
 
   if output="$(show_links --summary --qr)" 2>/dev/null; then
     return 1

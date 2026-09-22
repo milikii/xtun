@@ -281,6 +281,9 @@ prepare_install_inputs() {
 
   install_prompt_connection_names || return 1
   install_prompt_cert_section || return 1
+  # ECH / xpadding 是节点生成时的选择，直接在基础问答里问（实测 2026-09-22 反馈：
+  # 藏在确认页 advanced 里逐个设置，用户根本不知道要去找）。
+  install_prompt_xhttp_combo || return $?
   install_ensure_identity_values || return 1
   install_apply_base_combo_defaults || return 1
 
@@ -296,6 +299,28 @@ install_prompt_connection_names() {
   prompt_validated_value REALITY_TARGET "REALITY 目标地址 host:port" \
     "$(default_reality_target_for_sni "${REALITY_SNI}")" ensure_reality_target_format || return $?
   prompt_validated_value XHTTP_DOMAIN "XHTTP CDN 域名" "" ensure_xhttp_domain_format || return $?
+}
+
+# XHTTP 组合项：ECH、xpadding 各问一次，默认关。命令行显式给过的不再问；
+# 非交互按参数/state 走。复用高级项的同一段问答，文案与行为只有一份。
+install_prompt_xhttp_combo() {
+  [[ "${NON_INTERACTIVE}" -ne 1 ]] || return 0
+  if ! install_var_provided XHTTP_ECH_CONFIG_LIST; then
+    prompt_install_advanced_item 2 || return $?
+  fi
+  if ! install_var_provided XHTTP_XPADDING_ENABLED; then
+    prompt_install_advanced_item 3 || return $?
+  fi
+}
+
+# ECH 的「开/关」事实来源是 XHTTP_ECH_CONFIG_LIST 是否非空；XHTTP_ECH_ENABLED 只是
+# 问答用的开关。重建/恢复时开关可能还是空的，默认值必须从列表推，不能一律当 no。
+xhttp_ech_effective_enabled() {
+  if [[ -n "${XHTTP_ECH_ENABLED:-}" ]]; then
+    normalize_yes_no_value "XHTTP_ECH_ENABLED" "${XHTTP_ECH_ENABLED}" || exit 1
+    return 0
+  fi
+  if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi
 }
 
 install_prompt_cert_section() {
@@ -380,7 +405,6 @@ install_apply_base_combo_defaults() {
   XHTTP_VLESS_ENCRYPTION_ENABLED="${XHTTP_VLESS_ENCRYPTION_ENABLED:-${DEFAULT_XHTTP_VLESS_ENCRYPTION_ENABLED}}"
   XHTTP_VLESS_ENCRYPTION_ENABLED="$(normalize_yes_no_value "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}")" || exit 1
 
-  XHTTP_ECH_ENABLED="${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}"
   configure_xhttp_ech_from_toggle
 
   XHTTP_XPADDING_ENABLED="${XHTTP_XPADDING_ENABLED:-${DEFAULT_XHTTP_XPADDING_ENABLED}}"
@@ -724,6 +748,7 @@ install_summary_text() {
   install_summary_line "可选: ${optional_text} nginx主配置=$(yes_no_text "${NGINX_MAIN_MANAGED:-no}")"
   install_summary_line "      拦截回国=$(yes_no_text "${ROUTE_BLOCK_CN:-no}") WARP=$(yes_no_text "${ENABLE_WARP:-no}")"
   install_summary_line "H3: $(h3_intent_text)；应用前核对模块/证书/UDP，条件不足会失败并恢复。"
+  install_summary_node_lines
   install_summary_line "影响: 安装/更新依赖包；写入托管配置与服务单元；重启托管服务；写 state 与节点链接。"
   if [[ -n "$(install_takeover_path_list)" ]]; then
     install_summary_line "接管: 覆盖安装前已存在的托管路径，卸载时按登记还原（清单见上方端口与资源归属）。"
@@ -731,6 +756,24 @@ install_summary_text() {
   install_summary_line "说明: 自动凭据（UUID/短ID/路径）本次只生成一次；重试与重建不会更换。"
   if [[ "${NGINX_MAIN_MANAGED:-no}" != "yes" ]]; then
     install_summary_line "说明: 未接管 nginx 主配置，连接数上限保持现状（见上方端口与资源归属）。"
+  fi
+}
+
+# 确认前先说清会生成哪些节点（实测 2026-09-22 反馈：摘要里看不到节点选项）。
+# 编号与 lib/nodes.sh 的节点清单一致：1–5 固定，6/7 随 IPv6，8/9 随 H3。
+install_summary_node_lines() {
+  install_summary_line "节点: 1 REALITY 直连  2 XHTTP+REALITY 直连  3 XHTTP+TLS 经 CDN"
+  install_summary_line "      4 上行 CDN/下行 REALITY  5 上行 REALITY/下行 CDN（上下行分离）"
+  if [[ -n "${SERVER_IP6:-}" ]]; then
+    install_summary_line "      6 REALITY 直连（IPv6）  7 上行 CDN/下行 REALITY（IPv6）"
+  fi
+  case "${H3_INTENT:-off}" in
+    on|legacy-on)
+      install_summary_line "      8 XHTTP+TLS H3 直连  9 上行 CDN/下行 H3 直连（需 UDP 443）"
+      ;;
+  esac
+  if [[ "${XHTTP_ECH_ENABLED:-no}" == "yes" ]]; then
+    install_summary_line "      ECH 作用于 3/4/5 的 CDN TLS 层；plain/ech 变体可分别导出。"
   fi
 }
 
@@ -804,7 +847,7 @@ prompt_install_advanced_item() {
       prompt_validated_value SERVER_IP6 "REALITY 直连节点 IPv6（留空关闭双栈）" "${SERVER_IP6:-}" ensure_server_ip6_format || return $?
       ;;
     2)
-      prompt_yes_no XHTTP_ECH_ENABLED "是否启用 XHTTP CDN 的 ECH（隐藏真实 SNI，要求域名已有 ECH 记录）？ [y/n]" "$(yes_no_value "${XHTTP_ECH_ENABLED:-no}")" || return $?
+      prompt_yes_no XHTTP_ECH_ENABLED "是否启用 XHTTP CDN 的 ECH（隐藏真实 SNI，要求域名已有 ECH 记录）？ [y/n]" "$(yes_no_value "$(xhttp_ech_effective_enabled)")" || return $?
       configure_xhttp_ech_from_toggle
       ;;
     3)
@@ -911,7 +954,10 @@ prompt_install_final_confirmation() {
 configure_xhttp_ech_from_toggle() {
   local enabled=""
 
-  enabled="$(normalize_yes_no_value "XHTTP_ECH_ENABLED" "${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}")" || exit 1
+  enabled="$(xhttp_ech_effective_enabled)" || exit 1
+  # 把规范化结果写回开关：以前答 y 之后这里只算不写，摘要按 yes_no_text 看到的
+  # 还是原样的 "y"，于是列表已经设好、摘要却显示 ECH=关。
+  XHTTP_ECH_ENABLED="${enabled}"
   if [[ "${enabled}" == "yes" ]]; then
     XHTTP_ECH_CONFIG_LIST="${XHTTP_ECH_CONFIG_LIST:-https://dns.alidns.com/dns-query}"
     return

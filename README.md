@@ -120,9 +120,10 @@ xtun upgrade --xray-version vX.Y.Z
 轮换凭据 `--task rotate`（等价 `--rotate-credentials`）。有未完成的安装草稿时，
 非交互入口必须显式选任务，不会静默加载上次输入；想丢掉草稿重新开始用
 `--discard-draft`。全新安装的可选高影响项（IPv6、WARP、网络优化、第三方内核、
-接管 nginx 主配置、回国拦截、H3、ECH、xpadding）默认全部关闭；IPv6 双栈在基础
-问答里直接询问，其余需要在确认页的 `advanced` 入口或命令行显式打开；
-VLESS Encryption 默认开启。
+接管 nginx 主配置、回国拦截、H3、ECH、xpadding）默认全部关闭；IPv6 双栈、ECH、
+xpadding 在基础问答里直接询问，其余需要在确认页的 `advanced` 入口或命令行显式打开；
+VLESS Encryption 默认开启。确认页会列出本次生成的节点编号与含义；装完的节点摘要
+直接给出 Cloudflare 缓存绕过表达式。
 
 使用已有证书并启用 WARP（默认自动注册免费 WARP，无需任何密钥）：
 

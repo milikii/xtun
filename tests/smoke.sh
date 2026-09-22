@@ -220,6 +220,7 @@ main() {
     run_install_advanced_item_answer_case
     run_install_warp_prompt_status_case
     run_install_dual_stack_prompt_case
+    run_install_xhttp_combo_prompt_case
     run_install_identity_stability_case
     run_install_generated_identity_reentry_case
     run_install_draft_schema_case

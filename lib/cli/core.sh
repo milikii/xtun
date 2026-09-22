@@ -87,6 +87,19 @@ show_links_summary() {
     show_node_png_location "${node_number}" "${label}" || return $?
   done < <(output_node_link_entries)
   [[ "${link_count}" -gt 0 ]] || warn "输出文件中没有找到节点链接。"
+  [[ -n "${selected}" ]] || show_xhttp_cache_bypass_hint
+}
+
+# 装完/看摘要时直接给出 Cloudflare 缓存绕过表达式（实测 2026-09-22 反馈：只写在
+# 输出文件里，用户装完在屏幕上看不到）。从输出文件里取，show-links 仍是纯查看。
+show_xhttp_cache_bypass_hint() {
+  local expression=""
+
+  expression="$(grep -m1 '^(http.host eq ' "${OUTPUT_FILE}" 2>/dev/null || true)"
+  [[ -n "${expression}" ]] || return 0
+  printf '\nXHTTP 经 CDN 的节点（3/4/5）需要在 Cloudflare 建一条 Cache Rule，动作选 Bypass cache：\n'
+  printf '  %s\n' "${expression}"
+  printf '  完整步骤见 %s 的「XHTTP 缓存绕过」一节。\n' "${OUTPUT_FILE}"
 }
 
 show_links() {

@@ -330,15 +330,15 @@ run_install_wizard_input_budget_case() {
 
   # 干净环境 + 已有证书路径，一路接受默认值：
   # 地址确认 → 双栈（默认关） → SNI → target → CDN 域名 → 证书模式 → 证书路径
-  # → 私钥路径 → 最终确认
-  input_lines=$'\n\nreality.example.com\n\ncdn.example.com\n2\n\n\ny\n'
+  # → 私钥路径 → ECH（默认关） → xpadding（默认关） → 最终确认
+  input_lines=$'\n\nreality.example.com\n\ncdn.example.com\n2\n\n\n\n\ny\n'
   # 重定向文件而不是管道：管道每一段都在子 shell 里，向导写入的变量传不回来。
   printf '%s' "${input_lines}" > "${workdir}/answers.txt"
   prepare_install_inputs < "${workdir}/answers.txt" \
     > "${workdir}/summary.txt" 2> "${workdir}/error.txt"
 
-  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -le 9 ]]
-  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -eq 9 ]]
+  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -le 11 ]]
+  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -eq 11 ]]
   grep -q '^ask:SERVER_IP$' "${workdir}/questions.txt"
   grep -q '^ask:REALITY_SNI$' "${workdir}/questions.txt"
   grep -q '^ask:REALITY_TARGET$' "${workdir}/questions.txt"
@@ -347,13 +347,18 @@ run_install_wizard_input_budget_case() {
   # 双栈是基础问答里的直接选项，不再藏在 advanced 关键词后面
   grep -q '^read:是否启用 IPv6 直连双栈' "${workdir}/questions.txt"
   assert_absent '^ask:SERVER_IP6$' "${workdir}/questions.txt"
+  # ECH / xpadding 同样在基础问答里直接问（2026-09-22 实测反馈），默认关
+  grep -q '^read:是否启用 XHTTP CDN 的 ECH' "${workdir}/questions.txt"
+  grep -q '^read:是否启用 XHTTP xpadding' "${workdir}/questions.txt"
+  [[ "${XHTTP_ECH_ENABLED}" == "no" && -z "${XHTTP_ECH_CONFIG_LIST}" ]]
+  [[ "${XHTTP_XPADDING_ENABLED}" == "no" ]]
   # 自动值不占问答
   assert_absent '^ask:REALITY_UUID$' "${workdir}/questions.txt"
   assert_absent '^ask:REALITY_SHORT_ID$' "${workdir}/questions.txt"
   assert_absent '^ask:XHTTP_UUID$' "${workdir}/questions.txt"
   assert_absent '^ask:XHTTP_PATH$' "${workdir}/questions.txt"
   assert_absent '^ask:NODE_LABEL_PREFIX$' "${workdir}/questions.txt"
-  # 顺序：地址 → 双栈 → SNI/target/域名 → 证书 → 最终确认
+  # 顺序：地址 → 双栈 → SNI/target/域名 → 证书 → ECH/xpadding → 最终确认
   [[ "$(grep -n '^ask:SERVER_IP$' "${workdir}/questions.txt" | cut -d: -f1)" \
     -lt "$(grep -n '^read:是否启用 IPv6 直连双栈' "${workdir}/questions.txt" | cut -d: -f1)" ]]
   [[ "$(grep -n '^read:是否启用 IPv6 直连双栈' "${workdir}/questions.txt" | cut -d: -f1)" \
@@ -362,9 +367,17 @@ run_install_wizard_input_budget_case() {
     -lt "$(grep -n '^ask:XHTTP_DOMAIN$' "${workdir}/questions.txt" | cut -d: -f1)" ]]
   [[ "$(grep -n '^ask:XHTTP_DOMAIN$' "${workdir}/questions.txt" | cut -d: -f1)" \
     -lt "$(grep -n '^ask:CERT_MODE$' "${workdir}/questions.txt" | cut -d: -f1)" ]]
+  [[ "$(grep -n '^ask:CERT_MODE$' "${workdir}/questions.txt" | cut -d: -f1)" \
+    -lt "$(grep -n '^read:是否启用 XHTTP CDN 的 ECH' "${workdir}/questions.txt" | cut -d: -f1)" ]]
+  [[ "$(grep -n '^read:是否启用 XHTTP xpadding' "${workdir}/questions.txt" | cut -d: -f1)" \
+    -lt "$(grep -n '^read:确认开始？' "${workdir}/questions.txt" | cut -d: -f1)" ]]
   grep -q '^read:确认开始？' "${workdir}/questions.txt"
-  # 摘要真的出现，确认页给出高级项入口
+  # 摘要真的出现，确认页给出高级项入口，并列出会生成的节点
   grep -q '安装摘要' "${workdir}/summary.txt"
+  grep -q '节点: 1 REALITY 直连' "${workdir}/summary.txt"
+  grep -q '5 上行 REALITY/下行 CDN' "${workdir}/summary.txt"
+  assert_absent '6 REALITY 直连（IPv6）' "${workdir}/summary.txt"
+  assert_absent '8 XHTTP+TLS H3' "${workdir}/summary.txt"
   # stdin 不是终端时不打印提示，所以提示文本从记录的调用参数上看。
   # 确认页必须明确告诉用户：输入 advanced 才能进高级选项，输入 back 才能改地址/域名/证书。
   grep -q '输入 advanced 进入高级选项' "${workdir}/questions.txt"
@@ -381,6 +394,91 @@ run_install_wizard_input_budget_case() {
     return 1
   fi
 
+  rm -rf "${workdir}"
+  load_functions
+}
+
+# ECH / xpadding 是节点生成时的选择，基础问答里直接问（2026-09-22 实测反馈：
+# 藏在 advanced 里逐个设置，用户不知道要去找）。命令行显式给过的不再问；
+# 答 y 之后摘要必须显示「开」（以前 ECH 答 y 只设了列表，摘要仍显示 ECH=关）。
+run_install_xhttp_combo_prompt_case() {
+  local workdir=""
+  local idx=0
+  local -a answers=()
+  local summary=""
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  : > "${workdir}/prompts.txt"
+  read_line_or_cancel() {
+    printf '%s\n' "${2}" >> "${workdir}/prompts.txt"
+    printf -v "${1}" '%s' "${answers[idx]}"
+    idx=$((idx + 1))
+  }
+  NON_INTERACTIVE=0
+  INSTALL_PROVIDED_VARS=" "
+  INSTALL_TASK="fresh"
+  INSTALL_TASK_SOURCE="cli"
+  SERVER_IP="203.0.113.10"
+  SERVER_IP6=""
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="reality.example.com:443"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/edge"
+  CERT_MODE="self-signed"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+  ENABLE_NET_OPT="no"; NGINX_MAIN_MANAGED="no"; ROUTE_BLOCK_CN="no"; ENABLE_WARP="no"
+  H3_INTENT="off"
+
+  # 两个都回车：默认关，问了两次
+  XHTTP_ECH_ENABLED=""; XHTTP_ECH_CONFIG_LIST=""; XHTTP_XPADDING_ENABLED=""
+  idx=0; answers=("" "")
+  install_prompt_xhttp_combo
+  [[ "${idx}" -eq 2 ]]
+  grep -q '是否启用 XHTTP CDN 的 ECH' "${workdir}/prompts.txt"
+  grep -q '是否启用 XHTTP xpadding' "${workdir}/prompts.txt"
+  install_apply_base_combo_defaults
+  [[ "${XHTTP_ECH_ENABLED}" == "no" && -z "${XHTTP_ECH_CONFIG_LIST}" ]]
+  [[ "${XHTTP_XPADDING_ENABLED}" == "no" ]]
+
+  # 两个都答 y：列表用默认 DoH，xpadding 套默认参数，摘要显示「开」
+  XHTTP_ECH_ENABLED=""; XHTTP_ECH_CONFIG_LIST=""; XHTTP_XPADDING_ENABLED=""; XHTTP_XPADDING_KEY=""
+  idx=0; answers=("y" "y")
+  install_prompt_xhttp_combo
+  install_apply_base_combo_defaults
+  [[ "${XHTTP_ECH_ENABLED}" == "yes" ]]
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == "https://dns.alidns.com/dns-query" ]]
+  [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]
+  [[ "${XHTTP_XPADDING_KEY}" == "${DEFAULT_XHTTP_XPADDING_KEY}" ]]
+  summary="$(install_summary_text)"
+  grep -q 'ECH=开 xpadding=开' <<< "${summary}"
+  grep -q 'ECH 作用于 3/4/5' <<< "${summary}"
+
+  # 命令行显式给过：一个都不问，值原样保留
+  XHTTP_ECH_ENABLED=""; XHTTP_ECH_CONFIG_LIST="https://doh.example/dns-query"; XHTTP_XPADDING_ENABLED="no"
+  INSTALL_PROVIDED_VARS=" XHTTP_ECH_CONFIG_LIST XHTTP_XPADDING_ENABLED "
+  idx=0; answers=()
+  install_prompt_xhttp_combo
+  [[ "${idx}" -eq 0 ]]
+  install_apply_base_combo_defaults
+  [[ "${XHTTP_ECH_ENABLED}" == "yes" ]]
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == "https://doh.example/dns-query" ]]
+
+  # 非交互：不问
+  INSTALL_PROVIDED_VARS=" "
+  NON_INTERACTIVE=1
+  install_prompt_xhttp_combo
+  [[ "${idx}" -eq 0 ]]
+
+  # 摘要节点清单随 IPv6 / H3 变化
+  SERVER_IP6="2408:8120::1"; H3_INTENT="on"
+  summary="$(install_summary_text)"
+  grep -q '6 REALITY 直连（IPv6）' <<< "${summary}"
+  grep -q '8 XHTTP+TLS H3 直连' <<< "${summary}"
+
+  unset -f read_line_or_cancel
   rm -rf "${workdir}"
   load_functions
 }
