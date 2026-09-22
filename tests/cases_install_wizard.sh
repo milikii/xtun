@@ -151,7 +151,7 @@ run_install_task_selection_case() {
     printf '[fail] 草稿存在时非交互安装应当要求显式任务\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '检测到未完成的安装草稿'
+  grep -q '检测到未完成的安装草稿' <<< "${output}"
 
   # 显式任务优先，且别名可用
   INSTALL_TASK_REQUEST="resume-draft"
@@ -167,7 +167,7 @@ run_install_task_selection_case() {
     printf '[fail] 缺少 state 时 rotate 应当报错\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '当前不可用'
+  grep -q '当前不可用' <<< "${output}"
 
   # 未知任务名报错
   INSTALL_TASK_REQUEST="bogus"
@@ -175,7 +175,7 @@ run_install_task_selection_case() {
     printf '[fail] 未知任务名应当报错\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '安装任务只能是'
+  grep -q '安装任务只能是' <<< "${output}"
 
   # 交互入口：默认任务排第一项，序号选择落到对应任务
   rm -f "${draft_file}"
@@ -191,8 +191,8 @@ run_install_task_selection_case() {
   output="$(<"${workdir}/menu.txt")"
   [[ "${INSTALL_TASK}" == "rebuild" ]]
   [[ "${INSTALL_TASK_SOURCE}" == "menu" ]]
-  printf '%s' "${output}" | grep -q '按当前状态重建'
-  printf '%s' "${output}" | grep -q '明确轮换凭据'
+  grep -q '按当前状态重建' <<< "${output}"
+  grep -q '明确轮换凭据' <<< "${output}"
 
   # 有草稿时默认任务是「恢复」
   printf 'INSTALL_DRAFT_SCHEMA=1\n' > "${draft_file}"
@@ -330,15 +330,15 @@ run_install_wizard_input_budget_case() {
 
   # 干净环境 + 已有证书路径，一路接受默认值：
   # 地址确认 → 双栈（默认关） → SNI → target → CDN 域名 → 证书模式 → 证书路径
-  # → 私钥路径 → ECH（默认关） → xpadding（默认关） → 最终确认
-  input_lines=$'\n\nreality.example.com\n\ncdn.example.com\n2\n\n\n\n\ny\n'
+  # → 私钥路径 → ECH → xpadding → 网络优化 → 拦截回国（都默认关） → 最终确认
+  input_lines=$'\n\nreality.example.com\n\ncdn.example.com\n2\n\n\n\n\n\n\ny\n'
   # 重定向文件而不是管道：管道每一段都在子 shell 里，向导写入的变量传不回来。
   printf '%s' "${input_lines}" > "${workdir}/answers.txt"
   prepare_install_inputs < "${workdir}/answers.txt" \
     > "${workdir}/summary.txt" 2> "${workdir}/error.txt"
 
-  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -le 11 ]]
-  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -eq 11 ]]
+  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -le 13 ]]
+  [[ "$(grep -c '^read:' "${workdir}/questions.txt")" -eq 13 ]]
   grep -q '^ask:SERVER_IP$' "${workdir}/questions.txt"
   grep -q '^ask:REALITY_SNI$' "${workdir}/questions.txt"
   grep -q '^ask:REALITY_TARGET$' "${workdir}/questions.txt"
@@ -347,11 +347,15 @@ run_install_wizard_input_budget_case() {
   # 双栈是基础问答里的直接选项，不再藏在 advanced 关键词后面
   grep -q '^read:是否启用 IPv6 直连双栈' "${workdir}/questions.txt"
   assert_absent '^ask:SERVER_IP6$' "${workdir}/questions.txt"
-  # ECH / xpadding 同样在基础问答里直接问（2026-09-22 实测反馈），默认关
+  # ECH / xpadding / 网络优化 / 拦截回国同样在基础问答里直接问（2026-09-22 实测反馈），默认关
   grep -q '^read:是否启用 XHTTP CDN 的 ECH' "${workdir}/questions.txt"
   grep -q '^read:是否启用 XHTTP xpadding' "${workdir}/questions.txt"
+  grep -q '^read:是否启用网络优化' "${workdir}/questions.txt"
+  grep -q '^read:是否拦截回国流量' "${workdir}/questions.txt"
+  assert_absent '^read:是否额外安装 Joey' "${workdir}/questions.txt"
   [[ "${XHTTP_ECH_ENABLED}" == "no" && -z "${XHTTP_ECH_CONFIG_LIST}" ]]
   [[ "${XHTTP_XPADDING_ENABLED}" == "no" ]]
+  [[ "${ENABLE_NET_OPT}" == "no" && "${ROUTE_BLOCK_CN}" == "no" ]]
   # 自动值不占问答
   assert_absent '^ask:REALITY_UUID$' "${workdir}/questions.txt"
   assert_absent '^ask:REALITY_SHORT_ID$' "${workdir}/questions.txt"
@@ -369,7 +373,7 @@ run_install_wizard_input_budget_case() {
     -lt "$(grep -n '^ask:CERT_MODE$' "${workdir}/questions.txt" | cut -d: -f1)" ]]
   [[ "$(grep -n '^ask:CERT_MODE$' "${workdir}/questions.txt" | cut -d: -f1)" \
     -lt "$(grep -n '^read:是否启用 XHTTP CDN 的 ECH' "${workdir}/questions.txt" | cut -d: -f1)" ]]
-  [[ "$(grep -n '^read:是否启用 XHTTP xpadding' "${workdir}/questions.txt" | cut -d: -f1)" \
+  [[ "$(grep -n '^read:是否拦截回国流量' "${workdir}/questions.txt" | cut -d: -f1)" \
     -lt "$(grep -n '^read:确认开始？' "${workdir}/questions.txt" | cut -d: -f1)" ]]
   grep -q '^read:确认开始？' "${workdir}/questions.txt"
   # 摘要真的出现，确认页给出高级项入口，并列出会生成的节点
@@ -431,34 +435,46 @@ run_install_xhttp_combo_prompt_case() {
   XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
   ENABLE_NET_OPT="no"; NGINX_MAIN_MANAGED="no"; ROUTE_BLOCK_CN="no"; ENABLE_WARP="no"
   H3_INTENT="off"
+  # 网络优化的问答不看真实内核
+  prompt_warp_settings() { :; }
 
-  # 两个都回车：默认关，问了两次
+  # 四个都回车：默认关，问了四次（网络优化默认关，不追问内核）
   XHTTP_ECH_ENABLED=""; XHTTP_ECH_CONFIG_LIST=""; XHTTP_XPADDING_ENABLED=""
-  idx=0; answers=("" "")
+  ENABLE_NET_OPT=""; NET_BBR_KERNEL=""; ROUTE_BLOCK_CN=""
+  idx=0; answers=("" "" "" "")
   install_prompt_xhttp_combo
-  [[ "${idx}" -eq 2 ]]
+  [[ "${idx}" -eq 4 ]]
   grep -q '是否启用 XHTTP CDN 的 ECH' "${workdir}/prompts.txt"
   grep -q '是否启用 XHTTP xpadding' "${workdir}/prompts.txt"
+  grep -q '是否启用网络优化' "${workdir}/prompts.txt"
+  grep -q '是否拦截回国流量' "${workdir}/prompts.txt"
   install_apply_base_combo_defaults
   [[ "${XHTTP_ECH_ENABLED}" == "no" && -z "${XHTTP_ECH_CONFIG_LIST}" ]]
   [[ "${XHTTP_XPADDING_ENABLED}" == "no" ]]
+  [[ "${ENABLE_NET_OPT}" == "no" && "${NET_BBR_KERNEL}" == "none" && "${ROUTE_BLOCK_CN}" == "no" ]]
 
-  # 两个都答 y：列表用默认 DoH，xpadding 套默认参数，摘要显示「开」
+  # 全答 y（网络优化追问内核答 n）：列表用默认 DoH，xpadding 套默认参数，摘要显示「开」
   XHTTP_ECH_ENABLED=""; XHTTP_ECH_CONFIG_LIST=""; XHTTP_XPADDING_ENABLED=""; XHTTP_XPADDING_KEY=""
-  idx=0; answers=("y" "y")
+  ENABLE_NET_OPT=""; NET_BBR_KERNEL=""; ROUTE_BLOCK_CN=""
+  idx=0; answers=("y" "y" "y" "n" "y")
   install_prompt_xhttp_combo
+  [[ "${idx}" -eq 5 ]]
   install_apply_base_combo_defaults
   [[ "${XHTTP_ECH_ENABLED}" == "yes" ]]
   [[ "${XHTTP_ECH_CONFIG_LIST}" == "https://dns.alidns.com/dns-query" ]]
   [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]
   [[ "${XHTTP_XPADDING_KEY}" == "${DEFAULT_XHTTP_XPADDING_KEY}" ]]
+  [[ "${ENABLE_NET_OPT}" == "yes" && "${NET_BBR_KERNEL}" == "none" && "${ROUTE_BLOCK_CN}" == "yes" ]]
   summary="$(install_summary_text)"
   grep -q 'ECH=开 xpadding=开' <<< "${summary}"
+  grep -q '网络优化=开（当前内核）' <<< "${summary}"
+  grep -q '拦截回国=开' <<< "${summary}"
   grep -q 'ECH 作用于 3/4/5' <<< "${summary}"
 
   # 命令行显式给过：一个都不问，值原样保留
   XHTTP_ECH_ENABLED=""; XHTTP_ECH_CONFIG_LIST="https://doh.example/dns-query"; XHTTP_XPADDING_ENABLED="no"
-  INSTALL_PROVIDED_VARS=" XHTTP_ECH_CONFIG_LIST XHTTP_XPADDING_ENABLED "
+  ENABLE_NET_OPT="no"; ROUTE_BLOCK_CN="no"
+  INSTALL_PROVIDED_VARS=" XHTTP_ECH_CONFIG_LIST XHTTP_XPADDING_ENABLED ENABLE_NET_OPT ROUTE_BLOCK_CN "
   idx=0; answers=()
   install_prompt_xhttp_combo
   [[ "${idx}" -eq 0 ]]
@@ -932,12 +948,12 @@ run_install_dependency_stage_case() {
 
   # 确认前只读：缺的工具列成「依赖准备后复检」，不调用 apt
   output="$(install_dependency_readonly_report)"
-  printf '%s' "${output}" | grep -q '依赖准备后复检'
-  printf '%s' "${output}" | grep -q 'qrencode'
+  grep -q '依赖准备后复检' <<< "${output}"
+  grep -q 'qrencode' <<< "${output}"
   [[ ! -s "${apt_log}" ]]
 
   expected_missing="$(install_missing_dependency_packages)"
-  printf '%s' "${expected_missing}" | grep -qx 'qrencode'
+  grep -qx 'qrencode' <<< "${expected_missing}"
   # 探测命令齐全时不重复列出同一个包
   [[ "$(printf '%s\n' "${expected_missing}" | sort | uniq -d | wc -l)" -eq 0 ]]
 
@@ -957,9 +973,9 @@ run_install_dependency_stage_case() {
   CERT_MODE="acme-http"
   dependencies_ready=0
   expected_missing="$(install_missing_dependency_packages)"
-  printf '%s\n' "${expected_missing}" | grep -qx 'socat'
+  grep -qx 'socat' <<< "${expected_missing}"
   output="$(install_dependency_readonly_report)"
-  printf '%s' "${output}" | grep -q 'socat（socat）'
+  grep -q 'socat（socat）' <<< "${output}"
   : > "${apt_log}"
   : > "${workdir}/order.txt"
   install_prepare_and_preflight
@@ -1336,12 +1352,12 @@ run_install_resource_ownership_case() {
   nginx_v3_capable() { return 0; }
   ss() { printf 'UNCONN 0 0 0.0.0.0:443 0.0.0.0:* users:(("hysteria",pid=41,fd=7))\n'; }
   output="$(install_resource_ownership_report)"
-  printf '%s' "${output}" | grep -q 'UDP 443:.*hysteria.*外来'
-  printf '%s' "${output}" | grep -q 'UDP 443 不能使用'
+  grep -q 'UDP 443:.*hysteria.*外来' <<< "${output}"
+  grep -q 'UDP 443 不能使用' <<< "${output}"
 
   # 未接管主配置：给出可执行的后续动作
   NGINX_MAIN_MANAGED="no"
-  printf '%s' "${output}" | grep -q 'xtun apply-config --manage-nginx-main'
+  grep -q 'xtun apply-config --manage-nginx-main' <<< "${output}"
 
   unset -f ss h3_enabled
   rm -rf "${workdir}"
@@ -1523,13 +1539,13 @@ run_install_summary_width_case() {
   done <<< "${output}"
   [[ "$(printf '%s\n' "${output}" | wc -l)" -le 24 ]]
 
-  printf '%s' "${output}" | grep -q '安装摘要'
-  printf '%s' "${output}" | grep -q '任务: 全新安装'
-  printf '%s' "${output}" | grep -q '连接地址: 203.0.113.10'
-  printf '%s' "${output}" | grep -q 'REALITY: SNI=reality.example.com target=reality.example.com:443'
-  printf '%s' "${output}" | grep -q 'VLESS Encryption=开'
-  printf '%s' "${output}" | grep -q 'WARP=关'
-  printf '%s' "${output}" | grep -q '不会更换'
+  grep -q '安装摘要' <<< "${output}"
+  grep -q '任务: 全新安装' <<< "${output}"
+  grep -q '连接地址: 203.0.113.10' <<< "${output}"
+  grep -q 'REALITY: SNI=reality.example.com target=reality.example.com:443' <<< "${output}"
+  grep -q 'VLESS Encryption=开' <<< "${output}"
+  grep -q 'WARP=关' <<< "${output}"
+  grep -q '不会更换' <<< "${output}"
 
   load_functions
 }
@@ -1617,7 +1633,7 @@ run_install_menu_task_dispatch_case() {
   printf 'INSTALL_DRAFT_SCHEMA=1\n' > "${draft_file}"
   : > "${workdir}/calls.txt"
   menu_output="$(printf '0\n' | menu_install_task 2>/dev/null)"
-  printf '%s' "${menu_output}" | grep -q '丢弃草稿并重新安装'
+  grep -q '丢弃草稿并重新安装' <<< "${menu_output}"
   discard_index="$(printf '%s\n' "${menu_output}" | awk '/丢弃草稿/ {print $1}' | tr -d '.')"
   [[ -n "${discard_index}" ]]
   printf '%s\n' "${discard_index}" > "${workdir}/answer.txt"

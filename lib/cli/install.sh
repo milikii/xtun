@@ -347,5 +347,5 @@ install_cmd() {
   log "备份目录：${BACKUP_DIR}"
   log "管理命令：${SELF_COMMAND_PATH}"
   log "节点链接已写入：${OUTPUT_FILE}"
-  show_links --summary
+  show_links --summary --with-links
 }

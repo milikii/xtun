@@ -12,7 +12,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '参数 --server-ip 需要值。'
+  grep -q '参数 --server-ip 需要值。' <<< "${output}"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
@@ -23,7 +23,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '参数 --reality-uuid 需要值。'
+  grep -q '参数 --reality-uuid 需要值。' <<< "${output}"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
@@ -34,7 +34,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '未知的 change-warp 参数：--bogus'
+  grep -q '未知的 change-warp 参数：--bogus' <<< "${output}"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
@@ -45,7 +45,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '未知的 change-cert-mode 参数：--bogus'
+  grep -q '未知的 change-cert-mode 参数：--bogus' <<< "${output}"
 }
 
 run_dispatch_case() {
@@ -798,13 +798,14 @@ run_install_flow_case() {
 
   [[ "${steps[*]}" == "prepare:--non-interactive --disable-warp runtime files optional finalize" ]]
   [[ "${shown}" -eq 1 ]]
-  [[ "${shown_links_args}" == "--summary" ]]
+  # 装完那一屏带可复制链接（2026-09-22 反馈）
+  [[ "${shown_links_args}" == "--summary --with-links" ]]
   [[ "${draft_writes}" -eq 0 ]]
   [[ "${draft_clears}" -eq 1 ]]
-  printf '%s' "${logged}" | grep -q 'STEP:准备安装参数与运行环境。'
-  printf '%s' "${logged}" | grep -q 'STEP:校验并启动托管服务。'
-  printf '%s' "${logged}" | grep -q '部署完成。'
-  printf '%s' "${logged}" | grep -q '管理命令：'
+  grep -q 'STEP:准备安装参数与运行环境。' <<< "${logged}"
+  grep -q 'STEP:校验并启动托管服务。' <<< "${logged}"
+  grep -q '部署完成。' <<< "${logged}"
+  grep -q '管理命令：' <<< "${logged}"
 
   # 跳过 / 忽略 SNI 预检：装完要再把这条事实说一遍，并给出公开的复检入口（D09）
   steps=()
@@ -814,8 +815,8 @@ run_install_flow_case() {
   draft_clears=0
   SNI_PREFLIGHT_IGNORED=1
   install_cmd --non-interactive --disable-warp
-  printf '%s' "${logged}" | grep -q 'WARN:未通过：REALITY 目标域名预检失败后选择忽略'
-  printf '%s' "${logged}" | grep -q 'xtun check-sni'
+  grep -q 'WARN:未通过：REALITY 目标域名预检失败后选择忽略' <<< "${logged}"
+  grep -q 'xtun check-sni' <<< "${logged}"
   SNI_PREFLIGHT_IGNORED=0
 
   steps=()
@@ -825,7 +826,7 @@ run_install_flow_case() {
   draft_clears=0
   SNI_PREFLIGHT_SKIPPED=1
   install_cmd --non-interactive --disable-warp
-  printf '%s' "${logged}" | grep -q 'WARN:未验证：REALITY 目标域名预检已跳过'
+  grep -q 'WARN:未验证：REALITY 目标域名预检已跳过' <<< "${logged}"
   SNI_PREFLIGHT_SKIPPED=0
 
   # 没有跳过 / 忽略时不多说一句
@@ -835,7 +836,7 @@ run_install_flow_case() {
   draft_writes=0
   draft_clears=0
   install_cmd --non-interactive --disable-warp
-  if printf '%s' "${logged}" | grep -q 'REALITY 目标域名预检'; then
+  if grep -q 'REALITY 目标域名预检' <<< "${logged}"; then
     return 1
   fi
 
@@ -857,8 +858,8 @@ run_install_flow_case() {
   [[ "${GENERATION_ACTIVE}" == "no" ]]
   [[ " ${GENERATION_PATHS[*]} " == *" ${STATE_FILE} "* ]]
   [[ " ${GENERATION_PATHS[*]} " == *" ${QR_OUTPUT_DIR} "* ]]
-  printf '%s' "${logged}" | grep -q '安装可选组件失败：已回退到操作前的文件'
-  printf '%s' "${logged}" | grep -q '部署完成。' && return 1
+  grep -q '安装可选组件失败：已回退到操作前的文件' <<< "${logged}"
+  grep -q '部署完成。' <<< "${logged}" && return 1
   # 失败的动作不留未完成操作标记，也不消耗备份保留名额。
   [[ ! -e "${PENDING_OP_FILE}" ]]
   [[ ! -e "${BACKUP_DIR}/completed" ]]

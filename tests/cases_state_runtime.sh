@@ -183,8 +183,8 @@ EOF
   load_existing_state
   [[ "${CERT_MODE}" == "existing" ]]
   [[ "${NODE_CLIENTS_TEXT}" == "" ]]
-  printf '%s' "${warned}" | grep -q 'cf-origin-ca 已并入 existing'
-  printf '%s' "${warned}" | grep -q '多客户端功能已移除'
+  grep -q 'cf-origin-ca 已并入 existing' <<< "${warned}"
+  grep -q '多客户端功能已移除' <<< "${warned}"
   write_state_file
   # 写回后 STATE_VERSION=2 且不含 legacy 键
   grep -q "STATE_VERSION=2" "${STATE_FILE}"
@@ -1632,7 +1632,7 @@ run_optional_component_rollback_case() {
   [[ " ${rolled[*]} " == *" ${NET_HELPER_PATH} "* ]]
   [[ " ${rolled[*]} " == *" ${NET_SERVICE_FILE} "* ]]
   [[ "${sysctl_calls}" -eq 1 ]]
-  printf '%s' "${warned}" | grep -q '可选组件应用失败'
+  grep -q '可选组件应用失败' <<< "${warned}"
 
   stopped=()
   rolled=()

@@ -121,9 +121,9 @@ xtun upgrade --xray-version vX.Y.Z
 非交互入口必须显式选任务，不会静默加载上次输入；想丢掉草稿重新开始用
 `--discard-draft`。全新安装的可选高影响项（IPv6、WARP、网络优化、第三方内核、
 接管 nginx 主配置、回国拦截、H3、ECH、xpadding）默认全部关闭；IPv6 双栈、ECH、
-xpadding 在基础问答里直接询问，其余需要在确认页的 `advanced` 入口或命令行显式打开；
-VLESS Encryption 默认开启。确认页会列出本次生成的节点编号与含义；装完的节点摘要
-直接给出 Cloudflare 缓存绕过表达式。
+xpadding、网络优化、回国拦截在基础问答里直接询问，其余需要在确认页的 `advanced`
+入口或命令行显式打开；VLESS Encryption 默认开启。确认页会列出本次生成的节点编号
+与含义；装完的那一屏直接印出每个节点可复制的链接和 Cloudflare 缓存绕过表达式。
 
 使用已有证书并启用 WARP（默认自动注册免费 WARP，无需任何密钥）：
 
@@ -234,7 +234,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `change-h3 [--enable-h3\|--disable-h3]` | 显式选择 H3；启用前校验证书、模块和 UDP 归属 |
 | `change-cert-mode` / `renew-cert` | 换证书模式 / 续期证书 |
 | `acme-deploy --domain DOMAIN` | ACME 回调/重试暂存证书部署；使用共享锁并核对 nginx 实际供证，通常由 acme.sh 的 reload 钩子调用 |
-| `show-links [--node N] [--qr\|--summary]` | 全文、单节点、摘要或二维码；查看不重写产物 |
+| `show-links [--node N] [--qr\|--summary [--with-links]]` | 全文、单节点、摘要或二维码；查看不重写产物 |
 | `export-client --node N --variant current\|plain\|ech --format uri\|json\|png --output PATH [--overwrite]` | 独立导出节点，不改服务或 state |
 | `rebuild-qr [--yes]` | 按已提交的节点定义重建 PNG，不重启服务 |
 | `diagnose [--warp-probe] [--net]` | 一次性诊断 / 网络栈体检 |
@@ -354,7 +354,7 @@ xtun show-links --node 3
 xtun show-links --qr --node 3
 ```
 
-`show-links` 只读取已提交的输出文件；无参数打印全文，`--node N` 直接显示该节点链接和 PNG 位置。`--summary` 显示节点清单与文件位置。`--qr` 直接显示节点名称和 UTF8 二维码，不先输出全文；不能与 `--summary` 同用。编号只能是存在且启用的 1–9。
+`show-links` 只读取已提交的输出文件；无参数打印全文，`--node N` 直接显示该节点链接和 PNG 位置。`--summary` 显示节点清单与文件位置，加 `--with-links` 在每个节点下直接印出可复制的链接（安装完成那一屏就是这个格式）。`--qr` 直接显示节点名称和 UTF8 二维码，不先输出全文；不能与 `--summary` 同用。编号只能是存在且启用的 1–9。
 
 二维码超过当前终端尺寸时只提示取用已有 PNG；默认尺寸为 80×24。缺 qrencode 时也可取用已有 PNG；编码器和 PNG 都不可用则返回非零。查看不会生成文件或重启服务。
 

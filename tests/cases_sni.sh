@@ -18,71 +18,71 @@ Verify return code: 0 (ok)'
 
   local out=""
   out="$(sni_judge_tls "${normal}")"
-  printf '%s\n' "${out}" | grep -q '^PASS|TLS 1.3|'
-  printf '%s\n' "${out}" | grep -q '^PASS|X25519|'
-  printf '%s\n' "${out}" | grep -q '^PASS|HTTP/2 ALPN|'
-  printf '%s\n' "${out}" | grep -q '^PASS|证书链|'
+  grep -q '^PASS|TLS 1.3|' <<< "${out}"
+  grep -q '^PASS|X25519|' <<< "${out}"
+  grep -q '^PASS|HTTP/2 ALPN|' <<< "${out}"
+  grep -q '^PASS|证书链|' <<< "${out}"
   [[ "$(printf '%s\n' "${out}" | grep -c '^PASS')" -eq 4 ]]
 
   out="$(sni_judge_tls "${no_h2}")"
-  printf '%s\n' "${out}" | grep -q '^FAIL|HTTP/2 ALPN|'
+  grep -q '^FAIL|HTTP/2 ALPN|' <<< "${out}"
   [[ "$(printf '%s\n' "${out}" | grep -c '^PASS')" -eq 3 ]]
 
   out="$(sni_judge_tls "${tls12}")"
-  printf '%s\n' "${out}" | grep -q '^FAIL|TLS 1.3|'
-  printf '%s\n' "${out}" | grep -q '^FAIL|X25519|'
+  grep -q '^FAIL|TLS 1.3|' <<< "${out}"
+  grep -q '^FAIL|X25519|' <<< "${out}"
 }
 
 run_sni_judge_http_case() {
   local out=""
 
   out="$(sni_judge_http 'www.x.com' '200 2  0.02')"
-  printf '%s\n' "${out}" | grep -q '^PASS|HTTP 跳转|'
-  printf '%s\n' "${out}" | grep -q '^PASS|HTTP 版本|'
-  printf '%s\n' "${out}" | grep -q '^PASS|握手耗时|'
+  grep -q '^PASS|HTTP 跳转|' <<< "${out}"
+  grep -q '^PASS|HTTP 版本|' <<< "${out}"
+  grep -q '^PASS|握手耗时|' <<< "${out}"
 
   out="$(sni_judge_http 'www.x.com' '301 2 https://www.x.com/ 0.02')"
-  printf '%s\n' "${out}" | grep -q '^WARN|HTTP 跳转|'
+  grep -q '^WARN|HTTP 跳转|' <<< "${out}"
 
   out="$(sni_judge_http 'x.com' '301 2 https://www.x.com/ 0.02')"
-  printf '%s\n' "${out}" | grep -q '^FAIL|HTTP 跳转|'
+  grep -q '^FAIL|HTTP 跳转|' <<< "${out}"
 
   # 相对跳转按实际 URL 解析：仍在本主机，不能判成跨主机（D09）
   out="$(sni_judge_http 'www.x.com' '302 2 /login 0.02')"
-  printf '%s\n' "${out}" | grep -q '^WARN|HTTP 跳转|'
-  printf '%s\n' "${out}" | grep -q '相对跳转'
+  grep -q '^WARN|HTTP 跳转|' <<< "${out}"
+  grep -q '相对跳转' <<< "${out}"
 
   out="$(sni_judge_http 'www.x.com' '302 2 login 0.02')"
-  printf '%s\n' "${out}" | grep -q '^WARN|HTTP 跳转|'
+  grep -q '^WARN|HTTP 跳转|' <<< "${out}"
 
   out="$(sni_judge_http 'www.x.com' '302 2 //www.x.com/x 0.02')"
-  printf '%s\n' "${out}" | grep -q '^WARN|HTTP 跳转|'
+  grep -q '^WARN|HTTP 跳转|' <<< "${out}"
 
   # 大小写不同的同一主机名是同主机
   out="$(sni_judge_http 'www.x.com' '302 2 https://WWW.X.com/x 0.02')"
-  printf '%s\n' "${out}" | grep -q '^WARN|HTTP 跳转|'
+  grep -q '^WARN|HTTP 跳转|' <<< "${out}"
 
   # 跨主机跳转要给出真实主机名（去端口/路径），不是原样回显 URL
   out="$(sni_judge_http 'x.com' '302 2 https://www.x.com:8443/y 0.02')"
-  printf '%s\n' "${out}" | grep -q '^FAIL|HTTP 跳转|'
-  printf '%s\n' "${out}" | grep -q 'www.x.com'
-  printf '%s\n' "${out}" | grep -q '8443'
+  grep -q '^FAIL|HTTP 跳转|' <<< "${out}"
+  grep -q 'www.x.com' <<< "${out}"
+  grep -q '8443' <<< "${out}"
 
   # 3xx 但没有可解析的 Location
   out="$(sni_judge_http 'www.x.com' '302 2  0.02')"
-  printf '%s\n' "${out}" | grep -q '^WARN|HTTP 跳转|'
+  grep -q '^WARN|HTTP 跳转|' <<< "${out}"
 
   out="$(sni_judge_http 'www.x.com' '403 2  0.02')"
-  printf '%s\n' "${out}" | grep -q '^WARN|HTTP 跳转|'
+  grep -q '^WARN|HTTP 跳转|' <<< "${out}"
 
   out="$(sni_judge_http 'www.x.com' '000 0  0')"
-  printf '%s\n' "${out}" | grep -q '^FAIL|HTTP 跳转|'
+  grep -q '^FAIL|HTTP 跳转|' <<< "${out}"
 
   out="$(sni_judge_http 'www.x.com' '200 2  1.4')"
-  printf '%s\n' "${out}" | grep -q '^FAIL|握手耗时|'
+  grep -q '^FAIL|握手耗时|' <<< "${out}"
 
   out="$(sni_judge_http 'www.x.com' '200 2  0.5')"
-  printf '%s\n' "${out}" | grep -q '^WARN|握手耗时|'
+  grep -q '^WARN|握手耗时|' <<< "${out}"
 }
 
 run_sni_judge_cert_case() {
@@ -95,63 +95,63 @@ run_sni_judge_cert_case() {
   out="$(sni_judge_cert 'www.stanford.edu' "SAN=DNS:www.stanford.edu
 NOTAFTER=$(date -d '+76 days' '+%b %e %H:%M:%S %Y GMT')
 ISSUER=C=US, O=Some University, CN=Some University CA" "${now}")"
-  printf '%s\n' "${out}" | grep -q '^PASS|证书 SAN|'
-  printf '%s\n' "${out}" | grep -q '^PASS|证书到期|'
-  printf '%s\n' "${out}" | grep -q '^NA|CDN 前置|'
-  printf '%s\n' "${out}" | grep -q '不能据此判断站点是否在 CDN 后'
+  grep -q '^PASS|证书 SAN|' <<< "${out}"
+  grep -q '^PASS|证书到期|' <<< "${out}"
+  grep -q '^NA|CDN 前置|' <<< "${out}"
+  grep -q '不能据此判断站点是否在 CDN 后' <<< "${out}"
 
   # SAN 通配符匹配
   out="$(sni_judge_cert 'cdn.example.com' "SAN=DNS:*.example.com
 NOTAFTER=$(date -d '+76 days' '+%b %e %H:%M:%S %Y GMT')
 ISSUER=C=US, O=Some CA" "${now}")"
-  printf '%s\n' "${out}" | grep -q '^PASS|证书 SAN|'
+  grep -q '^PASS|证书 SAN|' <<< "${out}"
 
   # SAN 不匹配
   out="$(sni_judge_cert 'www.stanford.edu' "SAN=DNS:other.example.com
 NOTAFTER=$(date -d '+76 days' '+%b %e %H:%M:%S %Y GMT')
 ISSUER=C=US, O=Some CA" "${now}")"
-  printf '%s\n' "${out}" | grep -q '^FAIL|证书 SAN|'
+  grep -q '^FAIL|证书 SAN|' <<< "${out}"
 
   # 到期不足 14 天
   out="$(sni_judge_cert 'www.stanford.edu' "SAN=DNS:www.stanford.edu
 NOTAFTER=$(date -d '+10 days' '+%b %e %H:%M:%S %Y GMT')
 ISSUER=C=US, O=Some CA" "${now}")"
-  printf '%s\n' "${out}" | grep -q '^FAIL|证书到期|'
+  grep -q '^FAIL|证书到期|' <<< "${out}"
 
   # CA 品牌不是 CDN 证据：Cloudflare 签发也只是事实，结论仍是未验证（D09/H18）
   out="$(sni_judge_cert 'www.x.com' "SAN=DNS:www.x.com
 NOTAFTER=$(date -d '+76 days' '+%b %e %H:%M:%S %Y GMT')
 ISSUER=C=US, O=Cloudflare, Inc., CN=Cloudflare Inc ECC CA-3" "${now}")"
-  printf '%s\n' "${out}" | grep -q '^NA|CDN 前置|'
-  printf '%s\n' "${out}" | grep -q 'Cloudflare'
+  grep -q '^NA|CDN 前置|' <<< "${out}"
+  grep -q 'Cloudflare' <<< "${out}"
 }
 
 run_sni_judge_dns_case() {
   local out=""
 
   out="$(sni_judge_dns 'www.x.com' 'www.x.com' '171.67.215.200' '203.0.113.9')"
-  printf '%s\n' "${out}" | grep -q '^PASS|DNS 解析|'
+  grep -q '^PASS|DNS 解析|' <<< "${out}"
 
   out="$(sni_judge_dns 'www.x.com' 'www.x.com' '203.0.113.9' '203.0.113.9')"
-  printf '%s\n' "${out}" | grep -q '^FAIL|DNS 解析|'
-  printf '%s\n' "${out}" | grep -q '回环'
+  grep -q '^FAIL|DNS 解析|' <<< "${out}"
+  grep -q '回环' <<< "${out}"
 
   out="$(sni_judge_dns 'www.x.com' 'www.x.com' '192.168.1.10' '203.0.113.9')"
-  printf '%s\n' "${out}" | grep -q '^FAIL|DNS 解析|'
+  grep -q '^FAIL|DNS 解析|' <<< "${out}"
 
   out="$(sni_judge_dns 'www.x.com' 'www.x.com' '' '203.0.113.9')"
-  printf '%s\n' "${out}" | grep -q '^FAIL|DNS 解析|'
+  grep -q '^FAIL|DNS 解析|' <<< "${out}"
 
   # 探测失败的原因分开写：超预算 ≠ 没有 A 记录（D09）
   out="$(sni_judge_dns 'www.x.com' 'www.x.com' '' '203.0.113.9' 124)"
-  printf '%s\n' "${out}" | grep -q '^FAIL|DNS 解析|'
-  printf '%s\n' "${out}" | grep -q '超出探测预算'
+  grep -q '^FAIL|DNS 解析|' <<< "${out}"
+  grep -q '超出探测预算' <<< "${out}"
 
   out="$(sni_judge_dns 'www.x.com' 'www.x.com' '' '203.0.113.9' 2)"
-  printf '%s\n' "${out}" | grep -q '无 A 记录'
+  grep -q '无 A 记录' <<< "${out}"
 
   out="$(sni_judge_dns 'www.x.com' 'www.x.com' '' '203.0.113.9' 3)"
-  printf '%s\n' "${out}" | grep -q '没有 getent'
+  grep -q '没有 getent' <<< "${out}"
 }
 
 run_sni_probe_http_target_case() {
@@ -225,7 +225,7 @@ run_sni_check_cmd_case() {
   }
   # run_sni_checks 此时仍会退 2（TLS 探测桩还是 1.2），只断言表头与目标参数
   output="$(sni_check_cmd www.stanford.edu --target 1.2.3.4:443 2>/dev/null)" || true
-  printf '%s\n' "${output}" | grep -q '回落目标（实际探测与转发地址）: 1.2.3.4:443'
+  grep -q '回落目标（实际探测与转发地址）: 1.2.3.4:443' <<< "${output}"
 
   # 菜单 10 无参数：从已保存状态回填 SNI / target / 本机 IP
   STATE_FILE="${workdir}/state.env"
@@ -269,9 +269,9 @@ run_install_preflight_sni_case() {
   SKIP_SNI_CHECK=1
   preflight_check_reality_sni > "${workdir}/skip.txt" 2>&1
   output="$(cat "${workdir}/skip.txt")"
-  printf '%s\n' "${output}" | grep -q '跳过 Reality 目标域名预检'
+  grep -q '跳过 Reality 目标域名预检' <<< "${output}"
   # 跳过只对本次动作有效，结论是未验证，不是通过（D09）
-  printf '%s\n' "${output}" | grep -q '未验证'
+  grep -q '未验证' <<< "${output}"
   [[ "${SNI_PREFLIGHT_SKIPPED}" == "1" ]]
   SKIP_SNI_CHECK=0
   SNI_PREFLIGHT_SKIPPED=0
@@ -283,23 +283,23 @@ run_install_preflight_sni_case() {
   preflight_check_reality_sni > "${workdir}/ignore.txt" 2>&1
   output="$(cat "${workdir}/ignore.txt")"
   [[ "${SNI_PREFLIGHT_IGNORED}" == "1" ]]
-  printf '%s\n' "${output}" | grep -q '忽略'
-  printf '%s\n' "${output}" | grep -q '不通过'
-  printf '%s\n' "${output}" | grep -q 'xtun check-sni'
+  grep -q '忽略' <<< "${output}"
+  grep -q '不通过' <<< "${output}"
+  grep -q 'xtun check-sni' <<< "${output}"
   NON_INTERACTIVE=1
   SNI_PREFLIGHT_IGNORED=0
 
   # 装完要把这次的事实再说一遍，建议的复检命令是公开入口
   SNI_PREFLIGHT_IGNORED=1
   output="$(install_sni_preflight_notice)"
-  printf '%s\n' "${output}" | grep -q '未通过'
+  grep -q '未通过' <<< "${output}"
   output="$(report_sni_preflight_override 2>&1)"
-  printf '%s\n' "${output}" | grep -q 'xtun check-sni'
+  grep -q 'xtun check-sni' <<< "${output}"
   SNI_PREFLIGHT_IGNORED=0
 
   SNI_PREFLIGHT_SKIPPED=1
   output="$(install_sni_preflight_notice)"
-  printf '%s\n' "${output}" | grep -q '未验证'
+  grep -q '未验证' <<< "${output}"
   SNI_PREFLIGHT_SKIPPED=0
 
   # 没有跳过/忽略时不多说一句
@@ -498,10 +498,10 @@ run_sni_check_prompt_domain_case() {
   printf '\nkit.edu\n' > "${workdir}/answers.txt"
   output="$(sni_check_cmd < "${workdir}/answers.txt" 2> "${workdir}/error.txt")"
   # 头部要同时点明「伪装 SNI」和「回落目标」两个值，并给出 PASS/WARN/未验证/FAIL 的意思
-  printf '%s\n' "${output}" | grep -q 'REALITY 伪装域名预检: kit.edu'
-  printf '%s\n' "${output}" | grep -q '伪装 SNI（客户端握手时使用的名字）: kit.edu'
-  printf '%s\n' "${output}" | grep -q '回落目标（实际探测与转发地址）: kit.edu:443'
-  printf '%s\n' "${output}" | grep -q '判定说明:'
+  grep -q 'REALITY 伪装域名预检: kit.edu' <<< "${output}"
+  grep -q '伪装 SNI（客户端握手时使用的名字）: kit.edu' <<< "${output}"
+  grep -q '回落目标（实际探测与转发地址）: kit.edu:443' <<< "${output}"
+  grep -q '判定说明:' <<< "${output}"
   grep -q '域名不能为空' "${workdir}/error.txt"
 
   # 非交互入口不把「没有域名」变成挂起等待输入，直接失败
@@ -570,14 +570,14 @@ run_sni_bounded_probe_case() {
 
   # 阶段进度与总预算上界
   output="$(cat "${workdir}/out.txt")"
-  printf '%s\n' "${output}" | grep -Fq '[1/5] DNS 解析（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '[2/5] TLS 1.3 握手（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '[3/5] 证书读取（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '[4/5] HTTP 探测（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '[5/5] 后量子就绪度（预算 10s）… 完成'
-  printf '%s\n' "${output}" | grep -Fq '等待上界: 5 个探针 × 10s = 50s'
-  printf '%s\n' "${output}" | grep -Fq '本轮等待上界 50s'
-  printf '%s\n' "${output}" | grep -Fq '结论: 通过（0 FAIL, 0 WARN, 1 未验证）'
+  grep -Fq '[1/5] DNS 解析（预算 10s）… 完成' <<< "${output}"
+  grep -Fq '[2/5] TLS 1.3 握手（预算 10s）… 完成' <<< "${output}"
+  grep -Fq '[3/5] 证书读取（预算 10s）… 完成' <<< "${output}"
+  grep -Fq '[4/5] HTTP 探测（预算 10s）… 完成' <<< "${output}"
+  grep -Fq '[5/5] 后量子就绪度（预算 10s）… 完成' <<< "${output}"
+  grep -Fq '等待上界: 5 个探针 × 10s = 50s' <<< "${output}"
+  grep -Fq '本轮等待上界 50s' <<< "${output}"
+  grep -Fq '结论: 通过（0 FAIL, 0 WARN, 1 未验证）' <<< "${output}"
 
   # 探针挂住时也不会超过预算：DNS 单独跑一次也要带 timeout
   # 先恢复真实探针（上面被本用例的桩换掉了），再只桩掉底层命令

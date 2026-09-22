@@ -314,8 +314,8 @@ run_renew_cert_command_case() {
   renew_cert_cmd --non-interactive --acme-email ops@example.com --cf-dns-token "@${workdir}/cf-dns-token.txt"
   [[ "${applied}" -eq 1 ]]
   [[ "${shown_links}" -eq 0 ]]
-  printf '%s' "${logged}" | grep -q 'STEP:刷新 TLS 证书资产。'
-  printf '%s' "${logged}" | grep -q 'OK:证书刷新完成，已验证 nginx 实际供证。'
+  grep -q 'STEP:刷新 TLS 证书资产。' <<< "${logged}"
+  grep -q 'OK:证书刷新完成，已验证 nginx 实际供证。' <<< "${logged}"
 }
 
 # renew-cert 是 acme.sh 的 cron 自动跑的：这里报「已续期」没人会去核对，
@@ -530,20 +530,20 @@ run_diagnose_command_case() {
   state_before="$(cat "${state_file}")"
 
   output="$(diagnose_cmd)"
-  printf '%s' "${output}" | grep -q 'Xray 诊断'
-  printf '%s' "${output}" | grep -Fq '监听 443: TCP 运行中 (*:443 · test)'
-  printf '%s' "${output}" | grep -Fq '监听 [::]:443: TCP 运行中'
-  printf '%s' "${output}" | grep -q 'Nginx worker_connections: 768（偏低）'
+  grep -q 'Xray 诊断' <<< "${output}"
+  grep -Fq '监听 443: TCP 运行中 (*:443 · test)' <<< "${output}"
+  grep -Fq '监听 [::]:443: TCP 运行中' <<< "${output}"
+  grep -q 'Nginx worker_connections: 768（偏低）' <<< "${output}"
   # 证书用途、本地探测、外部/客户端验证必须分开写（D09/H18）
-  printf '%s' "${output}" | grep -q '证书用途: self-signed'
-  printf '%s' "${output}" | grep -q '本地 TLS 探测: 通过（证书受系统信任）'
-  printf '%s' "${output}" | grep -q '外部可达: 未验证'
-  printf '%s' "${output}" | grep -q '客户端兼容: 未验证'
+  grep -q '证书用途: self-signed' <<< "${output}"
+  grep -q '本地 TLS 探测: 通过（证书受系统信任）' <<< "${output}"
+  grep -q '外部可达: 未验证' <<< "${output}"
+  grep -q '客户端兼容: 未验证' <<< "${output}"
   # 只是提示，不该把 diagnose 判成失败。
-  printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
-  printf '%s' "${output}" | grep -q 'WARP 出站: wireguard · 172.16.0.2'
-  printf '%s' "${output}" | grep -q 'WARP 规则数: 4'
-  if printf '%s' "${output}" | grep -q 'WARP 出口 IP'; then
+  grep -q '诊断摘要: 未发现关键问题' <<< "${output}"
+  grep -q 'WARP 出站: wireguard · 172.16.0.2' <<< "${output}"
+  grep -q 'WARP 规则数: 4' <<< "${output}"
+  if grep -q 'WARP 出口 IP' <<< "${output}"; then
     return 1
   fi
   [[ "$(cat "${probe_file}")" == "0" ]]
@@ -566,15 +566,15 @@ run_diagnose_command_case() {
   done
 
   output="$(diagnose_cmd --warp-probe)"
-  printf '%s' "${output}" | grep -q 'WARP 出口 IP: 203.0.113.99'
+  grep -q 'WARP 出口 IP: 203.0.113.99' <<< "${output}"
   [[ "$(cat "${probe_file}")" == "1" ]]
 
   # 自签 / Origin CA：握手成功但证书不受系统信任是预期，不该判失败（H18）
   local_tls_probe_state() { printf 'untrusted'; }
   CERT_MODE="self-signed"
   output="$(diagnose_cmd 2>&1)"
-  printf '%s' "${output}" | grep -q '握手成功，证书不受系统信任'
-  printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
+  grep -q '握手成功，证书不受系统信任' <<< "${output}"
+  grep -q '诊断摘要: 未发现关键问题' <<< "${output}"
 
   # 公网 CA 模式下不受信任才是故障
   CERT_MODE="acme-dns-cf"
@@ -583,7 +583,7 @@ run_diagnose_command_case() {
   status=$?
   set -e
   [[ "${status}" -ne 0 ]]
-  printf '%s' "${output}" | grep -q 'ACME 证书应受系统信任'
+  grep -q 'ACME 证书应受系统信任' <<< "${output}"
   CERT_MODE="self-signed"
 
   # 没装 ss：端口状态是「无法确认」，不能报成「未监听」这种确定结论
@@ -594,8 +594,8 @@ run_diagnose_command_case() {
   status=$?
   set -e
   [[ "${status}" -ne 0 ]]
-  printf '%s' "${output}" | grep -q '443 无法确认（缺少 ss）'
-  printf '%s' "${output}" | grep -Fq '监听 [::]:443: 无法确认（缺少 ss）'
+  grep -q '443 无法确认（缺少 ss）' <<< "${output}"
+  grep -Fq '监听 [::]:443: 无法确认（缺少 ss）' <<< "${output}"
   port_listening_snapshot() {
     count_call "port:${1}"
     printf 'listening|TCP 运行中 (*:%s · test)' "${1}"
@@ -611,7 +611,7 @@ run_diagnose_command_case() {
     printf 'listening|TCP 运行中 (*:%s · test)' "${1}"
   }
   output="$(diagnose_cmd 2>&1)"
-  printf '%s' "${output}" | grep -Fq '监听 [::]:443: TCP 未监听（仅 IPv4）'
+  grep -Fq '监听 [::]:443: TCP 未监听（仅 IPv4）' <<< "${output}"
   port_listening_snapshot() {
     count_call "port:${1}"
     printf 'listening|TCP 运行中 (*:%s · test)' "${1}"
@@ -624,8 +624,8 @@ run_diagnose_command_case() {
   status=$?
   set -e
   [[ "${status}" -ne 0 ]]
-  printf '%s' "${output}" | grep -q '诊断摘要: 检测到'
-  printf '%s' "${output}" | grep -q '服务: xray 未运行'
+  grep -q '诊断摘要: 检测到' <<< "${output}"
+  grep -q '服务: xray 未运行' <<< "${output}"
   [[ "$(cat "${probe_file}")" == "0" ]]
 
   WARP_PRIVATE_KEY=""
@@ -634,5 +634,5 @@ run_diagnose_command_case() {
   status=$?
   set -e
   [[ "${status}" -ne 0 ]]
-  printf '%s' "${output}" | grep -q 'WARP: WARP WireGuard 私钥缺失'
+  grep -q 'WARP: WARP WireGuard 私钥缺失' <<< "${output}"
 }

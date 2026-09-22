@@ -281,7 +281,7 @@ prepare_install_inputs() {
 
   install_prompt_connection_names || return 1
   install_prompt_cert_section || return 1
-  # ECH / xpadding 是节点生成时的选择，直接在基础问答里问（实测 2026-09-22 反馈：
+  # ECH / xpadding / 网络优化 / 拦截回国直接在基础问答里问（实测 2026-09-22 反馈：
   # 藏在确认页 advanced 里逐个设置，用户根本不知道要去找）。
   install_prompt_xhttp_combo || return $?
   install_ensure_identity_values || return 1
@@ -301,8 +301,8 @@ install_prompt_connection_names() {
   prompt_validated_value XHTTP_DOMAIN "XHTTP CDN 域名" "" ensure_xhttp_domain_format || return $?
 }
 
-# XHTTP 组合项：ECH、xpadding 各问一次，默认关。命令行显式给过的不再问；
-# 非交互按参数/state 走。复用高级项的同一段问答，文案与行为只有一份。
+# 基础组合项：ECH、xpadding、网络优化、拦截回国各问一次，默认关。命令行显式
+# 给过的不再问；非交互按参数/state 走。复用高级项的同一段问答，文案与行为只有一份。
 install_prompt_xhttp_combo() {
   [[ "${NON_INTERACTIVE}" -ne 1 ]] || return 0
   if ! install_var_provided XHTTP_ECH_CONFIG_LIST; then
@@ -310,6 +310,14 @@ install_prompt_xhttp_combo() {
   fi
   if ! install_var_provided XHTTP_XPADDING_ENABLED; then
     prompt_install_advanced_item 3 || return $?
+  fi
+  # 网络优化、拦截回国同样是装机时就该决定的事（2026-09-22 反馈）；
+  # 网络优化答 y 后会追问是否装第三方内核，默认不装。
+  if ! install_var_provided ENABLE_NET_OPT; then
+    prompt_install_advanced_item 4 || return $?
+  fi
+  if ! install_var_provided ROUTE_BLOCK_CN; then
+    prompt_install_advanced_item 6 || return $?
   fi
 }
 

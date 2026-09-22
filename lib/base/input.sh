@@ -31,7 +31,7 @@ usage() {
   ${command_name} renew-cert [参数]
   ${command_name} acme-deploy --domain DOMAIN
   ${command_name} uninstall [--yes] [--purge]
-  ${command_name} show-links [--qr] [--summary] [--node N]
+  ${command_name} show-links [--qr] [--summary [--with-links]] [--node N]
   ${command_name} diagnose
   ${command_name} status [--raw]
   ${command_name} restart

@@ -19,7 +19,7 @@ run_xray_version_selection_case() {
 {"tag_name":"v26.10.1-rc.1","prerelease":true}' 2>&1)"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '可能更新的无法识别'
+  grep -q '可能更新的无法识别' <<< "${output}"
 }
 
 run_xray_latest_pagination_case() {
@@ -97,7 +97,7 @@ run_xray_release_metadata_failure_case() {
   if output="$(xray_prepare_release_context "v26.9.9" "64" 2>&1)"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '缺少当前架构资产'
+  grep -q '缺少当前架构资产' <<< "${output}"
 }
 
 run_xray_release_digest_conflict_case() {
@@ -131,7 +131,7 @@ run_xray_release_digest_conflict_case() {
     return 1
   fi
   rm -rf "${workdir}"
-  printf '%s' "${output}" | grep -q '摘要冲突'
+  grep -q '摘要冲突' <<< "${output}"
 }
 
 run_xray_candidate_commands_case() {

@@ -16,7 +16,7 @@ run_usage_case() {
   [[ "${output}" == *$'\n  xtun diagnose'* ]]
   [[ "${output}" == *$'\n  xtun apply-net-opt'* ]]
   [[ "${output}" == *$'\n  xtun apply-config'* ]]
-  [[ "${output}" == *$'\n  xtun show-links [--qr] [--summary]'* ]]
+  [[ "${output}" == *$'\n  xtun show-links [--qr] [--summary [--with-links]]'* ]]
 }
 
 run_show_links_without_state_case() {
@@ -81,6 +81,11 @@ EOF
   # 只看单个节点时不重复提示
   output="$(show_links --summary --node 1)"
   [[ "${output}" != *"Bypass cache"* ]]
+  # 装完那一屏要能直接复制链接：--with-links 在每个节点下印出 URI
+  output="$(show_links --summary --with-links)"
+  [[ "${output}" == *$'节点 1: REALITY\nvless://uuid@example.test:443#REALITY'* ]]
+  [[ "${output}" == *$'节点 8: H3\nvless://uuid@example.test:443#H3'* ]]
+  [[ "${output}" == *"Bypass cache"* ]]
 
   if output="$(show_links --summary --qr)" 2>/dev/null; then
     return 1
@@ -459,7 +464,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'REALITY SNI 不是合法域名'
+  grep -q 'REALITY SNI 不是合法域名' <<< "${output}"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
@@ -476,7 +481,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'REALITY 目标地址 必须是 1-65535 之间的端口'
+  grep -q 'REALITY 目标地址 必须是 1-65535 之间的端口' <<< "${output}"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
@@ -493,7 +498,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'XHTTP 路径不能包含空白字符'
+  grep -q 'XHTTP 路径不能包含空白字符' <<< "${output}"
 
   # 一个反斜杠也得拦住：原来写成 *'\\'* 只挡得住连着写两个的，
   # /a\b 会一路进 nginx 的 location 前缀。
@@ -512,7 +517,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'XHTTP 路径不能包含反斜杠'
+  grep -q 'XHTTP 路径不能包含反斜杠' <<< "${output}"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
@@ -531,7 +536,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'XHTTP xpadding 参数名只能包含'
+  grep -q 'XHTTP xpadding 参数名只能包含' <<< "${output}"
 }
 
 run_value_source_case() {
@@ -732,7 +737,7 @@ EOF
     return 1
   fi
   rm -rf "${workdir}"
-  printf '%s' "${output}" | grep -q 'Xray 安装包 SHA256 校验失败'
+  grep -q 'Xray 安装包 SHA256 校验失败' <<< "${output}"
 }
 
 run_install_packages_failure_case() {
@@ -751,8 +756,8 @@ EOF
     return 1
   fi
 
-  printf '%s' "${output}" | grep -q '安装依赖包'
-  if printf '%s' "${output}" | grep -q '依赖包安装完成'; then
+  grep -q '安装依赖包' <<< "${output}"
+  if grep -q '依赖包安装完成' <<< "${output}"; then
     return 1
   fi
 }
@@ -890,8 +895,8 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '不支持直接明文传值'
-  printf '%s' "${output}" | grep -q 'WARP_PRIVATE_KEY'
+  grep -q '不支持直接明文传值' <<< "${output}"
+  grep -q 'WARP_PRIVATE_KEY' <<< "${output}"
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
@@ -902,7 +907,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '不支持直接明文传值'
+  grep -q '不支持直接明文传值' <<< "${output}"
 }
 
 # curl 的桩必须和真 curl 的契约一致，不然测出来的是桩的脾气不是代码的。
@@ -946,7 +951,7 @@ PROBE
 
   # 令牌没问题
   output="$(preflight_token_probe '{"success":true}' 200 "${workdir}")"
-  printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验通过'
+  grep -q 'Cloudflare API Token 校验通过' <<< "${output}"
 
   # 令牌是坏的：Cloudflare 回 401 加一段说清了原因的 JSON，必须死掉，
   # 而且要把它自己的错误信息带出来——「令牌不对」和「权限不够」是两回事
@@ -956,9 +961,9 @@ PROBE
     printf '[fail] 401 + Invalid API Token 时预检没有失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验未通过'
-  printf '%s' "${output}" | grep -q 'HTTP 401'
-  printf '%s' "${output}" | grep -q 'Invalid API Token'
+  grep -q 'Cloudflare API Token 校验未通过' <<< "${output}"
+  grep -q 'HTTP 401' <<< "${output}"
+  grep -q 'Invalid API Token' <<< "${output}"
 
   # 权限不足是另一条要给操作员看的信息
   if output="$(preflight_token_probe \
@@ -967,7 +972,7 @@ PROBE
     printf '[fail] 403 权限不足时预检没有失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'Unauthorized to access requested resource'
+  grep -q 'Unauthorized to access requested resource' <<< "${output}"
 
   # 关键的回归钉子：Cloudflare 答了话但 body 为空。旧代码「响应为空就当没连上」
   # 正是在这里放行的——答了话就不能再算没连上。
@@ -975,12 +980,12 @@ PROBE
     printf '[fail] body 为空的 403 被当成「没连上」放行了\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验未通过'
-  printf '%s' "${output}" | grep -q 'HTTP 403'
+  grep -q 'Cloudflare API Token 校验未通过' <<< "${output}"
+  grep -q 'HTTP 403' <<< "${output}"
 
   # 真的连不上（状态码 000）才保留原来的宽容行为：警告一句然后放过
   output="$(preflight_token_probe '' 000 "${workdir}")"
-  printf '%s' "${output}" | grep -q '无法在线校验 Cloudflare API Token'
+  grep -q '无法在线校验 Cloudflare API Token' <<< "${output}"
   assert_false grep -q '校验未通过' <<< "${output}"
 
   # 没有 jq 时错误信息退回 sed 取，不能因此变成空话
@@ -990,7 +995,7 @@ PROBE
     printf '[fail] 没有 jq 时 401 没有让预检失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'Invalid API Token'
+  grep -q 'Invalid API Token' <<< "${output}"
 
   rm -rf "${workdir}"
 }
@@ -1011,7 +1016,7 @@ EOF
     return 1
   fi
 
-  printf '%s' "${output}" | grep -q '预检提示：XHTTP CDN 域名 当前无法解析'
+  grep -q '预检提示：XHTTP CDN 域名 当前无法解析' <<< "${output}"
 }
 
 run_warp_rule_normalize_case() {
@@ -1029,7 +1034,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'WARP 分流规则不能包含空白字符'
+  grep -q 'WARP 分流规则不能包含空白字符' <<< "${output}"
 }
 
 # 菜单 13 的交互编辑器。read 的提示走 stderr，最终规则走 stdout，
@@ -1155,8 +1160,8 @@ run_joey_bbr_release_parse_case() {
   [[ "$(joey_bbr_latest_core_version_from_tag "${tag_name}")" == "7.0.3" ]]
 
   rows="$(joey_bbr_release_asset_rows_from_metadata "${metadata_json}" "${tag_name}")"
-  printf '%s' "${rows}" | grep -q 'linux-image-7.0.3-joeyblog-bbrv3_7.0.3-1_arm64.deb'
-  printf '%s' "${rows}" | grep -qv -- '-dbg_'
+  grep -q 'linux-image-7.0.3-joeyblog-bbrv3_7.0.3-1_arm64.deb' <<< "${rows}"
+  grep -qv -- '-dbg_' <<< "${rows}"
   validate_joey_bbr_asset_rows "${rows}"
 }
 
@@ -1234,8 +1239,8 @@ run_install_network_joey_reboot_case() {
   [[ -x "${NET_HELPER_PATH}" ]]
   [[ -f "${NET_SERVICE_FILE}" ]]
   [[ "${sysctl_calls}" -eq 1 ]]
-  printf '%s' "${systemctl_calls}" | grep -q '^daemon-reload$'
-  printf '%s' "${systemctl_calls}" | grep -q "^enable --now ${NET_SERVICE_NAME}$"
+  grep -q '^daemon-reload$' <<< "${systemctl_calls}"
+  grep -q "^enable --now ${NET_SERVICE_NAME}$" <<< "${systemctl_calls}"
   [[ "${ENABLE_NET_OPT}" == "yes" ]]
   load_functions
 }
@@ -1739,8 +1744,8 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '\-\-warp-profile'
-  printf '%s' "${output}" | grep -q '\-\-disable-warp'
+  grep -q '\-\-warp-profile' <<< "${output}"
+  grep -q '\-\-disable-warp' <<< "${output}"
 }
 
 # 0.11 遗留的巡检与 WARP Team 托管文件，升级 / 卸载 / 重装时由
@@ -1778,15 +1783,15 @@ run_legacy_cleanup_case() {
   remove_legacy_managed_paths
 
   [[ "${#stopped[@]}" -ne 0 ]]
-  printf '%s' "${stopped}" | grep -q 'xtun-core-health.timer'
-  printf '%s' "${stopped}" | grep -q 'xtun-warp-health.timer'
-  printf '%s' "${stopped}" | grep -q 'warp-svc.service'
+  grep -q 'xtun-core-health.timer' <<< "${stopped}"
+  grep -q 'xtun-warp-health.timer' <<< "${stopped}"
+  grep -q 'warp-svc.service' <<< "${stopped}"
   [[ ! -e "${workdir}/usr/local/sbin/xtun-core-health.sh" ]]
   [[ ! -e "${workdir}/etc/systemd/system/xtun-core-health.service" ]]
   [[ ! -e "${workdir}/etc/systemd/system/xtun-core-health.timer" ]]
   [[ ! -d "${workdir}/root/xtun-subscriptions" ]]
   [[ ! -d "${workdir}/var/www/xtun-sub" ]]
-  printf '%s' "${logged}" | grep -q 'STEP:清理旧版本遗留的托管文件。'
+  grep -q 'STEP:清理旧版本遗留的托管文件。' <<< "${logged}"
   [[ -e "${workdir}/keep.md" ]]
 
   # 没有遗留文件时是安静幂等：不再 log_step，也不碰 systemd
@@ -1819,8 +1824,8 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '\-\-warp-profile'
-  printf '%s' "${output}" | grep -q '\-\-disable-warp'
+  grep -q '\-\-warp-profile' <<< "${output}"
+  grep -q '\-\-disable-warp' <<< "${output}"
 }
 
 run_warp_legacy_teardown_case() {
@@ -1856,8 +1861,8 @@ run_warp_legacy_teardown_case() {
   [[ " ${stopped[*]} " == *" xtun-warp-health.service "* ]]
   [[ " ${stopped[*]} " == *" warp-svc.service "* ]]
   [[ "${removed[*]}" == "${workdir}/mdm.xml" ]]
-  printf '%s' "${logged}" | grep -q 'STEP:清理旧版 WARP Team 托管文件。'
-  printf '%s' "${logged}" | grep -q 'apt-get purge -y cloudflare-warp'
+  grep -q 'STEP:清理旧版 WARP Team 托管文件。' <<< "${logged}"
+  grep -q 'apt-get purge -y cloudflare-warp' <<< "${logged}"
 
   rm -f "${workdir}/mdm.xml"
   stopped=()
@@ -1892,8 +1897,8 @@ EOF
 
   output="$(render_output_file_qr 2>&1)"
 
-  printf '%s' "${output}" | grep -q '节点 1: HKG-A'
-  printf '%s' "${output}" | grep -q '节点 2: HKG-B'
+  grep -q '节点 1: HKG-A' <<< "${output}"
+  grep -q '节点 2: HKG-B' <<< "${output}"
   [[ "$(grep -c 'qrencode:' "${call_log}")" -eq 2 ]]
 
   # 缺 qrencode：只告警，不画
@@ -1903,7 +1908,7 @@ EOF
   local status=0
   output="$(render_output_file_qr 2>&1)" || status=$?
   [[ "${status}" == 1 ]]
-  printf '%s' "${output}" | grep -q 'qrencode'
+  grep -q 'qrencode' <<< "${output}"
 
   load_functions
 }

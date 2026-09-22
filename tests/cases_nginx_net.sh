@@ -109,18 +109,18 @@ run_diagnose_net_case() {
 
   local output=""
   output="$(net_stack_text)"
-  printf '%s\n' "${output}" | grep -q '内核:            7.0.3-joeyblog-bbrv3'
-  printf '%s\n' "${output}" | grep -q '拥塞控制:        bbr1'
-  printf '%s\n' "${output}" | grep -q 'tcp_bbr 模块:    version 3'
-  printf '%s\n' "${output}" | grep -q '默认 qdisc:      fq'
-  printf '%s\n' "${output}" | grep -q '出网网卡 qdisc:  fq limit 100000p'
-  printf '%s\n' "${output}" | grep -q 'MTU:             1500'
-  printf '%s\n' "${output}" | grep -q 'tcp_notsent_lowat: 131072'
-  printf '%s\n' "${output}" | grep -q 'fs.file-max:     2097152'
-  printf '%s\n' "${output}" | grep -q 'nginx worker_connections / worker_rlimit_nofile:  65535 / 1048576'
-  printf '%s\n' "${output}" | grep -q 'nginx master LimitNOFILE:  1048576'
-  printf '%s\n' "${output}" | grep -q 'haproxy maxconn: 20000'
-  printf '%s\n' "${output}" | grep -q '已建立连接拥塞算法分布:  bbr1=37 cubic=0'
+  grep -q '内核:            7.0.3-joeyblog-bbrv3' <<< "${output}"
+  grep -q '拥塞控制:        bbr1' <<< "${output}"
+  grep -q 'tcp_bbr 模块:    version 3' <<< "${output}"
+  grep -q '默认 qdisc:      fq' <<< "${output}"
+  grep -q '出网网卡 qdisc:  fq limit 100000p' <<< "${output}"
+  grep -q 'MTU:             1500' <<< "${output}"
+  grep -q 'tcp_notsent_lowat: 131072' <<< "${output}"
+  grep -q 'fs.file-max:     2097152' <<< "${output}"
+  grep -q 'nginx worker_connections / worker_rlimit_nofile:  65535 / 1048576' <<< "${output}"
+  grep -q 'nginx master LimitNOFILE:  1048576' <<< "${output}"
+  grep -q 'haproxy maxconn: 20000' <<< "${output}"
+  grep -q '已建立连接拥塞算法分布:  bbr1=37 cubic=0' <<< "${output}"
 
   [[ "$(net_stack_state)" == "ok" ]]
 
@@ -150,7 +150,7 @@ EOF
 )"; then
     return 1
   fi
-  printf '%s' "${output}" | grep -q '只能是 joey 或 none'
+  grep -q '只能是 joey 或 none' <<< "${output}"
 
   # install_network_optimization 在 NET_BBR_KERNEL=none 时跳过内核安装
   ENABLE_NET_OPT="yes"

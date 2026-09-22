@@ -49,7 +49,7 @@ ISOLATED
       printf '[fail] 互斥参数应当报错：%s\n' "${order}" >&2
       return 1
     fi
-    printf '%s' "${output}" | grep -q '互相冲突'
+    grep -q '互相冲突' <<< "${output}"
   done
 
   # 草稿里的 IPv6 不能越过 --no-ipv6；探测结果也不行
@@ -105,7 +105,7 @@ ISOLATED
       printf '[fail] install 互斥开关应当报错：%s\n' "${args}" >&2
       return 1
     fi
-    printf '%s' "${output}" | grep -q '互相冲突'
+    grep -q '互相冲突' <<< "${output}"
   done
 
   for args in "--enable-warp --disable-warp" "--disable-warp --enable-warp"; do
@@ -121,7 +121,7 @@ ISOLATED
       printf '[fail] change-warp 互斥开关应当报错：%s\n' "${args}" >&2
       return 1
     fi
-    printf '%s' "${output}" | grep -q '互相冲突'
+    grep -q '互相冲突' <<< "${output}"
   done
 
   # nginx 主配置开关同样处理
@@ -135,7 +135,7 @@ ISOLATED
     printf '[fail] --manage-nginx-main 冲突未报错\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '互相冲突'
+  grep -q '互相冲突' <<< "${output}"
 }
 
 # 地址校验：明显非法的输入必须在写盘之前被拒。
@@ -325,7 +325,7 @@ ISOLATED
     printf '[fail] 找不到原件时不应报成功\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '找不到'
+  grep -q '找不到' <<< "${output}"
   [[ ! -e "${workdir}/applied-unconfirmed.log" ]]
 
   # 非法参数绝不触达写入
@@ -346,7 +346,7 @@ ISOLATED
     printf '[fail] 非法 --bbr-kernel 应当失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q 'NET_BBR_KERNEL 只能是 joey 或 none'
+  grep -q 'NET_BBR_KERNEL 只能是 joey 或 none' <<< "${output}"
   [[ ! -e "${workdir}/touch.log" ]]
   [[ ! -e "${workdir}/invalid/backups" && ! -e "${workdir}/invalid/xtun.lock" ]]
 }
@@ -389,7 +389,7 @@ ISOLATED
     printf '[fail] --timeout=abc 应当失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '必须是正整数'
+  grep -q '必须是正整数' <<< "${output}"
 
   # 缺值：分离写法和内联写法都不能把空串带进流程
   for token in "--server-ip" "--server-ip="; do
@@ -403,7 +403,7 @@ ISOLATED
       printf '[fail] %s 缺值应当失败\n' "${token}" >&2
       return 1
     fi
-    printf '%s' "${output}" | grep -q '需要值'
+    grep -q '需要值' <<< "${output}"
   done
 
   # 无值开关不接受 = 值
@@ -417,7 +417,7 @@ ISOLATED
     printf '[fail] --no-ipv6=1 应当失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '无值开关'
+  grep -q '无值开关' <<< "${output}"
 
   # 敏感值：两种写法都只收 @文件；内联的明文同样拒绝
   parse_install_args "--warp-private-key=@${workdir}/warp-key.txt"
@@ -435,7 +435,7 @@ ISOLATED
     printf '[fail] 明文敏感值应当失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '不支持直接明文传值'
+  grep -q '不支持直接明文传值' <<< "${output}"
 
   # 未知项仍然报未知，不会被当成值吞掉
   if output="$(bash <<ISOLATED 2>&1
@@ -448,5 +448,5 @@ ISOLATED
     printf '[fail] 未知参数应当失败\n' >&2
     return 1
   fi
-  printf '%s' "${output}" | grep -q '未知的 install 参数'
+  grep -q '未知的 install 参数' <<< "${output}"
 }

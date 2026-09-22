@@ -74,8 +74,10 @@ render_output_file_qr() {
   return "${failed}"
 }
 
+# with_links=1 时每个节点下面直接印链接（装完那一屏要能复制；2026-09-22 反馈）。
+# 默认摘要仍不带链接：菜单里随手看一眼状态不该把凭据滚上屏幕。
 show_links_summary() {
-  local selected="${1:-}" node_number="" label="" uri="" link_count=0
+  local selected="${1:-}" with_links="${2:-0}" node_number="" label="" uri="" link_count=0
   printf '\n%s\n' "节点链接摘要"
   printf '链接文件: %s\n' "${OUTPUT_FILE}"
   printf '完整内容: xtun show-links\n'
@@ -84,6 +86,7 @@ show_links_summary() {
     [[ -z "${selected}" || "${selected}" == "${node_number}" ]] || continue
     link_count=$((link_count + 1))
     printf '节点 %s: %s\n' "${node_number}" "${label}"
+    [[ "${with_links}" -ne 1 ]] || printf '%s\n' "${uri}"
     show_node_png_location "${node_number}" "${label}" || return $?
   done < <(output_node_link_entries)
   [[ "${link_count}" -gt 0 ]] || warn "输出文件中没有找到节点链接。"
@@ -105,6 +108,7 @@ show_xhttp_cache_bypass_hint() {
 show_links() {
   local show_qr=0
   local summary=0
+  local with_links=0
   local selected="" number="" label="" uri="" entry=""
 
   while [[ $# -gt 0 ]]; do
@@ -114,6 +118,9 @@ show_links() {
         ;;
       --summary)
         summary=1
+        ;;
+      --with-links)
+        with_links=1
         ;;
       --node|--node=*)
         option_take_value --node "${1}" "${@:2}"
@@ -146,7 +153,7 @@ show_links() {
   fi
 
   if [[ "${summary}" -eq 1 ]]; then
-    show_links_summary "${selected}"
+    show_links_summary "${selected}" "${with_links}"
     return
   fi
   if [[ "${show_qr}" -eq 1 ]]; then

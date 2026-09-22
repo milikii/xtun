@@ -118,7 +118,7 @@ run_generation_restore_verified_case() {
   [[ "${GENERATION_ACTIVE}" == "no" ]]
   # 回退之后重新核对服务，而不是「systemctl 没报错就算回来了」
   [[ "${SYSTEMCTL_CALLS}" == *"restart xray.service"* ]]
-  printf '%s' "${LOGGED}" | grep -q '测试失败：已回退到操作前的文件与服务，并确认服务回到操作前状态'
+  grep -q '测试失败：已回退到操作前的文件与服务，并确认服务回到操作前状态' <<< "${LOGGED}"
   # 失败的动作不消耗备份保留名额，也不留未完成操作标记。
   [[ -e "${BACKUP_DIR}/manifest.tsv" ]]
   [[ ! -e "${BACKUP_DIR}/completed" ]]
@@ -164,8 +164,8 @@ run_generation_recovery_failed_case() {
   [[ "$(cat "${STATE_FILE}")" == "new-state" ]]
   [[ "${GENERATION_RECOVERY_RESULT}" == "recovery-failed" ]]
   [[ "${GENERATION_ACTIVE}" == "no" ]]
-  printf '%s' "${LOGGED}" | grep -q '测试失败：回退没有完成'
-  printf '%s' "${LOGGED}" | grep -q -- "- ${STATE_FILE}"
+  grep -q '测试失败：回退没有完成' <<< "${LOGGED}"
+  grep -q -- "- ${STATE_FILE}" <<< "${LOGGED}"
   # 回退失败要留下现场和未完成操作标记，下次维护动作才有入口
   [[ -e "${BACKUP_DIR}/manifest.tsv" ]]
   [[ ! -e "${BACKUP_DIR}/completed" ]]
@@ -512,7 +512,7 @@ run_generation_products_rollback_case() {
   # 上一代的二维码原样留着，暂存目录一个都不剩
   [[ "$(cat "${QR_OUTPUT_DIR}/01-HKG-REALITY.png")" == "old-png" ]]
   [[ -z "$(find "${workdir}" -maxdepth 3 -name '*.staging.*' -print -quit)" ]]
-  printf '%s' "${LOGGED}" | grep -q '写入节点输出与二维码失败：已回退到操作前的文件'
+  grep -q '写入节点输出与二维码失败：已回退到操作前的文件' <<< "${LOGGED}"
 
   load_functions
 }
