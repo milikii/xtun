@@ -1,9 +1,7 @@
-# GitHub 的源码归档（codeload tar.gz —— bash xtun.sh 单文件引导与 update-script 下载的就是它）
-# 遵守 export-ignore。装进 /usr/local/lib/xtun 的只有 xtun.sh / lib / static，其余目录不进归档。
-.claude/        export-ignore
-skills/         export-ignore
-tests/          export-ignore
-docs/           export-ignore
-.github/        export-ignore
-.gitattributes  export-ignore
-.shellcheckrc   export-ignore
+# The skill, pinned evidence, examples, tests and licenses are the distribution.
+# Never exclude .claude/ or .claude/skills/ as a whole.
+.claude/settings.local.json export-ignore
+.claude/worktrees/ export-ignore
+.github/ export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore

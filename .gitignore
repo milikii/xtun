@@ -1,1 +1,11 @@
 .codex
+.claude/worktrees/
+.claude/settings.local.json
+__pycache__/
+*.py[cod]
+.venv/
+.cache/
+output/
+outputs/
+artifacts/
+*.log

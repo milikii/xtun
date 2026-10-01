@@ -1,0 +1,746 @@
+{
+  "checked_at": "2026-10-01T12:16:28.711333+00:00",
+  "scope": "Official metadata observation only; docs and historical main snapshots were not refreshed",
+  "requests": {
+    "latest_stable": "https://api.github.com/repos/XTLS/Xray-core/releases/latest",
+    "recent_releases": "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=100",
+    "tag": "https://api.github.com/repos/XTLS/Xray-core/git/ref/tags/v26.9.30",
+    "core_main": "https://api.github.com/repos/XTLS/Xray-core/git/ref/heads/main",
+    "docs_main": "https://api.github.com/repos/XTLS/Xray-docs-next/git/ref/heads/main"
+  },
+  "latest_stable": "v26.3.27",
+  "latest_prerelease": "v26.9.30",
+  "latest_published": "v26.9.30",
+  "release_tag": {
+    "ref": "refs/tags/v26.9.30",
+    "node_id": "MDM6UmVmMzExMzE1NzMxOnJlZnMvdGFncy92MjYuOS4zMA==",
+    "url": "https://api.github.com/repos/XTLS/Xray-core/git/refs/tags/v26.9.30",
+    "object": {
+      "sha": "b26a91de4f3294e26a0ad0a970b81a386a41f789",
+      "type": "commit",
+      "url": "https://api.github.com/repos/XTLS/Xray-core/git/commits/b26a91de4f3294e26a0ad0a970b81a386a41f789"
+    }
+  },
+  "core_main": {
+    "ref": "refs/heads/main",
+    "node_id": "MDM6UmVmMzExMzE1NzMxOnJlZnMvaGVhZHMvbWFpbg==",
+    "url": "https://api.github.com/repos/XTLS/Xray-core/git/refs/heads/main",
+    "object": {
+      "sha": "b26a91de4f3294e26a0ad0a970b81a386a41f789",
+      "type": "commit",
+      "url": "https://api.github.com/repos/XTLS/Xray-core/git/commits/b26a91de4f3294e26a0ad0a970b81a386a41f789"
+    }
+  },
+  "docs_main": {
+    "ref": "refs/heads/main",
+    "node_id": "MDM6UmVmMzQ3MjcwODc2OnJlZnMvaGVhZHMvbWFpbg==",
+    "url": "https://api.github.com/repos/XTLS/Xray-docs-next/git/refs/heads/main",
+    "object": {
+      "sha": "5ee08112dd7935dd3f97d9de3b9e2751d5f54c2c",
+      "type": "commit",
+      "url": "https://api.github.com/repos/XTLS/Xray-docs-next/git/commits/5ee08112dd7935dd3f97d9de3b9e2751d5f54c2c"
+    }
+  },
+  "recent_release_page": [
+    {
+      "tag_name": "v26.9.30",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-09-30T07:41:08Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.9.30"
+    },
+    {
+      "tag_name": "v26.9.9",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-09-08T22:28:10Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.9.9"
+    },
+    {
+      "tag_name": "v26.9.8",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-09-08T09:49:08Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.9.8"
+    },
+    {
+      "tag_name": "v26.7.28",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-07-28T08:00:45Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.7.28"
+    },
+    {
+      "tag_name": "v26.7.11",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-07-11T15:56:30Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.7.11"
+    },
+    {
+      "tag_name": "v26.6.27",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-06-27T13:20:31Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.6.27"
+    },
+    {
+      "tag_name": "v26.6.22",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-06-22T18:56:38Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.6.22"
+    },
+    {
+      "tag_name": "v26.6.1",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-06-01T02:12:09Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.6.1"
+    },
+    {
+      "tag_name": "v26.5.9",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-05-09T17:39:33Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.5.9"
+    },
+    {
+      "tag_name": "v26.5.3",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-05-03T11:55:19Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.5.3"
+    },
+    {
+      "tag_name": "v26.4.25",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-04-25T23:17:49Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.25"
+    },
+    {
+      "tag_name": "v26.4.17",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-04-17T23:05:34Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.17"
+    },
+    {
+      "tag_name": "v26.4.15",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-04-15T23:57:14Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.15"
+    },
+    {
+      "tag_name": "v26.4.13",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-04-13T22:51:31Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.4.13"
+    },
+    {
+      "tag_name": "v26.3.27",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-03-27T17:51:11Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.3.27"
+    },
+    {
+      "tag_name": "v26.3.23",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-03-23T10:24:30Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.3.23"
+    },
+    {
+      "tag_name": "v26.2.6",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-02-06T10:05:09Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.2.6"
+    },
+    {
+      "tag_name": "v26.2.4",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-02-04T00:50:39Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.2.4"
+    },
+    {
+      "tag_name": "v26.2.2",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-02-02T09:50:04Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.2.2"
+    },
+    {
+      "tag_name": "v26.1.31",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-01-31T14:45:15Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.31"
+    },
+    {
+      "tag_name": "v26.1.23",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-01-23T15:55:09Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.23"
+    },
+    {
+      "tag_name": "v26.1.18",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-01-18T06:10:04Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.18"
+    },
+    {
+      "tag_name": "v26.1.13",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-01-13T15:33:59Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.1.13"
+    },
+    {
+      "tag_name": "v25.12.8",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-12-08T13:40:36Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.12.8"
+    },
+    {
+      "tag_name": "v25.12.2",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-12-02T13:56:49Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.12.2"
+    },
+    {
+      "tag_name": "v25.12.1",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-12-01T14:51:11Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.12.1"
+    },
+    {
+      "tag_name": "v25.10.15",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-10-15T08:09:35Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.10.15"
+    },
+    {
+      "tag_name": "v25.9.11",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-09-10T11:49:27Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.9.11"
+    },
+    {
+      "tag_name": "v25.9.10",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-09-10T01:42:20Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.9.10"
+    },
+    {
+      "tag_name": "v25.9.5",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-09-05T09:05:29Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.9.5"
+    },
+    {
+      "tag_name": "v25.8.31",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-08-31T13:32:14Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.8.31"
+    },
+    {
+      "tag_name": "v25.8.29",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-08-29T14:35:20Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.8.29"
+    },
+    {
+      "tag_name": "v25.8.3",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-08-03T11:14:23Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.8.3"
+    },
+    {
+      "tag_name": "v25.7.26",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-07-26T10:05:43Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.7.26"
+    },
+    {
+      "tag_name": "v25.7.25",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-07-25T15:11:11Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.7.25"
+    },
+    {
+      "tag_name": "v25.7.24",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-07-24T02:20:07Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.7.24"
+    },
+    {
+      "tag_name": "v25.7.23",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-07-23T12:57:22Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.7.23"
+    },
+    {
+      "tag_name": "v25.6.8",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-06-08T13:54:03Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.6.8"
+    },
+    {
+      "tag_name": "v25.6.7",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-06-07T13:40:23Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.6.7"
+    },
+    {
+      "tag_name": "v25.5.16",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-05-16T12:21:07Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.5.16"
+    },
+    {
+      "tag_name": "v25.4.30",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-04-30T04:44:14Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.4.30"
+    },
+    {
+      "tag_name": "v25.3.31",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-03-31T12:37:43Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.3.31"
+    },
+    {
+      "tag_name": "v25.3.6",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-03-06T13:51:25Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.3.6"
+    },
+    {
+      "tag_name": "v25.3.3",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-03-03T15:31:36Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.3.3"
+    },
+    {
+      "tag_name": "v25.2.21",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-02-21T07:59:10Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.2.21"
+    },
+    {
+      "tag_name": "v25.2.18",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-02-18T11:59:09Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.2.18"
+    },
+    {
+      "tag_name": "v25.1.30",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2025-01-30T10:58:55Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.1.30"
+    },
+    {
+      "tag_name": "v25.1.1",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2025-01-01T12:06:14Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v25.1.1"
+    },
+    {
+      "tag_name": "v24.12.31",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-12-31T12:12:57Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.12.31"
+    },
+    {
+      "tag_name": "v24.12.28",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-12-28T13:59:18Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.12.28"
+    },
+    {
+      "tag_name": "v24.12.18",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-12-18T21:39:02Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.12.18"
+    },
+    {
+      "tag_name": "v24.12.15",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-12-15T12:40:27Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.12.15"
+    },
+    {
+      "tag_name": "v24.11.30",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-11-30T06:13:50Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.11.30"
+    },
+    {
+      "tag_name": "v24.11.21",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-11-21T05:50:50Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.11.21"
+    },
+    {
+      "tag_name": "v24.11.11",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-11-11T04:25:39Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.11.11"
+    },
+    {
+      "tag_name": "v24.11.5",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-11-05T00:55:31Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.11.5"
+    },
+    {
+      "tag_name": "v24.10.31",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-10-31T08:00:08Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.10.31"
+    },
+    {
+      "tag_name": "v24.10.16",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-10-16T04:11:06Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.10.16"
+    },
+    {
+      "tag_name": "v24.9.30",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-09-30T15:20:59Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.9.30"
+    },
+    {
+      "tag_name": "v24.9.19",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-09-19T01:15:20Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.9.19"
+    },
+    {
+      "tag_name": "v24.9.16",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-09-16T12:49:22Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.9.16"
+    },
+    {
+      "tag_name": "v24.9.7",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-09-07T00:50:31Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v24.9.7"
+    },
+    {
+      "tag_name": "v1.8.24",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-08-30T07:01:34Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.24"
+    },
+    {
+      "tag_name": "v1.8.23",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-07-29T10:23:12Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.23"
+    },
+    {
+      "tag_name": "v1.8.21",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-07-21T21:37:37Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.21"
+    },
+    {
+      "tag_name": "v1.8.20",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-07-20T06:11:20Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.20"
+    },
+    {
+      "tag_name": "v1.8.19",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-07-17T13:57:23Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.19"
+    },
+    {
+      "tag_name": "v1.8.18",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-07-15T13:59:56Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.18"
+    },
+    {
+      "tag_name": "v1.8.17",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-07-12T11:02:32Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.17"
+    },
+    {
+      "tag_name": "v1.8.16",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-06-21T01:20:52Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.16"
+    },
+    {
+      "tag_name": "v1.8.15",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-06-18T05:45:48Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.15"
+    },
+    {
+      "tag_name": "v1.8.13",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-05-22T22:03:07Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.13"
+    },
+    {
+      "tag_name": "v1.8.12",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2024-05-22T04:37:19Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.12"
+    },
+    {
+      "tag_name": "v1.8.11",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-04-26T03:37:22Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.11"
+    },
+    {
+      "tag_name": "v1.8.10",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-03-30T09:00:59Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.10"
+    },
+    {
+      "tag_name": "v1.8.9",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-03-11T02:07:14Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.9"
+    },
+    {
+      "tag_name": "v1.8.8",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-02-25T14:45:48Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.8"
+    },
+    {
+      "tag_name": "v1.8.7",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2024-01-07T21:30:54Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.7"
+    },
+    {
+      "tag_name": "v1.8.6",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2023-11-18T04:10:00Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.6"
+    },
+    {
+      "tag_name": "v1.8.4",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2023-08-29T07:21:26Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.4"
+    },
+    {
+      "tag_name": "v1.8.3",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2023-06-19T00:39:15Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.3"
+    },
+    {
+      "tag_name": "v1.8.1",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2023-04-17T23:37:56Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.1"
+    },
+    {
+      "tag_name": "v1.8.0",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2023-03-09T13:57:56Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.8.0"
+    },
+    {
+      "tag_name": "v1.7.5",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2023-02-08T11:33:33Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.7.5"
+    },
+    {
+      "tag_name": "v1.7.3",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2023-02-02T05:50:42Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.7.3"
+    },
+    {
+      "tag_name": "v1.7.2",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2023-01-07T17:52:05Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.7.2"
+    },
+    {
+      "tag_name": "v1.7.1",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2023-01-07T02:55:10Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.7.1"
+    },
+    {
+      "tag_name": "v1.7.0",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2022-12-26T01:52:02Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.7.0"
+    },
+    {
+      "tag_name": "v1.6.6-2",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-12-13T02:53:32Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.6.6-2"
+    },
+    {
+      "tag_name": "v1.6.5",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-11-28T00:02:30Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.6.5"
+    },
+    {
+      "tag_name": "v1.6.4",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-11-14T02:40:03Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.6.4"
+    },
+    {
+      "tag_name": "v1.6.3",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-11-07T03:53:23Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.6.3"
+    },
+    {
+      "tag_name": "v1.6.2",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-10-29T05:06:45Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.6.2"
+    },
+    {
+      "tag_name": "v1.6.1",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2022-10-22T01:34:39Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.6.1"
+    },
+    {
+      "tag_name": "v1.6.0",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2022-09-18T15:06:21Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.6.0"
+    },
+    {
+      "tag_name": "v1.5.10",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-08-28T03:30:51Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.5.10"
+    },
+    {
+      "tag_name": "v1.5.9",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-07-16T02:19:09Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.5.9"
+    },
+    {
+      "tag_name": "v1.5.8",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-06-20T00:38:42Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.5.8"
+    },
+    {
+      "tag_name": "v1.5.7",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-06-05T12:37:28Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.5.7"
+    },
+    {
+      "tag_name": "v1.5.6",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2022-05-29T03:13:07Z",
+      "html_url": "https://github.com/XTLS/Xray-core/releases/tag/v1.5.6"
+    }
+  ]
+}

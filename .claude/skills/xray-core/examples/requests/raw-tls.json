@@ -1,0 +1,12 @@
+{
+  "version": "v26.3.27",
+  "label": "Example RAW TLS",
+  "server": {"address": "proxy.example.com", "port": 8443},
+  "transport": {"type": "raw"},
+  "security": {
+    "type": "tls",
+    "server_name": "proxy.example.com",
+    "certificate_file": "server.pem",
+    "key_file": "server.key"
+  }
+}

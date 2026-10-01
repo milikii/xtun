@@ -1,152 +1,32 @@
-name: CI
+name: Skill checks
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, refactor/xray-core-skill]
   pull_request:
-  schedule:
-    - cron: "17 19 * * *"
   workflow_dispatch:
 
-env:
-  XRAY_VERSION: v26.9.9
+permissions:
+  contents: read
 
 jobs:
-  shellcheck-and-smoke:
+  offline:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
+          python-version: '3.12'
+      - name: Install Python dependencies
+        run: python -m pip install -r .claude/skills/xray-core/scripts/requirements.txt
+      - name: Verify pinned evidence
+        run: python .claude/skills/xray-core/scripts/snapshot.py verify
+      - name: Run offline tests
+        run: python -m unittest discover -s .claude/skills/xray-core/tests
+      - name: Check portable distribution
+        run: python .claude/skills/xray-core/tests/check_distribution.py
 
-      - name: Install Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck jq openssl unzip curl ca-certificates qrencode zbar-tools libcap2-bin python3 nginx iproute2 util-linux
-
-      # smoke 会把宿主机的 xray 软链进沙箱，然后真的去跑 xray vlessenc / x25519 /
-      # run -test。runner 上没有 xray，所以第 4 条用例就 die 了——CI 从 3b167b7
-      # 起一直红在这儿，而本机是装着 xray 的生产节点，85 条全绿，谁都没看出来。
-      # CI 显式复现共享版本模块中的基线 tag；默认 latest 路径由 latest-check 单独验证。
-      # 不该是上游哪天发了个新版本。要升级就一起改这两行。
-      - name: Install Xray-core
-        run: bash tests/install-smoke.sh install-core
-
-      - name: Run Shellcheck
-        run: shellcheck xtun.sh $(find lib tests -type f -name '*.sh' | sort)
-
-      # 一定要跑：这个 job 原来是 shellcheck 先红，Actions 直接跳过后面的步骤，
-      # 于是 smoke 从来没在 CI 里执行过——所有 lint 都只在本地手工跑时才有效。
-      # 一个 shellcheck 的 note 不该再有能力把整套用例的结果藏起来。
-      - name: Run Smoke Tests
-        if: ${{ !cancelled() }}
-        # 恢复用例穿过真实 recover CLI；无 root 帮助用例单独用 setpriv 降权。
-        run: sudo --preserve-env=GITHUB_ACTIONS bash tests/smoke.sh
-
-      - name: Run installation PTY boundaries
-        if: ${{ !cancelled() }}
-        # PTY 穿过真实安装/维护入口及 root 检查；托管路径和外部副作用由 worker 隔离。
-        run: sudo --preserve-env=GITHUB_ACTIONS python3 tests/install-boundary.py
-
-      - name: Run task menu PTY boundaries
-        if: ${{ !cancelled() }}
-        run: sudo --preserve-env=GITHUB_ACTIONS python3 tests/task-menu-boundary.py
-
-      - name: Run native transport and negative paths
-        if: ${{ !cancelled() }}
-        run: sudo python3 tests/native-transport.py
-
-      - name: Run exact historical migration matrix
-        if: ${{ !cancelled() }}
-        run: sudo --preserve-env=GITHUB_ACTIONS bash tests/migration.sh
-
-      - name: Run exported client in official container
-        if: ${{ !cancelled() }}
-        run: sudo bash tests/docker-client.sh
-
-  # 真机冒烟：debian:13 systemd 容器里完整跑一遍 install + diagnose。
-  # 沙箱用例永远碰不到 systemd / apt / 真实 haproxy / nginx，这一层只有真机跑得出来。
-  # 容器必须以 /sbin/init 起（systemd 才是 PID 1），install 再通过 docker exec 进去跑；
-  # 网络不可达导致 check-sni 失败时走 --skip-sni-check。
-  install-smoke:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        image: ['debian:12', 'debian:13', 'ubuntu:24.04']
-        track: ${{ fromJSON((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["baseline","latest"]' || '["baseline"]') }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Start systemd container
-        env:
-          TEST_IMAGE: ${{ matrix.image }}
-        run: |
-          # 基础镜像里没有 /sbin/init：先装 systemd + systemd-sysv，再 exec 成 PID 1。
-          docker run -d --name smoke --privileged --cgroupns=host \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-            -v "${PWD}:/src:ro" \
-            "${TEST_IMAGE}" bash -euc '
-              export DEBIAN_FRONTEND=noninteractive
-              apt-get update -qq
-              apt-get install -y -qq systemd systemd-sysv >/dev/null
-              exec /sbin/init
-            '
-
-      - name: Wait for systemd
-        run: |
-          for i in $(seq 1 30); do
-            if docker exec smoke systemctl list-units >/dev/null 2>&1; then
-              echo "systemd ready after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs smoke || true
-          exit 1
-
-      - name: Run install smoke
-        env:
-          XRAY_VERSION: ${{ matrix.track == 'latest' && 'latest-published' || env.XRAY_VERSION }}
-        run: docker exec -e XRAY_VERSION="${XRAY_VERSION}" -e GITHUB_ACTIONS smoke bash /src/tests/install-smoke.sh container
-
-      - name: TLS debug（diagnose 失败时留现场）
-        if: ${{ always() }}
-        run: |
-          docker exec smoke bash -c '
-            echo "===== s_client ====="
-            echo | timeout 8 openssl s_client -connect 127.0.0.1:443 -servername cdn.example.test 2>&1 | tail -25 || true
-            echo "===== curl ====="
-            curl -kv --max-time 8 --resolve cdn.example.test:443:127.0.0.1 https://cdn.example.test/ 2>&1 | tail -25 || true
-            echo "===== listeners ====="
-            ss -ltnp 2>/dev/null || ss -ltn || true
-            echo "===== haproxy log ====="
-            tail -20 /var/log/haproxy.log 2>/dev/null || journalctl -u haproxy --no-pager -n 20 2>/dev/null || true
-            echo "===== nginx error log ====="
-            tail -20 /var/log/nginx/error.log 2>/dev/null || journalctl -u nginx --no-pager -n 20 2>/dev/null || true
-          '
-
-      - name: Stop container
-        if: ${{ always() }}
-        run: docker rm -f smoke
-
-  latest-check:
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck jq openssl unzip curl ca-certificates qrencode zbar-tools libcap2-bin python3 nginx iproute2 util-linux
-
-      - name: Check latest published Xray-core
-        run: bash tests/install-smoke.sh check-latest
+# Real core build/handshake tests are deliberately not inferred from this job.
+# They require a separately authorized run of tests/native_matrix.py using
+# the exact core version, with --handshake only for explicitly enabled tests.

@@ -1,0 +1,30 @@
+name: Observe upstream changes
+
+on:
+  schedule:
+    - cron: '23 7 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Observe official release channels and commits
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .claude/skills/xray-core/scripts/upstream.py check --output upstream-report.json
+      - name: Retain metadata report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-observation
+          path: upstream-report.json
+          retention-days: 14
+# Does not update pins, generate credentials, run downloaded code or publish a release.

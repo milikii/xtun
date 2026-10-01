@@ -1,0 +1,103 @@
+schema_version: 1
+scope: VLESS node generation; reviewed profiles, not a complete Xray JSON Schema
+versions:
+  v26.3.27:
+    repository: core_stable
+    user_key: clients
+    stream_key: network
+    config_root: source/stable/v26.3.27/infra/conf
+    runtime_root: source/stable/v26.3.27
+    review: source-reviewed
+  v26.9.9:
+    repository: core_release
+    user_key: users
+    stream_key: network
+    config_root: source/config
+    runtime_root: source/runtime
+    review: source-reviewed
+  v26.9.30:
+    repository: core_current
+    user_key: users
+    stream_key: network
+    config_root: source/versions/v26.9.30/infra/conf
+    runtime_root: source/versions/v26.9.30
+    review: source-reviewed
+transports:
+  raw:
+    settings_key: rawSettings
+    struct: TCPConfig
+    security: [tls, reality, none]
+    status: source-reviewed
+  xhttp:
+    settings_key: xhttpSettings
+    struct: SplitHTTPConfig
+    security: [tls, reality, none]
+    status: source-reviewed
+  ws:
+    settings_key: wsSettings
+    struct: WebSocketConfig
+    security: [tls, none]
+    status: deprecated-but-supported
+  grpc:
+    settings_key: grpcSettings
+    struct: GRPCConfig
+    security: [tls, reality, none]
+    status: deprecated-but-supported
+  httpupgrade:
+    settings_key: httpupgradeSettings
+    struct: HttpUpgradeConfig
+    security: [tls, none]
+    status: deprecated-but-supported
+  kcp:
+    settings_key: kcpSettings
+    struct: KCPConfig
+    security: [none]
+    status: source-reviewed
+    notes: Generator uses VLESS Encryption or an explicitly trusted private network; KCP seed is not a security layer.
+  hysteria:
+    settings_key: hysteriaSettings
+    struct: HysteriaConfig
+    security: [tls]
+    status: needs-runtime-verification
+    notes: Hysteria transport, not the independent Hysteria proxy protocol. TLS and UDP prerequisites apply.
+  masque:
+    settings_key: masqueSettings
+    struct: MasqueConfig
+    versions: [v26.9.30]
+    security: [tls]
+    status: needs-runtime-verification
+    notes: CONNECT-IP transport requires TLS; ALPN selects H2 or H3. Not the independent MASQUE proxy protocol.
+  xdrive:
+    settings_key: xdriveSettings
+    struct: XDriveConfig
+    versions: [v26.9.30]
+    security: [none, tls]
+    generate: false
+    status: topology-not-yet-covered
+    notes: Storage-backed transport is not an ordinary listener. See v26.9.30-delta; never treat storage HTTPS as end-to-end VLESS encryption.
+aliases:
+  tcp: raw
+  splithttp: xhttp
+  websocket: ws
+  mkcp: kcp
+removed: [http, h2, h3, quic]
+constraints:
+  - id: reality-transports
+    evidence_symbol: StreamConfig.Build
+    rule: REALITY requires RAW, XHTTP or gRPC; inspect the versioned implementation.
+  - id: vision-runtime
+    evidence_symbol: Handler.Process
+    rule: Without VLESS Encryption, generated Vision nodes require RAW plus TLS or REALITY. Encryption changes runtime constraints; do not apply this as a universal core limitation.
+  - id: encryption-pair
+    evidence_symbol: VLessInboundConfig.Build
+    rule: Server decryption and client encryption have different roles; non-none decryption cannot be combined with fallbacks.
+  - id: tls-verify
+    evidence_symbol: TLSConfig.Build
+    rule: Never generate allowInsecure=true or disable peer certificate verification.
+  - id: xhttp-xmux
+    evidence_symbol: SplitHTTPConfig.Build
+    rule: maxConcurrency and maxConnections cannot both be nonzero; omitted defaults belong to the target core version.
+coverage_gaps:
+  - Reverse and fallbacks are documented but require an explicit multi-endpoint topology; not automatically added to ordinary forward nodes.
+  - Finalmask and platform-specific sockopt require additional reviewed rules; unknown options are rejected, not discarded.
+  - Third-party GUI imports, public CDN behavior, REALITY target suitability and regional reachability are not implied by local validation.

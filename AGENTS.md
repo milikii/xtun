@@ -1,1 +1,9 @@
-Xray 官方文档 / 源码快照在 `.claude/skills/xray-core-official-knowledge/`，涉及 xray 配置字段时以它的 `docs/stable/config/` 与 `source/` 为准（`changelog/` 与 `extracted/` 是人工摘要，引用前必须回到前两者核对）。
+Xray-core 专用技能位于 `.claude/skills/xray-core/`。本项目只生成和验证配置，不安装服务、不修改目标机器或全局技能设置。
+
+涉及 Xray 配置字段时，先读取技能的 `sources.yaml` 确认目标 tag/commit，再核对 `docs/stable/config/` 与对应版本 `source/` 的构建和运行代码。`docs/stable/` 是滚动官网文档，不保证与稳定版同步；源码快照不是可构建的完整仓库。
+
+`changelog/`、`extracted/`、`references/` 与 `citations/` 中的解读不是独立权威来源，引用前必须回到官方原文/源码。最新稳定版、最新预发布、最新发布和 main 必须分开；未实时核验不能声称当前最新，发现新版本不能自动宣称旧规则适用。
+
+不修改官方快照正文来掩盖冲突。配置生成和分享链接必须保留客户端/服务端职责与配对约束；不能无损表达的链接退回原生 JSON。凭据不得出现在日志、公开测试报告或版本控制中。
+
+验证分别报告结构/约束检查、对应二进制配置构建、隔离链路与外部条件。`xray run -test` 通过不代表实际握手、CDN、第三方客户端或某地区网络已验证。

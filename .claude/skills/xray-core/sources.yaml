@@ -1,0 +1,495 @@
+metadata:
+  skill_name: xray-core
+  revision: 2026-10-01.1
+  last_sync: '2026-10-01'
+  last_verified: '2026-09-14'
+  sync_method: pinned-git-blobs + release-api + reviewed-extracts
+  manifest: source/snapshot-manifest.json
+  latest_source_check: '2026-10-01T12:16:28.711333+00:00'
+  latest_source_check_scope: Official release/tag identities and pinned source bytes only; no configuration or handshake
+    verification for v26.9.30
+upstream:
+  repository: https://github.com/XTLS/Xray-core
+  documentation: https://xtls.github.io/
+  releases_api: https://api.github.com/repos/XTLS/Xray-core/releases
+  latest_stable_api: https://api.github.com/repos/XTLS/Xray-core/releases/latest
+covered_versions:
+  stable:
+    version: v26.3.27
+    commit: d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
+    source_root: source/stable/v26.3.27/
+    scope: Selected config, transport, runtime and locked REALITY source; not a buildable full checkout
+  beta:
+    version: v26.9.30
+    commit: b26a91de4f3294e26a0ad0a970b81a386a41f789
+    source_root: source/versions/v26.9.30/
+    scope: Selected official config, transport, VLESS runtime and command source; source-reviewed only, not a buildable
+      full checkout or behavior validation
+  dev:
+    branch: main
+    commit: c412e77a9b712082ac9ebf27fa793951cb5a7d85
+    source_root: source/dev/
+    scope: Historical main snapshot after v26.9.9; these two fixes are included in v26.9.30. This pin is retained
+      for provenance, not current main.
+    last_sync: '2026-09-14'
+  historical:
+  - version: v26.9.9
+    commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+    source_roots:
+    - source/config/
+    - source/transport/
+    - source/runtime/
+    scope: Retained v26.9.9 prerelease baseline and existing validation; not latest prerelease
+documentation:
+  directory: docs/stable/
+  track: rolling official documentation, NOT release-matched stable docs
+  commit: 46c680b71b18b48b9cc6e55e596405bd0442ab8a
+  language: Chinese primary docs
+  known_conflicts: references/source-conflicts.md
+  last_sync: '2026-09-14'
+  observed_main_commit: 5ee08112dd7935dd3f97d9de3b9e2751d5f54c2c
+  observed_main_at: '2026-10-01T12:16:28.711333+00:00'
+repositories:
+  core_stable:
+    name: XTLS/Xray-core
+    clone: core
+    tag: v26.3.27
+    commit: d2758a023cd7f4174a5a5fa4ff66e487d4342ba0
+    url: https://github.com/XTLS/Xray-core
+  core_release:
+    name: XTLS/Xray-core
+    clone: core
+    tag: v26.9.9
+    commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+    url: https://github.com/XTLS/Xray-core
+  core_dev:
+    name: XTLS/Xray-core
+    clone: core
+    branch: main
+    commit: c412e77a9b712082ac9ebf27fa793951cb5a7d85
+    url: https://github.com/XTLS/Xray-core
+  docs:
+    name: XTLS/Xray-docs-next
+    clone: docs
+    branch: main
+    commit: 46c680b71b18b48b9cc6e55e596405bd0442ab8a
+    url: https://github.com/XTLS/Xray-docs-next
+  reality_stable:
+    name: XTLS/REALITY
+    clone: reality
+    module_version: v0.0.0-20260322125925-9234c772ba8f
+    commit: 9234c772ba8f181f31c3e81dc2b4177322e5a9a9
+    url: https://github.com/XTLS/REALITY
+  reality_release:
+    name: XTLS/REALITY
+    clone: reality
+    module_version: v0.0.0-20260908062103-8cdf7bf9c7f0
+    commit: 8cdf7bf9c7f09cb9814bf08c3eb877f68b85fba8
+    url: https://github.com/XTLS/REALITY
+  core_current:
+    name: XTLS/Xray-core
+    clone: core
+    tag: v26.9.30
+    commit: b26a91de4f3294e26a0ad0a970b81a386a41f789
+    url: https://github.com/XTLS/Xray-core
+  reality_current:
+    name: XTLS/REALITY
+    clone: reality
+    module_version: v0.0.0-20260908062103-8cdf7bf9c7f0
+    commit: 8cdf7bf9c7f09cb9814bf08c3eb877f68b85fba8
+    url: https://github.com/XTLS/REALITY
+extraction:
+- repository: core_release
+  source_prefix: infra/conf/
+  destination: source/config/
+  recursive: false
+  suffixes:
+  - .go
+  exclude_suffixes:
+  - _test.go
+- repository: core_release
+  source_prefix: transport/internet/
+  destination: source/transport/internet/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_release
+  source_prefix: app/dns/
+  destination: source/runtime/app/dns/
+  suffixes: &id001
+  - .go
+  - .proto
+  exclude_suffixes: &id002
+  - _test.go
+  - .pb.go
+- repository: core_release
+  source_prefix: app/router/
+  destination: source/runtime/app/router/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: app/policy/
+  destination: source/runtime/app/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: features/policy/
+  destination: source/runtime/features/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: proxy/freedom/
+  destination: source/runtime/proxy/freedom/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: proxy/vless/
+  destination: source/runtime/proxy/vless/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: common/errors/
+  destination: source/runtime/common/errors/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_release
+  source_prefix: ''
+  destination: source/runtime/
+  files:
+  - go.mod
+  - core/core.go
+- repository: core_stable
+  source_prefix: infra/conf/
+  destination: source/stable/v26.3.27/infra/conf/
+  recursive: false
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: transport/internet/
+  destination: source/stable/v26.3.27/transport/internet/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: app/dns/
+  destination: source/stable/v26.3.27/app/dns/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: app/router/
+  destination: source/stable/v26.3.27/app/router/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: app/policy/
+  destination: source/stable/v26.3.27/app/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: features/policy/
+  destination: source/stable/v26.3.27/features/policy/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: proxy/freedom/
+  destination: source/stable/v26.3.27/proxy/freedom/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: proxy/vless/
+  destination: source/stable/v26.3.27/proxy/vless/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: common/errors/
+  destination: source/stable/v26.3.27/common/errors/
+  suffixes: *id001
+  exclude_suffixes: *id002
+- repository: core_stable
+  source_prefix: ''
+  destination: source/stable/v26.3.27/
+  files:
+  - go.mod
+  - core/core.go
+  - LICENSE
+- repository: core_release
+  source_prefix: ''
+  destination: source/licenses/core/
+  files:
+  - LICENSE
+- repository: docs
+  source_prefix: ''
+  destination: source/licenses/docs/
+  files:
+  - LICENSE
+- repository: docs
+  source_prefix: docs/
+  destination: docs/stable/
+  include_prefixes:
+  - config/
+  - about/
+  - development/
+  - document/level-1/
+  - document/level-2/
+- repository: docs
+  source_prefix: docs/
+  destination: docs/stable/
+  files:
+  - index.md
+  - document/document.md
+  - document/command.md
+  - document/config.md
+  - document/install.md
+  - document/index.md
+  - public/img-project-x.png
+  - public/img-project-xray.png
+  - public/logo-dark.svg
+  - public/logo-light.svg
+- repository: reality_stable
+  source_prefix: ''
+  destination: source/dependencies/reality/v26.3.27/
+  files:
+  - tls.go
+  - handshake_server_tls13.go
+  - common.go
+  - record_detect.go
+  - go.mod
+  - LICENSE
+- repository: reality_release
+  source_prefix: ''
+  destination: source/dependencies/reality/v26.9.9/
+  files:
+  - tls.go
+  - handshake_server_tls13.go
+  - common.go
+  - record_detect.go
+  - go.mod
+  - LICENSE
+- repository: core_dev
+  source_prefix: ''
+  destination: source/dev/
+  files:
+  - common/buf/readv_windows.go
+  - proxy/tun/handler.go
+- repository: core_current
+  source_prefix: infra/conf/
+  destination: source/versions/v26.9.30/infra/conf/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: transport/internet/
+  destination: source/versions/v26.9.30/transport/internet/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: app/dns/
+  destination: source/versions/v26.9.30/app/dns/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: app/router/
+  destination: source/versions/v26.9.30/app/router/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: app/policy/
+  destination: source/versions/v26.9.30/app/policy/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: features/policy/
+  destination: source/versions/v26.9.30/features/policy/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: proxy/freedom/
+  destination: source/versions/v26.9.30/proxy/freedom/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: proxy/vless/
+  destination: source/versions/v26.9.30/proxy/vless/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: common/errors/
+  destination: source/versions/v26.9.30/common/errors/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: common/protocol/
+  destination: source/versions/v26.9.30/common/protocol/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: common/uuid/
+  destination: source/versions/v26.9.30/common/uuid/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: main/commands/
+  destination: source/versions/v26.9.30/main/commands/
+  suffixes:
+  - .go
+  - .proto
+  exclude_suffixes:
+  - _test.go
+- repository: core_current
+  source_prefix: ''
+  destination: source/versions/v26.9.30/
+  files:
+  - go.mod
+  - go.sum
+  - core/core.go
+  - LICENSE
+- repository: reality_current
+  source_prefix: ''
+  destination: source/dependencies/reality/v26.9.30/
+  files:
+  - tls.go
+  - handshake_server_tls13.go
+  - common.go
+  - record_detect.go
+  - go.mod
+  - LICENSE
+- repository: core_current
+  source_prefix: ''
+  destination: source/versions/v26.9.30/
+  files:
+  - common/buf/readv_windows.go
+  - common/net/address.go
+  - common/net/address.pb.go
+  - common/net/address.proto
+  - common/net/cnc/connection.go
+  - common/net/destination.go
+  - common/net/destination.pb.go
+  - common/net/destination.proto
+  - common/net/find_process_android.go
+  - common/net/find_process_darwin.go
+  - common/net/find_process_ios.go
+  - common/net/find_process_linux.go
+  - common/net/find_process_others.go
+  - common/net/find_process_windows.go
+  - common/net/net.go
+  - common/net/network.go
+  - common/net/network.pb.go
+  - common/net/network.proto
+  - common/net/packet.go
+  - common/net/port.go
+  - common/net/port.pb.go
+  - common/net/port.proto
+  - common/net/system.go
+  - proxy/masque/account.go
+  - proxy/masque/client.go
+  - proxy/masque/config.pb.go
+  - proxy/masque/config.proto
+  - proxy/masque/pool.go
+  - proxy/masque/server.go
+  - proxy/proxy.go
+  - transport/internet/masque/connectip/LICENSE
+history:
+  release_api_records: 30
+  release_range: v25.8.31 through v26.9.9
+  commit_range: v26.3.27..v26.9.9
+  commit_count: 241
+  commit_indexes: source/commits/
+  reviewed_changelog: changelog/index.md
+  historical_changes: extracted/deprecations/timeline.md
+  critical_commits:
+  - 2c92339f95fe9aa493b6ae51d3b07017a44c4014
+  - 9a953c070f9c3bd2b7f255fb50f076ae8ece7bce
+  - ae62a0fb526f2faa0aa8b3fbce5a566187059090
+  - dde0a4f2729d9c56c0b7c7581b77d98f8f46e108
+  - 75729ce77902d3da2b95c53bb3c87676a6482dff
+  - 18b85adb4e288f49a7894351c6e0f2428c0beef6
+  - 18e283909ca253d4220136eccca0a27006ea709f
+  - 47cfe9994a6b39b1f673ba35e62b091bcce15a71
+  - af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770
+  - fb548f54d22856446e883c6d13b32d60f0dda9bd
+  - c42deab55cc0dcc73eca5487206446fb76c5f79e
+  - d7fa2076c3e5401173bf9b58f7b07f9aa5174443
+  - 3e2f040cd80b33197d358da6bf0d859fae58f180
+  - c26d2eda240f521cd215ef9ff8ef17f323d29452
+  - 18a1b5042ad47ed71f01ae58f95ded4884aaba5e
+  new_release_supplement:
+    release: v26.9.30
+    commit_range: v26.9.9..v26.9.30
+    commit_count: 36
+    index: source/commits/v26.9.9-to-v26.9.30.md
+    note: Historical index and original 30-record evidence retained unchanged.
+maintainer_sources:
+  index: citations/maintainer-intent.md
+  snapshots: citations/raw/
+  policy: Distinguish the post author, quoted third parties, proposals and implementation; dates are part of the
+    evidence
+gaps:
+- area: Rolling docs vs release behavior
+  status: documented
+  note: TLS allowInsecure prose and historical XHTTP defaults conflict with implemented behavior; source-conflicts.md
+    records resolution
+- area: Runtime snapshot
+  status: partial
+  note: Not a full build tree; uncollected protocol implementations and protobuf generated defaults may require
+    the pinned upstream checkout
+- area: Hysteria, TUN, WireGuard, Finalmask
+  status: partial
+  note: Official config/docs/transports are available; no complete field-by-field YAML extraction or behavior testing
+- area: Translations and level-0 tutorials
+  status: intentionally-omitted
+  note: Chinese primary docs retained; links in untouched official docs to omitted translations/level-0 may not
+    resolve locally
+- area: Historical versions
+  status: partial
+  note: Two source baselines plus selected historical diffs; do not claim all past releases are fully snapshotted
+- area: Maintainer discussion snapshots
+  status: selected
+  note: Main XHTTP post and selected issues/comments only; not a complete live discussion archive
+- area: v26.9.30 behavior validation
+  status: not-run
+  note: Pinned source bytes and selected diffs have been reviewed. No v26.9.30 binary parse/build, live handshake
+    or client interoperability test was executed by this source refresh.
+upstream_observed:
+  checked_at: '2026-10-01T12:16:28.711333+00:00'
+  stable: v26.3.27
+  prerelease: v26.9.30
+  latest_published: v26.9.30
+  core_main: b26a91de4f3294e26a0ad0a970b81a386a41f789
+  docs_main: 5ee08112dd7935dd3f97d9de3b9e2751d5f54c2c
+  documentation_snapshot_refreshed: false
+  main_snapshot_refreshed: false
+  note: Observed upstream identities are not historical source pins or proof of configuration support; original
+    docs/main snapshots remain unchanged.

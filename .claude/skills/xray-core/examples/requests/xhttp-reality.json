@@ -1,0 +1,11 @@
+{
+  "version": "v26.9.30",
+  "label": "Example XHTTP REALITY",
+  "server": {"address": "proxy.example.com", "port": 8443},
+  "transport": {"type": "xhttp", "settings": {"path": "/example", "mode": "packet-up"}},
+  "security": {
+    "type": "reality",
+    "server_name": "target.example.com",
+    "target": "target.example.com:443"
+  }
+}
