@@ -1,4 +1,9 @@
-# 维护与校验
+# 知识维护与校验
+
+主要维护知识与场景流程，见 [持续更新](update-workflow.md)。发布观察、知识复核、工具适配、
+行为验证是独立事项；不要用生成器支持列表代替整个技能的知识范围。
+REALITY/XHTTP/证书指南新增结论时核对其官方来源；外部运维手册的核查范围记录在
+[operations-sources.yaml](operations-sources.yaml)，它们没有包含在官方源码快照哈希验证中。
 
 依赖：Python 3.10+、Git、PyYAML（[requirements.txt](../scripts/requirements.txt)）。
 隔离握手另需 OpenSSL 和用户明确允许执行的对应版本二进制。脚本不安装服务或修改全局技能设置。
@@ -28,8 +33,8 @@ python3 scripts/snapshot.py sync --core /path/Xray-core --docs /path/Xray-docs-n
 python3 scripts/history.py --core /path/Xray-core --releases-json /path/releases.json --write
 ```
 
-3. 核对构建与运行代码，再更新参数、默认值、组合、废弃项和 generation.yaml。
-   字段存在不证明运行可用。未知组合拒绝生成，不等于内核不支持。
+3. 核对构建与运行代码，再更新参数、默认值、设计判断、场景流程及兼容记录。
+   可选生成器需另行适配 generation.yaml；它拒绝未知组合不等于内核不支持或技能不能查证。
 4. 官网与源码冲突记入 [source-conflicts.md](source-conflicts.md)，不改写官方正文。
    引用发言保存原文、作者、日期与上下文。文档快照的提交和最新 docs 观察分开。
 5. 更新 SKILL 元数据；源码同步日期不是行为验证日期。未执行的验证不得更新为通过。

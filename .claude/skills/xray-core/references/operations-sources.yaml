@@ -1,0 +1,34 @@
+schema_version: 1
+scope: External operational documentation; not Xray configuration authority or a deployment validation report
+reviewed_on: '2026-10-02'
+snapshot_policy: URLs were read at review time; page bodies are not bundled or checked by the offline snapshot verifier
+sources:
+  letsencrypt-challenges:
+    url: https://letsencrypt.org/docs/challenge-types/
+    authority: Let's Encrypt official documentation
+    track: rolling
+    reviewed_claims:
+      - HTTP-01 uses port 80 and does not issue wildcard certificates
+      - DNS-01 supports wildcards and automated renewal depends on usable DNS automation
+      - DNS API credentials should be scoped narrowly; validation delegation is possible
+  certbot-using:
+    url: https://eff-certbot.readthedocs.io/en/stable/using.html
+    authority: Certbot official documentation
+    track: stable documentation alias; confirm installed Certbot version before execution
+    reviewed_claims:
+      - renew may exit zero when no renewal was needed
+      - deploy-hook is the hook for a successfully renewed certificate
+      - dry-run tests renewal; deployment hook execution requires separate attention to options/version
+      - Automation and safe deployment are separate from certificate issuance
+  cloudflare-full-strict:
+    url: https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/
+    authority: Cloudflare official documentation
+    track: rolling
+    reviewed_claims:
+      - Origin certificate must be unexpired and name-matching
+      - Accepted issuers include publicly trusted authorities and Cloudflare Origin CA
+      - Origin HTTPS and strict verification are distinct from the edge certificate
+    not_reviewed:
+      - User account settings and plan entitlements
+      - Complete gRPC, HTTP3, WAF, port and origin-rule behavior
+      - Actual XHTTP traffic through Cloudflare

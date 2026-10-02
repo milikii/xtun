@@ -41,6 +41,10 @@ def main():
                 names = set(handle.getnames())
             prefix = '.claude/skills/xray-core/'
             for relative in ('SKILL.md', 'sources.yaml', 'scripts/generate.py', 'scripts/check_handshake.py',
+                             'references/knowledge-workflow.md', 'references/update-workflow.md',
+                             'references/reality-workflow.md', 'references/xhttp-cdn-workflow.md',
+                             'references/certificate-lifecycle.md', 'references/private-artifacts.md',
+                             'references/operations-sources.yaml', 'tests/knowledge_cases.yaml',
                              'extracted/compatibility/generation.yaml', 'tests/test_generation.py', 'source/licenses'):
                 if not any(name == prefix + relative or name.startswith(prefix + relative + '/') for name in names):
                     raise RuntimeError('Required distribution entry missing: ' + relative)

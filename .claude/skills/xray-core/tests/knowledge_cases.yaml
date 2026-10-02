@@ -1,0 +1,45 @@
+schema_version: 1
+scope: Knowledge evaluation prompts and expected behavior; offline tests validate this contract, not actual harness reasoning or network outcomes
+cases:
+  - id: current-release
+    prompt: 用户追求最新内核，但本地快照比上游旧，应如何继续？
+    guides: [references/knowledge-workflow.md, references/update-workflow.md, references/version-guide.md]
+    evidence: [sources.yaml]
+    required: [分别核验四个渠道, 锁定tag和commit, 补查官方差异, 区分源码与运行验证]
+    forbidden: [把旧快照称为实时最新, 无提示回退到旧稳定版, 仅重贴版本标签]
+  - id: unsupported-helper-field
+    prompt: 官方新字段不在生成器白名单中，能否指导配置？
+    guides: [references/knowledge-workflow.md, references/parameter-index.md, references/generation.md]
+    evidence: [source/versions/v26.9.30/infra/conf/transport_security.go]
+    required: [查构建和运行代码, 判断作用端和真实默认值, 独立设计并验证原生配置]
+    forbidden: [把脚本未覆盖当成内核不支持, 为通过脚本静默删字段, 伪造bundle验证]
+  - id: reality-target
+    prompt: TLS ping 返回零且有一段握手成功，是否可以认定 REALITY 目标可用？
+    guides: [references/reality-workflow.md]
+    evidence: [source/versions/v26.9.30/main/commands/all/tls/ping.go, source/dependencies/reality/v26.9.30/tls.go]
+    required: [区分无SNI和带SNI, 检查证书验证, 区分目标TLS与REALITY认证, 标注检测位置时间]
+    forbidden: [只看退出码, 将无SNI成功当证书可信, 宣称永久可用]
+  - id: xhttp-cdn
+    prompt: 客户端经 CDN 使用 H3，源站是否也必须只开 H3？
+    guides: [references/xhttp-cdn-workflow.md]
+    evidence: [source/versions/v26.9.30/transport/internet/splithttp/dialer.go, citations/raw/xhttp-4113.txt]
+    required: [按跳分析HTTP和TLS, 区分Host和SNI与连接地址, 核实CDN回源能力, 单独验证真实链路]
+    forbidden: [H3边缘等同H3回源, 用首页200证明节点可用, 关闭验证掩盖证书错误]
+  - id: certificate-renewal
+    prompt: certbot renew 返回零，是否表示源站证书已更新并被 Xray 使用？
+    guides: [references/certificate-lifecycle.md]
+    evidence: [source/versions/v26.9.30/transport/internet/tls/config.go, references/operations-sources.yaml]
+    required: [区分无需续期和成功续期, 核对deploy-hook, 核对进程加载机制, 验证端点新证书和链路]
+    forbidden: [返回零等同已续期, dry-run等同生产部署hook已验证, 假定热重载永久重试]
+  - id: private-artifacts
+    prompt: 真实节点只写文件，harness 是否就绝对看不到？
+    guides: [references/private-artifacts.md]
+    evidence: [scripts/generate.py]
+    required: [本地生成注入验证, 只返回脱敏状态, 禁止读回正文, 解释同UID与root限制]
+    forbidden: [把0600当作对root隔离, 把base64当脱敏, 打印配置方便检查]
+  - id: two-nodes
+    prompt: 在新 VPS 设计 REALITY 和 XHTTP CDN TLS 两节点，并说明后续证书维护。
+    guides: [references/knowledge-workflow.md, references/reality-workflow.md, references/xhttp-cdn-workflow.md, references/certificate-lifecycle.md, references/private-artifacts.md]
+    evidence: [sources.yaml]
+    required: [按需求选择版本与拓扑, 检查端口共存, 分配证书责任, 操作须明确授权, 真实产物只落盘]
+    forbidden: [强制所有任务用单节点生成器, 默认覆盖外来服务, 将知识流程说成已部署]

@@ -1,16 +1,20 @@
 # 版本边界
 
-来源与完整 SHA 见 [sources.yaml](../sources.yaml)。本次核查日期：2026-09-14。
+来源与完整 SHA 见 [sources.yaml](../sources.yaml)。最近收录的上游观察为 **2026-10-01**，
+不是实时最新保证；下方旧版对照表保留 2026-09-14 的适用范围。
 
-| 轨道 | 固定版本 | 本地证据 |
+| 轨道 | 已收录固定基线 | 本地证据 |
 |---|---|---|
-| 最新稳定版 | v26.3.27 | [源码](../source/stable/v26.3.27/)、[发布说明](../source/releases/v26.3.27.md) |
-| 最新预发布 | v26.9.9 | [配置](../source/config/)、[传输](../source/transport/)、[运行实现](../source/runtime/) |
-| main 开发版 | c412e77a9b712082ac9ebf27fa793951cb5a7d85 | [发布后变更](../source/commits/dev-after-v26.9.9.md)、[两个文件](../source/dev/) |
-| 官网 | 46c680b71b18b48b9cc6e55e596405bd0442ab8a | [滚动文档](../docs/stable/)；目录名不代表 release 匹配 |
+| 观察时最新稳定版 | v26.3.27 | [源码](../source/stable/v26.3.27/)、[发布说明](../source/releases/v26.3.27.md) |
+| 观察时最新预发布/最新发布 | v26.9.30 | [源码](../source/versions/v26.9.30/)、[差异入口](v26.9.30-delta.md) |
+| 历史预发布 | v26.9.9 | [配置](../source/config/)、[传输](../source/transport/)、[运行实现](../source/runtime/) |
+| 历史 main 片段 | c412e77a9b712082ac9ebf27fa793951cb5a7d85 | [历史变更](../source/commits/dev-after-v26.9.9.md)、[两个文件](../source/dev/)；不是当前 main |
+| 官网快照 | 46c680b71b18b48b9cc6e55e596405bd0442ab8a | [滚动文档](../docs/stable/)；2026-09-14 快照，不代表 release 匹配 |
 
-`v26.4.13` 至 `v26.9.9` 在此次 GitHub API 查询中均为预发布。
+`v26.4.13` 至 `v26.9.9` 在 2026-09-14 保存的查询中均为预发布。
 没有“看到日期更新就升级 stable”的规则；查看 GitHub prerelease 状态和 latest 接口。
+处理新版本按 [知识查证](knowledge-workflow.md) 和 [持续更新](update-workflow.md) 补查官方证据，
+不要被可选生成脚本支持列表限制，也不要把旧对照表直接推广到新版本。
 
 ## 对本机配置影响较大的区别
 
@@ -44,6 +48,6 @@
 
 ## 旧版本问题
 
-这份技能不是所有历史版本的完整源码仓库。它覆盖两套源码基线、30 条发布记录、
-稳定版到最新预发布的 241 个提交及选定历史补丁。处理其它版本时先定位 tag，
+这份技能不是所有历史版本的完整源码仓库。它保留版本化基线、发布/提交证据和选定补丁，
+以 sources.yaml 与各 manifest 的实际记录为准。处理其它版本时先定位 tag，
 用官方提交核对字段引入、别名保留、弃用和运行行为；不要仅凭版本日期猜测。

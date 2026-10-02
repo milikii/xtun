@@ -1,6 +1,6 @@
 metadata:
   skill_name: xray-core
-  revision: 2026-10-01.1
+  revision: 2026-10-02.1
   last_sync: '2026-10-01'
   last_verified: '2026-09-14'
   sync_method: pinned-git-blobs + release-api + reviewed-extracts

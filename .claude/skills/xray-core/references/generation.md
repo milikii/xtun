@@ -1,4 +1,10 @@
-# 生成与验证契约
+# 可选生成与验证工具契约
+
+本文件只描述仓库已有脚本。**技能的核心是官方知识和实践指导，不以这些脚本的覆盖范围为限。**
+一般任务从 [知识查证](knowledge-workflow.md) 进入，REALITY/CDN/证书场景使用各自指南。
+脚本拒绝新版本或字段时，harness 可按准确官方证据设计原生配置并独立验证；
+不能为适配脚本删除正确字段，也不能伪造 manifest 将任意配置冒充已覆盖 bundle。
+真实产物遵循 [私密产物规范](private-artifacts.md)，不把 Python API 返回的配置对象打印给模型。
 
 本文说明**本工具的请求格式**，不是 Xray-core 的完整配置 schema。规则来自
 [生成规则](../extracted/compatibility/generation.yaml)，版本身份来自 [sources.yaml](../sources.yaml)。
